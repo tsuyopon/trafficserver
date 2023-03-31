@@ -84,7 +84,14 @@ struct SSLNextProtocolTrampoline : public Continuation {
     case VC_EVENT_ERROR:
     case VC_EVENT_ACTIVE_TIMEOUT:
     case VC_EVENT_INACTIVITY_TIMEOUT:
-      netvc->do_io_close();
+      if (netvc != nullptr) {
+        netvc->do_io_close();
+      } else { // Try making a unix netvc
+        UnixNetVConnection *vc = dynamic_cast<UnixNetVConnection *>(vio->vc_server);
+        if (vc != nullptr) {
+          vc->do_io_close();
+        }
+      }
       delete this;
       return EVENT_ERROR;
     case VC_EVENT_READ_COMPLETE:
