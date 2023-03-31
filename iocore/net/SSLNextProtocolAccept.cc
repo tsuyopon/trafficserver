@@ -77,7 +77,6 @@ struct SSLNextProtocolTrampoline : public Continuation {
 
     vio   = static_cast<VIO *>(edata);
     netvc = dynamic_cast<SSLNetVConnection *>(vio->vc_server);
-    ink_assert(netvc != nullptr);
 
     switch (event) {
     case VC_EVENT_EOS:
