@@ -150,6 +150,7 @@ CtrlEngine::CtrlUnimplementedCommand(std::string_view command)
   status_code = CTRL_EX_UNIMPLEMENTED;
 }
 
+// traffic_ctlコマンドのmain関数
 int
 main(int argc, const char **argv)
 {

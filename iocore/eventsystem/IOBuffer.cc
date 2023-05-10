@@ -42,6 +42,8 @@ int64_t max_iobuffer_size           = DEFAULT_BUFFER_SIZES - 1;
 //
 // Initialization
 //
+
+// iobuffer_adviceにはmadviseシステムコールに引き渡されるフラグが入る。
 void
 init_buffer_allocators(int iobuffer_advice)
 {
@@ -55,6 +57,8 @@ init_buffer_allocators(int iobuffer_advice)
 
     auto name = new char[64];
     snprintf(name, 64, "ioBufAllocator[%d]", i);
+    // IOBufferがallocateされる(実際にはmallocが呼ばれている)。
+    // MADV_DONTDUMP
     ioBufAllocator[i].re_init(name, s, n, a, iobuffer_advice);
   }
 }

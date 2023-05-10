@@ -42,11 +42,17 @@ ink_event_system_init(ts::ModuleVersion v)
 
   REC_EstablishStaticConfigInt32(thread_freelist_low_watermark, "proxy.config.allocator.thread_freelist_low_watermark");
 
+// Linux3.4以上で有効なifdef
 #ifdef MADV_DONTDUMP // This should only exist on Linux 3.4 and higher.
   RecBool dont_dump_enabled = true;
+
+  // proxy.config.allocator.dontdump_iobuffers = 0を指定することで、コアダンプに含められる
   RecGetRecordBool("proxy.config.allocator.dontdump_iobuffers", &dont_dump_enabled, false);
 
   if (dont_dump_enabled) {
+    // このフラグは実際にはmadviseシステムコールに引き渡される。
+    // MADV_DONTDUMPが指定されるとIOBufferがコアダンプに吐き出されないようになる。
+    // https://linuxjm.osdn.jp/html/LDP_man-pages/man2/madvise.2.html
     iobuffer_advice |= MADV_DONTDUMP;
   }
 #endif
