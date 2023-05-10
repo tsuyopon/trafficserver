@@ -191,6 +191,7 @@ mgmt_read_pipe(int fd, char *buf, int bytes_to_read)
  *          -errno on error
  */
 
+// pipeへの書き込み処理を行う
 int
 mgmt_write_pipe(int fd, char *buf, int bytes_to_write)
 {

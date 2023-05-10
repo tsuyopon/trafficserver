@@ -588,22 +588,29 @@ LocalManager::sendMgmtMsgToProcesses(int msg_id, const char *data_raw, int data_
 void
 LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
 {
+
+  // traffic_ctlオプションなどの各種処理に応じて実行する処理を分岐する
   switch (mh->msg_id) {
+
   case MGMT_EVENT_SHUTDOWN: {
     run_proxy = false;
     this->closeProxyPorts();
     break;
   }
+
   case MGMT_EVENT_RESTART:
     run_proxy = true;
     listenForProxy();
     return;
+
   case MGMT_EVENT_BOUNCE: /* Just bouncing the cluster, have it exit well restart */
     mh->msg_id = MGMT_EVENT_SHUTDOWN;
     break;
+
   case MGMT_EVENT_ROLL_LOG_FILES:
     mgmt_log("[LocalManager::SendMgmtMsgsToProcesses]Event is being constructed .\n");
     break;
+
   case MGMT_EVENT_CONFIG_FILE_UPDATE:
     bool found;
     char *fname = nullptr;
@@ -631,6 +638,8 @@ LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
   }
 
   if (watched_process_fd != -1) {
+
+    // mh構造体(MgmtMessageHdr)をpipeを使って書き込みを行う。これによって、trafficmanagerからtrafficserverにデータが伝達されると思われる
     if (mgmt_write_pipe(watched_process_fd, reinterpret_cast<char *>(mh), sizeof(MgmtMessageHdr) + mh->data_len) <= 0) {
       // In case of Linux, sometimes when the TS dies, the connection between TS and TM
       // is not closed properly. the socket does not receive an EOF. So, the TM does
@@ -651,6 +660,7 @@ LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
         int lerrno        = errno;
         mgmt_elog(errno, "[LocalManager::sendMgmtMsgToProcesses] Error writing message\n");
         if (lerrno == ECONNRESET || lerrno == EPIPE) { // Connection closed by peer or Broken pipe
+
           if ((kill(watched_process_pid, 0) < 0) && (errno == ESRCH)) {
             // TS is down
             pid_t tmp_pid = watched_process_pid;
@@ -700,6 +710,7 @@ LocalManager::signalFileChange(const char *var_name)
 void
 LocalManager::signalEvent(int msg_id, const char *data_str)
 {
+  // この関数の次に定義されているオーバーライド関数が呼ばれます。
   signalEvent(msg_id, data_str, strlen(data_str) + 1);
   return;
 }
@@ -715,6 +726,10 @@ LocalManager::signalEvent(int msg_id, const char *data_raw, int data_len)
   mh->data_len = data_len;
   auto payload = mh->payload();
   memcpy(payload.data(), data_raw, data_len);
+
+  // LocalManagerはBaseManagerを継承しているので LocalManager::enqueueが呼ばれqueueに追加される。
+  // なお、LocalManager::enqueueに追加されたキューを取得するのはLocalManager::processEventQueue()でdequeueにより取得されている。
+  // LocalManager::processEventQueue()自体はtraffic_managerの中で処理されている。
   this->enqueue(mh);
   //  ink_assert(enqueue(mgmt_event_queue, mh));
 
@@ -742,14 +757,19 @@ LocalManager::signalEvent(int msg_id, const char *data_raw, int data_len)
 void
 LocalManager::processEventQueue()
 {
+
+  // 追加されたqueueが空になるまで実行する。(ここのqueueにはたとえばtraffic config reloadなどのコマンド情報が含まれたqueueが処理されることになる)
   while (!this->queue_empty()) {
+
     bool handled_by_mgmt = false;
 
+    // LocalManager::signalEventにより追加されたqueueはここで取得される
     MgmtMessageHdr *mh = this->dequeue();
     auto payload       = mh->payload().rebind<char>();
 
     // check if we have a local file update
     if (mh->msg_id == MGMT_EVENT_CONFIG_FILE_UPDATE) {
+
       // records.config
       if (!(strcmp(payload.begin(), ts::filename::RECORDS))) {
         if (RecReadConfigFile() != REC_ERR_OKAY) {
@@ -762,6 +782,7 @@ LocalManager::processEventQueue()
     }
 
     if (!handled_by_mgmt) {
+      // trafficserverが起動していない場合には、dequeueにより取得したキューを再度enqueuして戻していると思われる
       if (processRunning() == false) {
         // Fix INKqa04984
         // If traffic server hasn't completely come up yet,
@@ -769,7 +790,9 @@ LocalManager::processEventQueue()
         this->enqueue(mh);
         return;
       }
+
       Debug("lm", "[TrafficManager] ==> Sending signal event '%d' %s payload=%d", mh->msg_id, payload.begin(), int(payload.size()));
+      // 下記によりtraffic_ctlなどで送られてきた命令を
       lmgmt->sendMgmtMsgToProcesses(mh);
     }
     ats_free(mh);

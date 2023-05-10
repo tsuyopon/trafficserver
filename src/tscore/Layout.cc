@@ -47,6 +47,7 @@ void
 Layout::create(std::string_view const prefix)
 {
   if (layout == nullptr) {
+    // Layout::Layoutを呼び出す
     layout = new Layout(prefix);
   }
 }

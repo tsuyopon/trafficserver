@@ -449,8 +449,10 @@ ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
   auto payload = mh->payload();
 
   Debug("pmgmt", "processing event id '%d' payload=%d", mh->msg_id, mh->data_len);
+
   switch (mh->msg_id) {
   case MGMT_EVENT_SHUTDOWN:
+    // executeMgmtCallbackについてはBaseManager::executeMgmtCallbackが実行される
     executeMgmtCallback(MGMT_EVENT_SHUTDOWN, {});
     Alert("exiting on shutdown message");
     break;

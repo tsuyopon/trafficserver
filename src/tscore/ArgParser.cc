@@ -47,6 +47,7 @@ ArgParser::ArgParser(std::string const &name, std::string const &description, st
                      Function const &f)
 {
   // initialize _top_level_command according to the provided message
+  // ArgParser::CommandのコンストラクタとしてArgParser::Command::Commandが呼ばれると思われる
   _top_level_command = ArgParser::Command(name, description, envvar, arg_num, f);
 }
 
@@ -210,6 +211,16 @@ ArgParser::get_error() const
 }
 
 //=========================== Command class ================================
+
+/*
+ * C++では下記のようなネストされたクラス定義が include/tscore/ArgParser.h  で可能です。この場合には ArgParser::Command::Command() のようにアクセスできます。
+ *
+ * class ArgParser {
+ *    class Command {
+ *      public:
+ *        Command();
+ * 
+ */
 ArgParser::Command::Command() {}
 
 ArgParser::Command::~Command() {}
@@ -426,10 +437,12 @@ ArgParser::Command::append_option_data(Arguments &ret, AP_StrVec &args, int inde
         i -= 1;
       }
     } else {
+
       // output version message
       if ((args[i] == "--version" || args[i] == "-V") && _option_list.find("--version") != _option_list.end()) {
         version_message();
       }
+
       // output help message
       if ((args[i] == "--help" || args[i] == "-h") && _option_list.find("--help") != _option_list.end()) {
         ArgParser::Command *command = this;
@@ -498,9 +511,12 @@ ArgParser::Command::parse(Arguments &ret, AP_StrVec &args)
       // handle the option
       append_option_data(ret, args, i);
       // handle the action
+      // _f 自体は ArgParser::Command::Command の初期化リストとしてセットされる。これはArgParser::Commandのコンストラクタである。
+      // TODO: ArgParser::ArgParserの引数ありのコンストラクタが呼ばれた際に_fはセットされる
       if (_f) {
         ret._action = _f;
       }
+
       std::string err = handle_args(ret, args, _key, _arg_num, i);
       if (!err.empty()) {
         help_message(err);
@@ -601,8 +617,10 @@ Arguments::show_all_configuration() const
 void
 Arguments::invoke()
 {
+  // _actionのコールバック自体は ArgParser::Command::parse 関数に第１引数として渡されるArguments &retのアドレスに対して関数内でret._actionがコールバックとしてセットされる
   if (_action) {
     // call the std::function
+    // ここで実行されているコールバック関数はtraffic_ctl.ccのmain関数のadd_commandの第３引数で指定されているラムダ式のコールバック関数であると思われる。
     _action();
   } else {
     throw std::runtime_error("no function to invoke");

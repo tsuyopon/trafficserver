@@ -681,8 +681,8 @@ main(int argc, const char **argv)
 
   // Setup the API and event sockets
   std::string rundir(RecConfigReadRuntimeDir());
-  std::string apisock(Layout::relative_to(rundir, MGMTAPI_MGMT_SOCKET_NAME));
-  std::string eventsock(Layout::relative_to(rundir, MGMTAPI_EVENT_SOCKET_NAME));
+  std::string apisock(Layout::relative_to(rundir, MGMTAPI_MGMT_SOCKET_NAME));    // mgmtapi.sock
+  std::string eventsock(Layout::relative_to(rundir, MGMTAPI_EVENT_SOCKET_NAME)); // eventapi.sock
 
   Debug("lm", "using main socket file '%s'", apisock.c_str());
   Debug("lm", "using event socket file '%s'", eventsock.c_str());
@@ -693,11 +693,13 @@ main(int argc, const char **argv)
   int mgmtapiFD  = -1; // FD for the api interface to issue commands
   int eventapiFD = -1; // FD for the api and clients to handle event callbacks
 
+  // mgmtapi.sockのUnix Domain Socketを生成する
   mgmtapiFD = bind_unix_domain_socket(apisock.c_str(), newmode);
   if (mgmtapiFD == -1) {
     mgmt_log("[WebIntrMain] Unable to set up socket for handling management API calls. API socket path = %s\n", apisock.c_str());
   }
 
+  // eventapi.sockのUnix Domain Socketを生成する
   eventapiFD = bind_unix_domain_socket(eventsock.c_str(), newmode);
   if (eventapiFD == -1) {
     mgmt_log("[WebIntrMain] Unable to set up so for handling management API event calls. Event Socket path: %s\n",
@@ -733,7 +735,9 @@ main(int argc, const char **argv)
 
   DerivativeMetrics derived; // This is simple class to calculate some useful derived metrics
 
+  // traffic_managerプロセスの主要なループ処理はここで行われる。
   for (;;) {
+
     lmgmt->processEventQueue();
     lmgmt->pollMgmtProcessServer();
 
@@ -755,6 +759,7 @@ main(int argc, const char **argv)
     if (lmgmt->mgmt_shutdown_outstanding != MGMT_PENDING_NONE) {
       Debug("lm", "pending shutdown %d", lmgmt->mgmt_shutdown_outstanding);
     }
+
     switch (lmgmt->mgmt_shutdown_outstanding) {
     case MGMT_PENDING_RESTART:
       lmgmt->mgmtShutdown();

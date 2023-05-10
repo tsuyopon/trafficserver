@@ -115,6 +115,7 @@ CtrlEngine::server_start()
   }
 }
 
+// 「$traffic_ctl server drain」で実行されるハンドラ
 void
 CtrlEngine::server_drain()
 {

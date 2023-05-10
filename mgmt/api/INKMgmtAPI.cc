@@ -677,6 +677,7 @@ TSRecordSetMlt(TSList rec_list, TSActionNeedT *action_need)
 tsapi TSMgmtError
 TSInit(const char *socket_path, TSInitOptionT options)
 {
+  // mgmt/api/CoreAPI.cc のInitが呼ばれる
   return Init(socket_path, options);
 }
 

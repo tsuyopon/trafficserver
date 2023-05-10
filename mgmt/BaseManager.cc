@@ -39,6 +39,7 @@ void
 BaseManager::enqueue(MgmtMessageHdr *mh)
 {
   std::lock_guard lock(q_mutex);
+  // キューに要素を追加する
   queue.emplace(mh);
   ink_sem_post(&q_sem);
 }
@@ -75,6 +76,7 @@ BaseManager::registerMgmtCallback(int msg_id, MgmtCallback const &cb)
 void
 BaseManager::executeMgmtCallback(int msg_id, ts::MemSpan<void> span)
 {
+  // mgmt_callback_tableについてはこの関数の上に定義されているBaseManager::registerMgmtCallbackで登録される
   if (auto it = mgmt_callback_table.find(msg_id); it != mgmt_callback_table.end()) {
     for (auto &&cb : it->second) {
       cb(span);

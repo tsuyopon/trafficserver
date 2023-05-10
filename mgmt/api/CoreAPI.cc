@@ -387,11 +387,17 @@ ServerBacktrace(unsigned /* options */, char **trace)
  *-------------------------------------------------------------------------
  * Rereads configuration files
  */
+// traffic_ctrl config reloadから呼ばれる
 TSMgmtError
 Reconfigure()
 {
   configFiles->rereadConfig();                              // TM rereads
+
+  // ここで指定されたMGMT_EVENT_PLUGIN_CONFIG_UPDATEがキューに格納されて、その後、dequeueされてtraffic_managerで処理されることになる。
+  // その後、traffic_serverのProcessManager::startから起動されるスレッドの中で処理される。
+  // 具体的にはそのスレッドから呼ばれるProcessManager::handleMgmtMsgFromLM関数の中でswitch文によりMGMT_EVENT_PLUGIN_CONFIG_UPDATEのcaseにマッチしたら処理されている。
   lmgmt->signalEvent(MGMT_EVENT_PLUGIN_CONFIG_UPDATE, "*"); // TS rereads
+
   RecSetRecordInt("proxy.node.config.reconfigure_time", time(nullptr), REC_SOURCE_DEFAULT);
   RecSetRecordInt("proxy.node.config.reconfigure_required", 0, REC_SOURCE_DEFAULT);
 

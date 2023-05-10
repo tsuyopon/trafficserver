@@ -156,6 +156,7 @@ main(int argc, const char **argv)
 {
   CtrlEngine engine;
 
+  // engine.parserはsrc/traffic_ctl/traffic_ctl.h中にengine構造体の中に「ts::ArgParser parse」として定義される。
   engine.parser.add_global_usage("traffic_ctl [OPTIONS] CMD [ARGS ...]");
   engine.parser.require_commands();
 
@@ -181,6 +182,7 @@ main(int argc, const char **argv)
     .add_example_usage("traffic_ctl alarm resolve ALARM [ALARM ...]");
 
   // config commands
+  // 「$ traffic_ctl config <xxxxx>」については下記でオプションが解釈される
   config_command.add_command("defaults", "Show default information configuration values", [&]() { engine.config_defaults(); })
     .add_example_usage("traffic_ctl config defaults [OPTIONS]")
     .add_option("--records", "", "Emit output in records.config format");
@@ -207,6 +209,7 @@ main(int argc, const char **argv)
     .add_example_usage("traffic_ctl config set RECORD VALUE");
 
   // host commands
+  // 「$ traffic_ctl host <xxxxx>」については下記でオプションが解釈される
   host_command.add_command("status", "Get one or more host statuses", "", MORE_THAN_ONE_ARG_N, [&]() { engine.status_get(); })
     .add_example_usage("traffic_ctl host status HOST  [HOST  ...]");
   host_command.add_command("down", "Set down one or more host(s)", "", MORE_THAN_ONE_ARG_N, [&]() { engine.status_down(); })
@@ -218,6 +221,7 @@ main(int argc, const char **argv)
     .add_option("--reason", "", "reason for marking the host up, one of 'manual|active|local", "", 1);
 
   // metric commands
+  // 「$ traffic_ctl metric <xxxxx>」については下記でオプションが解釈される
   metric_command.add_command("get", "Get one or more metric values", "", MORE_THAN_ONE_ARG_N, [&]() { engine.metric_get(); })
     .add_example_usage("traffic_ctl metric get METRIC [METRIC ...]");
   metric_command.add_command("clear", "Clear all metric values", [&]() { engine.metric_clear(); });
@@ -265,6 +269,7 @@ main(int argc, const char **argv)
                               [&]() { engine.CtrlUnimplementedCommand("status"); }); // not implemented
 
   // parse the arguments
+  // engine.parseは「ts::ArgParser」型を表し、engine.parser.parseはsrc/tscore/ArgParser.ccのArgParser::parseを呼び出す
   engine.arguments = engine.parser.parse(argv);
 
   BaseLogFile *base_log_file = new BaseLogFile("stderr");
@@ -277,6 +282,8 @@ main(int argc, const char **argv)
   }
 
   argparser_runroot_handler(engine.arguments.get("run-root").value(), argv[0]);
+
+  // src/tscore/Layout.ccのcreate()が呼ばれる
   Layout::create();
 
   // This is a little bit of a hack, for now it'll suffice.
@@ -284,6 +291,7 @@ main(int argc, const char **argv)
   RecProcessInit(RECM_STAND_ALONE, diags);
   LibRecordsConfigInit();
 
+  // runtimeディレクトリを取得する
   ats_scoped_str rundir(RecConfigReadRuntimeDir());
 
   // Make a best effort to connect the control socket. If it turns out we are
@@ -293,10 +301,13 @@ main(int argc, const char **argv)
   // error.
   TSInit(rundir, static_cast<TSInitOptionT>(TS_MGMT_OPT_NO_EVENTS | TS_MGMT_OPT_NO_SOCK_TESTS));
 
+  // engine.argumentsはArgumentsクラスを表す。つまり、src/tscore/ArgParser.ccのArguments::invoke()が呼ばれる。この中でmainのadd_commandで指定しているコールバックが呼ばれる
+  // Arguments::invoke()はcsopeで表示されない気がするので注意
   engine.arguments.invoke();
 
   // Done with the mgmt API.
   TSTerminate();
 
+  // 終了ステータスを応答する
   return engine.status_code;
 }

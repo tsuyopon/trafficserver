@@ -658,6 +658,7 @@ check_config_directories()
 //
 // Startup process manager
 //
+// 下記はmainからも実行される関数です
 static void
 initialize_process_manager()
 {
@@ -677,10 +678,12 @@ initialize_process_manager()
   LibRecordsConfigInit();
 
   // Start up manager
+  // ProcessManagerクラスはtraffic_managerから受け取った処理を処理する為のクラスです。start()により専用のスレッドが起動します。
   pmgmt = new ProcessManager(remote_management_flag);
 
   // Lifecycle callbacks can potentially be invoked from this thread, so force thread initialization
   // to make the TS API work.
+  // traffic_ctlからの処理をUnixDomainソケットで受け取る為のスレッドを起動する。
   pmgmt->start(TSThreadInit, TSThreadDestroy);
 
   RecProcessInitMessage(remote_management_flag ? RECM_CLIENT : RECM_STAND_ALONE);

@@ -35,6 +35,7 @@
 // RecordsConfig
 //-------------------------------------------------------------------------
 
+// 以下の配列は RecordsConfigIterate() 関数によってイテレーション操作が行われる。
 // clang-format off
 static const RecordElement RecordsConfig[] =
 {
@@ -1555,10 +1556,12 @@ static const RecordElement RecordsConfig[] =
 };
 // clang-format on
 
+// LibRecordsConfigInit()からしか呼ばれない
 void
 RecordsConfigIterate(RecordElementCallback callback, void *data)
 {
+  // このソースファイル中のこの関数定義よりも上で定義されているRecordsConfig[]配列に指定されたすべての要素に対してcallbackを実行する
   for (unsigned i = 0; i < countof(RecordsConfig); ++i) {
-    callback(&RecordsConfig[i], data);
+    callback(&RecordsConfig[i], data);  // callback = initialize_record, data = nullptr として引き渡される
   }
 }
