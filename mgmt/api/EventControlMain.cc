@@ -230,6 +230,7 @@ apiEventCallback(alarm_t newAlarm, const char * /* ip ATS_UNUSED */, const char 
  * until receives a request from the remote API client. Parse the request
  * to determine which CoreAPI call to make.
  *********************************************************************/
+// eventapi.sockを監視します。
 void *
 event_callback_main(void *arg)
 {
@@ -348,6 +349,7 @@ event_callback_main(void *arg)
       Debug("event", "[event_callback_main] NO EVENTS TO PROCESS");
       continue;
     }
+
     // iterate through each event in mgmt_events
     while (!queue_is_empty(mgmt_events)) {
       ink_mutex_acquire(&mgmt_events_lock);                     // acquire lock

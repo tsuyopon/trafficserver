@@ -801,6 +801,7 @@ TextView::prefix_if(F const &pred) const
   return this->prefix(this->find_if(pred));
 }
 
+// 引数として指定されたサイズ だけprefixを除去します
 inline TextView &
 TextView::remove_prefix(size_t n)
 {
@@ -812,6 +813,7 @@ TextView::remove_prefix(size_t n)
   return *this;
 }
 
+// 「TextView::remove_prefix」で引数として指定されたサイズ + 1 だけprefixを除去します
 inline TextView &
 TextView::remove_prefix_at(char c)
 {
@@ -841,10 +843,14 @@ inline TextView
 TextView::split_prefix_at(size_t n)
 {
   self_type zret; // default to empty return.
+
+  // 実際の文字列のサイズよりも指定された引数が小さいことを確認します
   if (n < this->size()) {
+
     zret = this->prefix(n);
     this->remove_prefix(std::min(n + 1, this->size()));
   }
+
   return zret;
 }
 
@@ -854,6 +860,7 @@ TextView::split_prefix_at(int n)
   return this->split_prefix_at(static_cast<size_t>(n));
 }
 
+// 引数cには"_"や"."などのログファイルで使われる記号が入ります
 inline TextView
 TextView::split_prefix_at(char c)
 {

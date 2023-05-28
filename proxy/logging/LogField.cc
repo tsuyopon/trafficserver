@@ -425,6 +425,8 @@ unsigned
 LogField::marshal_len(LogAccess *lad)
 {
   if (m_container == NO_CONTAINER) {
+    // LogFieldクラスのコピーコンストラクタが生成される際に関数ポインタが指定される。もしくは第５引数を指定する場合にも設定される
+    // 「new LogField」でgrepをかけると設定されているm_marshal_funcがわかります。
     return (lad->*m_marshal_func)(nullptr);
   }
 
@@ -507,6 +509,8 @@ unsigned
 LogField::marshal(LogAccess *lad, char *buf)
 {
   if (m_container == NO_CONTAINER) {
+    // LogFieldクラスのコピーコンストラクタが生成される際に関数ポインタが指定される。もしくはLogFieldクラスをnew時に第５引数を指定する場合にも設定される
+    // 「new LogField」でgrepをかけると設定されているm_marshal_funcがわかります。
     return (lad->*m_marshal_func)(buf);
   }
 

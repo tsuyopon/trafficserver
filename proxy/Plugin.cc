@@ -99,9 +99,12 @@ PluginRegInfo::~PluginRegInfo()
   }
 }
 
+// load_pluginから呼ばれます。この場合にはtraffic_serverの読み込みテスト用オプションとして呼ばれます。
+// single_plugin_initから呼ばれた場合には起動時にトリガーとして呼び出されます。この場合、plugin.conigから値を取得したプラグイン設定内容を元にしてdlopenしています。
 bool
 plugin_dso_load(const char *path, void *&handle, void *&init, std::string &error)
 {
+  // 指定されたpathのプラグインをdlopenします
   handle = dlopen(path, RTLD_NOW);
   init   = nullptr;
   if (!handle) {
@@ -110,6 +113,7 @@ plugin_dso_load(const char *path, void *&handle, void *&init, std::string &error
     return false;
   }
 
+  // TSPluginInitのシンボルを取得しできることをあらかじめ確認しておきます。つまり、TSPluginInitはプラグインに必ず必要となります。
   init = dlsym(handle, "TSPluginInit");
   if (!init) {
     error.assign("unable to find TSPluginInit function in '").append(path).append("': ").append(dlerror());
@@ -120,6 +124,7 @@ plugin_dso_load(const char *path, void *&handle, void *&init, std::string &error
   return true;
 }
 
+// 起動時に呼ばれるplugin.conigに指定されたglobalプラグイン情報の読み込みをこなう関数です
 static bool
 single_plugin_init(int argc, char *argv[], bool validateOnly)
 {
@@ -150,6 +155,7 @@ single_plugin_init(int argc, char *argv[], bool validateOnly)
 
     void *handle, *initptr = nullptr;
     std::string error;
+    // globalプラグインのロード(dlopen)とTSPluginInitのシンボル確認はここで実施されます
     bool loaded = plugin_dso_load(path, handle, initptr, error);
     init        = reinterpret_cast<init_func_t>(initptr);
 
@@ -163,6 +169,7 @@ single_plugin_init(int argc, char *argv[], bool validateOnly)
 
     // Allocate a new registration structure for the
     //    plugin we're starting up
+    // ロードされたremap.configをdlopenした際の戻り値であるhandleの値やパス情報などを含めて構造体として作成します
     ink_assert(plugin_reg_current == nullptr);
     plugin_reg_current              = new PluginRegInfo;
     plugin_reg_current->plugin_path = ats_strdup(path);
@@ -182,6 +189,7 @@ single_plugin_init(int argc, char *argv[], bool validateOnly)
   } // done elevating access
 
   if (plugin_reg_current->plugin_registered) {
+    // 新規ロードしたglobalプラグインをplugin_reg_listに詰める
     plugin_reg_list.push(plugin_reg_current);
   } else {
     Fatal("plugin not registered by calling TSPluginRegister");
@@ -258,6 +266,7 @@ not_found:
   return nullptr;
 }
 
+// plugin.configの解析やそこに記載されるプラグインのdlopen(ロード)を行います
 bool
 plugin_init(bool validateOnly)
 {
@@ -273,7 +282,7 @@ plugin_init(bool validateOnly)
 
   if (INIT_ONCE) {
     api_init();
-    plugin_dir = ats_stringdup(RecConfigReadPluginDir());
+    plugin_dir = ats_stringdup(RecConfigReadPluginDir()); // proxy.config.plugin.plugin_dir からプラグインディレクトリを取得
     INIT_ONCE  = false;
   }
 
@@ -285,6 +294,7 @@ plugin_init(bool validateOnly)
     return false;
   }
 
+  // plugin.configを1行ずつ解析します
   while (ink_file_fd_readline(fd, sizeof(line) - 1, line) > 0) {
     argc = 0;
     p    = line;
@@ -293,12 +303,16 @@ plugin_init(bool validateOnly)
     while (*p && ParseRules::is_wslfcr(*p)) {
       ++p;
     }
+
+    // 行の先頭の文字列がnullまたは"#"の場合にはskipする
     if ((*p == '\0') || (*p == '#')) {
       continue;
     }
 
     // not comment or blank, so rip line into tokens
     while (true) {
+
+      // プラグインの最大引数は64個までと決められている
       if (argc >= MAX_PLUGIN_ARGS) {
         Warning("Exceeded max number of args (%d) for plugin: [%s]", MAX_PLUGIN_ARGS, argc > 0 ? argv[0] : "???");
         break;
@@ -307,6 +321,7 @@ plugin_init(bool validateOnly)
       while (*p && ParseRules::is_wslfcr(*p)) {
         ++p;
       }
+
       if ((*p == '\0') || (*p == '#')) {
         break; // EOL
       }
@@ -348,6 +363,9 @@ plugin_init(bool validateOnly)
     } else {
       argv[MAX_PLUGIN_ARGS - 1] = nullptr;
     }
+
+    // globalプラグインのロード(dlopen)を行います。この関数は起動時にplugin.configを解析して呼び出されています。(globalプラグインだけであることに注意してください)
+    // 下記コードはwhile内で実行されており、1つ1つのパラメータに対して呼ばれます
     retVal = single_plugin_init(argc, argv, validateOnly);
 
     for (i = 0; i < argc; i++) {

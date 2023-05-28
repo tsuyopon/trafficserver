@@ -3617,6 +3617,7 @@ HttpSM::tunnel_handler_cache_write(int event, HttpTunnelConsumer *c)
 int
 HttpSM::tunnel_handler_post_ua(int event, HttpTunnelProducer *p)
 {
+
   STATE_ENTER(&HttpSM::tunnel_handler_post_ua, event);
   client_request_body_bytes = p->init_bytes_done + p->bytes_read;
 
@@ -4160,13 +4161,14 @@ HttpSM::check_sni_host()
   int host_len;
   const char *host_name = t_state.hdr_info.client_request.host_get(&host_len);
   if (host_name && host_len) {
+
     if (ua_txn->support_sni()) {
+
       int host_sni_policy   = t_state.http_config_param->http_host_sni_policy;
       NetVConnection *netvc = ua_txn->get_netvc();
       if (netvc) {
         IpEndpoint ip = netvc->get_remote_endpoint();
-        if (SNIConfig::test_client_action(std::string{host_name, static_cast<size_t>(host_len)}.c_str(), ip, host_sni_policy) &&
-            host_sni_policy > 0) {
+        if (SNIConfig::test_client_action(std::string{host_name, static_cast<size_t>(host_len)}.c_str(), ip, host_sni_policy) && host_sni_policy > 0) {
           // In a SNI/Host mismatch where the Host would have triggered SNI policy, mark the transaction
           // to be considered for rejection after the remap phase passes.  Gives the opportunity to conf_remap
           // override the policy.:w
@@ -4205,9 +4207,11 @@ HttpSM::check_sni_host()
   }
 }
 
+// remap処理を実行する
 void
 HttpSM::do_remap_request(bool run_inline)
 {
+
   SMDebug("http_seq", "Remapping request");
   SMDebug("url_rewrite", "Starting a possible remapping for request");
   bool ret = remapProcessor.setup_for_remap(&t_state, m_remap);
@@ -4217,6 +4221,7 @@ HttpSM::do_remap_request(bool run_inline)
   // Preserve effective url before remap
   t_state.unmapped_url.create(t_state.hdr_info.client_request.url_get()->m_heap);
   t_state.unmapped_url.copy(t_state.hdr_info.client_request.url_get());
+
   // Depending on a variety of factors the HOST field may or may not have been promoted to the
   // client request URL. The unmapped URL should always have that promotion done. If the HOST field
   // is not already there, promote it only in the unmapped_url. This avoids breaking any logic that
@@ -7239,6 +7244,7 @@ HttpSM::kill_this()
     if (Log::transaction_logging_enabled() && t_state.api_info.logging_enabled) {
       LogAccess accessor(this);
 
+      //  retではLog::SKIP, Log::FULL, Log::FAILの3つのフラグを判定可能です。説明はproxy/logging/Log.hに記載されています。
       int ret = Log::access(&accessor);
 
       if (ret & Log::FULL) {
@@ -7582,7 +7588,9 @@ HttpSM::set_next_state()
   }
 
   case HttpTransact::SM_ACTION_REMAP_REQUEST: {
+    // remap処理はここで行われます。下記を辿るとTSRemapDoRemapが呼ばれます
     do_remap_request(true); /* run inline */
+
     SMDebug("url_rewrite", "completed inline remapping request");
     t_state.url_remap_success = remapProcessor.finish_remap(&t_state, m_remap);
     if (t_state.next_action == HttpTransact::SM_ACTION_SEND_ERROR_CACHE_NOOP && t_state.transact_return_point == nullptr) {

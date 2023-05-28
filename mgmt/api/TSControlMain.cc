@@ -116,6 +116,7 @@ remove_client(ClientT *client, std::unordered_map<int, ClientT *> &table)
  * until receives a request from the remote API client. Parse the request
  * to determine which CoreAPI call to make.
  *********************************************************************/
+// argにはmgmtapi.sockが指定されます。
 void *
 ts_ctrl_main(void *arg)
 {
@@ -135,6 +136,7 @@ ts_ctrl_main(void *arg)
 
   // loops until TM dies; waits for and processes requests from clients
   while (true) {
+
     // LINUX: to prevent hard-spin of CPU,  reset timeout on each loop
     timeout.tv_sec  = TIMEOUT_SECS;
     timeout.tv_usec = 0;

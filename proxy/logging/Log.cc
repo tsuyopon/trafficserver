@@ -105,6 +105,8 @@ Log::change_configuration()
 
   new_config = new LogConfig;
   ink_assert(new_config != nullptr);
+
+  // ログに関する設定値の再読み込みを行います
   new_config->read_configuration_variables();
 
   // grab the _APImutex so we can transfer the api objects to
@@ -167,18 +169,24 @@ struct PeriodicWakeup : Continuation {
   int m_preproc_threads;
   int m_flush_threads;
 
+  // PeriodicWakeupクラスのコンストラクタ内でSET_HANDLERされる
   int
   wakeup(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
   {
+    // LOG_PREPROCスレッドにsignalを送っています。送付されるとLog::preproc_thread_mainのwait()している箇所が開始します
     for (int i = 0; i < m_preproc_threads; i++) {
       Log::preproc_notify[i].signal();
     }
+
+    // LOG_FLUSHスレッドにsignalを送っています。送付されるとLog::flush_thread_mainのwait()している箇所が開始します
     for (int i = 0; i < m_flush_threads; i++) {
       Log::flush_notify[i].signal();
     }
+
     return EVENT_CONT;
   }
 
+  // proxy/logging/Log.ccのLog::init_when_enabled()から呼ばれる
   PeriodicWakeup(int preproc_threads, int flush_threads)
     : Continuation(new_ProxyMutex()), m_preproc_threads(preproc_threads), m_flush_threads(flush_threads)
   {
@@ -193,9 +201,15 @@ struct PeriodicWakeup : Continuation {
   PERIODIC_TASKS_INTERVAL seconds.
   -------------------------------------------------------------------------*/
 
+// Log::flush_thread_main内部から定期的に呼び出される関数です
+// 下記を行います
+//   - ログモードの設定読み込み
+//   - ディスク使用量のチェック(書き込み時に利用する変数の値を更新する)
+//   - ログローテート
 void
 Log::periodic_tasks(long time_now)
 {
+
   Debug("log-api-mutex", "entering Log::periodic_tasks");
 
   if (logging_mode_changed || Log::config->reconfiguration_needed) {
@@ -218,6 +232,7 @@ Log::periodic_tasks(long time_now)
     // so that log objects are flushed
     //
     change_configuration();
+
   } else if (logging_mode > LOG_MODE_NONE || config->has_api_objects()) {
     Debug("log-periodic", "Performing periodic tasks");
     Debug("log-periodic", "Periodic task interval = %d", periodic_tasks_interval);
@@ -247,6 +262,7 @@ Log::periodic_tasks(long time_now)
       }
       Log::config->log_object_manager.roll_files(time_now);
     }
+
     if (log_rotate_signal_received) {
       Log::config->log_object_manager.reopen_moved_log_files();
       log_rotate_signal_received = false;
@@ -257,6 +273,7 @@ Log::periodic_tasks(long time_now)
 /*-------------------------------------------------------------------------
   MAIN INTERFACE
   -------------------------------------------------------------------------*/
+// LOG_PREPROCスレッドのためのクラス
 struct LoggingPreprocContinuation : public Continuation {
   int m_idx;
 
@@ -273,6 +290,7 @@ struct LoggingPreprocContinuation : public Continuation {
   }
 };
 
+// LOG_FLUSHスレッドのためのクラス(このスレッドはログを書き込むために1スレッドしか存在しない)
 struct LoggingFlushContinuation : public Continuation {
   int m_idx;
 
@@ -1005,9 +1023,11 @@ Log::handle_log_rotation_request()
   return 0;
 }
 
+// main()から呼び出されます。ログの初期化を行う関数です
 void
 Log::init(int flags)
 {
+
   preproc_threads = 1;
 
   // store the configuration flags
@@ -1040,7 +1060,10 @@ Log::init(int flags)
     } else {
       logging_mode = static_cast<LoggingMode>(val);
     }
+
     // periodic task interval are set on a per instance basis
+    // periodic_task(ログの定期実行関数)の実行間隔(秒)を指定します。デフォルトは5秒
+    // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-log-periodic-tasks-interval
     MgmtInt pti = REC_ConfigReadInteger("proxy.config.log.periodic_tasks_interval");
     if (pti <= 0) {
       Error("proxy.config.log.periodic_tasks_interval = %" PRId64 " is invalid", pti);
@@ -1071,8 +1094,10 @@ Log::init(int flags)
     config->init();
     init_when_enabled();
   }
+
 }
 
+// main() -> Log::init() 経由で呼び出される
 void
 Log::init_when_enabled()
 {
@@ -1090,6 +1115,8 @@ Log::init_when_enabled()
 
     // create the flush thread
     create_threads();
+
+    // 毎秒定期的に呼び出しています。LOG_PREPROCやLOG_FLUSHスレッドへのシグナルを送っています。
     eventProcessor.schedule_every(new PeriodicWakeup(preproc_threads, 1), HRTIME_SECOND, ET_CALL);
 
     init_status |= FULLY_INITIALIZED;
@@ -1101,19 +1128,26 @@ Log::init_when_enabled()
   }
 }
 
+// Log::init_when_enabled から呼ばれる。つまり、main()から呼び出される
 void
 Log::create_threads()
 {
+
   char desc[64];
   preproc_notify = new EventNotify[preproc_threads];
 
   size_t stacksize;
+
+  // デフォルトのstacksizeは1MBとなっています
+  // https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-thread-default-stacksize
   REC_ReadConfigInteger(stacksize, "proxy.config.thread.default.stacksize");
 
   // start the preproc threads
   //
   // no need for the conditional var since it will be relying on
   // on the event system.
+
+  // 下記ではproxy.config.log.preproc_threadsの設定値分だけLOG_PREPROCスレッドを生成する
   for (int i = 0; i < preproc_threads; i++) {
     Continuation *preproc_cont = new LoggingPreprocContinuation(i);
     sprintf(desc, "[LOG_PREPROC %d]", i);
@@ -1128,6 +1162,8 @@ Log::create_threads()
   flush_data_list = new InkAtomicList;
 
   ink_atomiclist_init(flush_data_list, "Logging flush buffer list", 0);
+
+  // ログを書き出すLOG_FLUSHスレッドは1つしか起動しない
   Continuation *flush_cont = new LoggingFlushContinuation(0);
   eventProcessor.spawn_thread(flush_cont, "[LOG_FLUSH]", stacksize);
 }
@@ -1142,6 +1178,7 @@ Log::create_threads()
 int
 Log::access(LogAccess *lad)
 {
+
   // See if transaction logging is disabled
   //
   if (!transaction_logging_enabled()) {
@@ -1158,6 +1195,7 @@ Log::access(LogAccess *lad)
 
   // See if we're sampling and it is not time for another sample
   //
+  // sampling_frequency: https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-log-sampling-frequency
   if (Log::config->sampling_frequency > 1) {
     this_sample = sample++;
     if (this_sample && this_sample % Log::config->sampling_frequency) {
@@ -1177,6 +1215,7 @@ Log::access(LogAccess *lad)
     ret = Log::SKIP;
     goto done;
   }
+
   // initialize this LogAccess object and process
   //
   lad->init();
@@ -1296,6 +1335,7 @@ Log::trace_va(bool in, const sockaddr *peer_addr, uint16_t peer_port, const char
   work (such as convert to ascii), and then forward to flush thread.
   -------------------------------------------------------------------------*/
 
+// LOG_PREPROCスレッド(複数スレッドの場合あり)のメイン処理が行われる関数です。
 void *
 Log::preproc_thread_main(void *args)
 {
@@ -1305,6 +1345,7 @@ Log::preproc_thread_main(void *args)
 
   Log::preproc_notify[idx].lock();
 
+  // ループする
   while (true) {
     if (TSSystemState::is_event_system_shut_down()) {
       return nullptr;
@@ -1335,6 +1376,7 @@ Log::preproc_thread_main(void *args)
   return nullptr;
 }
 
+// LOG_FLUSHスレッドのメイン処理が行われる関数です
 void *
 Log::flush_thread_main(void * /* args ATS_UNUSED */)
 {
@@ -1347,7 +1389,10 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
 
   Log::flush_notify->lock();
 
+  // ループする
   while (true) {
+
+    // shutdownイベントが送られてきたら
     if (TSSystemState::is_event_system_shut_down()) {
       return nullptr;
     }
@@ -1398,7 +1443,9 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
 
       // write *all* data to target file as much as possible
       //
+      // 下記は「total_bytes - byte_written = 0」でない限りはwhile中が実行されることになる
       while (total_bytes - bytes_written) {
+
         if (Log::config->logging_space_exhausted) {
           Debug("log", "logging space exhausted, failed to write file:%s, have dropped (%d) bytes.", logfile->get_name(),
                 (total_bytes - bytes_written));
@@ -1408,8 +1455,10 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
           break;
         }
 
+        // ログの書き込みをここで行う
         len = ::write(logfilefd, &buf[bytes_written], total_bytes - bytes_written);
 
+        // ログの書き込みがエラーならば
         if (len < 0) {
           SiteThrottledError("Failed to write log to %s: [tried %d, wrote %d, %s]", logfile->get_name(),
                              total_bytes - bytes_written, bytes_written, strerror(errno));
@@ -1419,11 +1468,15 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
           break;
         }
         Debug("log", "Successfully wrote some stuff to %s", logfile->get_name());
+
+        // 書き込みした合計バイト数を bytes_written に記録します
         bytes_written += len;
+
       }
 
       RecIncrRawStat(log_rsb, mutex->thread_holding, log_stat_bytes_written_to_disk_stat, bytes_written);
 
+      // 
       if (logfile->m_log) {
         ink_atomic_increment(&logfile->m_log->m_bytes_written, bytes_written);
       }
@@ -1434,6 +1487,8 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
     // Time to work on periodic events??
     //
     now = Thread::get_hrtime() / HRTIME_SECOND;
+
+    // 現在時刻が前回実施時刻から一定時間(5秒固定)以上経過していたらperiodic_tasks(now)を実行します。
     if (now >= last_time + periodic_tasks_interval) {
       Debug("log-preproc", "periodic tasks for %" PRId64, (int64_t)now);
       periodic_tasks(now);
@@ -1444,6 +1499,7 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
     // check the queue and find there is nothing to do, then wait
     // again.
     //
+    // (重要) シグナルを受信するまでここでwaitします
     Log::flush_notify->wait();
   }
 

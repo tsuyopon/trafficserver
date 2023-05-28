@@ -68,11 +68,20 @@ RolledLogDeleter::register_log_type_for_deletion(std::string_view log_type, int 
     // Already registered.
     return;
   }
+
+  // LogDeletingInfoのstd::uniqueポインタを生成する
   auto deletingInfo     = std::make_unique<LogDeletingInfo>(log_type, rolling_min_count);
+
+  // std::uniqueのget()によりポインタ情報を取得する
   auto *deletingInfoPtr = deletingInfo.get();
 
+  // std::moveによりdeletingInfoの所有権が移動しているので、std::uniqueポインタのdeletingInfoはこの関数スコープを抜けても自動的にメモリ解放されない仕組みになっている
+  // deletingInfoは所有権を渡すので、deletingInfoはnullポインタとなります
   deletingInfoList.push_back(std::move(deletingInfo));
+
+  // deleting_infoにはLogDeletingInfoのunique_ptrを格納する。
   deleting_info.insert(deletingInfoPtr);
+
   candidates_require_sorting = true;
 }
 
@@ -80,38 +89,54 @@ bool
 RolledLogDeleter::consider_for_candidacy(std::string_view log_path, int64_t file_size, time_t modification_time)
 {
   const fs::path rolled_log_file = fs::filename(log_path);
+
+  // findの引数にはローリングされたファイル名から元のファイル名へと変換された文字列になる
   auto iter                      = deleting_info.find(LogUtils::get_unrolled_filename(rolled_log_file.view()));
+
+  // 対象となるファイルがdeleting_infoに存在しない場合にはfalseを応答する
   if (iter == deleting_info.end()) {
     return false;
   }
   auto &candidates = iter->candidates;
+
+  // std::make_uniqueを使用すると、メモリリークを防ぐための安全な方法でstd::unique_ptrを生成することができます
+  // std::make_uniqueは動的メモリ割り当てとその解放を一度に行うため、メモリ管理を簡略化します
+  // 通常、new演算子を利用してstd::uniqueを生成する場合にメモリ解放忘れの可能性がありますが、これを防ぐことができます。
   candidates.push_back(std::make_unique<LogDeleteCandidate>(log_path, file_size, modification_time));
   ++num_candidates;
   candidates_require_sorting = true;
   return true;
 }
 
+// ソートを行う
 void
 RolledLogDeleter::sort_candidates()
 {
+
   deleting_info.apply([](LogDeletingInfo &info) {
     std::sort(info.candidates.begin(), info.candidates.end(),
               [](std::unique_ptr<LogDeleteCandidate> const &a, std::unique_ptr<LogDeleteCandidate> const &b) {
+                // mtimeの降順にソートされます
                 return a->mtime > b->mtime;
               });
   });
+
+  // 呼び出し元(RolledLogDeleter::take_next_candidate_to_delete())にて、candidates_require_sortingがtrueでこの関数に入って処理が実行されているので、falseに戻しておく
   candidates_require_sorting = false;
 }
 
 std::unique_ptr<LogDeleteCandidate>
 RolledLogDeleter::take_next_candidate_to_delete()
 {
+
   if (!has_candidates()) {
     return nullptr;
   }
+
   if (candidates_require_sorting) {
     sort_candidates();
   }
+
   // Select the highest priority type (diags.log, traffic.out, etc.) from which
   // to select a candidate.
   auto target_type =
@@ -125,15 +150,18 @@ RolledLogDeleter::take_next_candidate_to_delete()
   }
 
   // Return the highest priority candidate among the candidates of that type.
+  // std::moveで末尾の要素の所有権を移動した後に、末尾をpop_backする
   auto victim = std::move(candidates.back());
   candidates.pop_back();
   --num_candidates;
+
   return victim;
 }
 
 bool
 RolledLogDeleter::has_candidates() const
 {
+  // get_candidate_count()が0でなかったら削除ログ候補があるものとしてtrueを返す
   return get_candidate_count() != 0;
 }
 

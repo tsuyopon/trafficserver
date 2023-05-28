@@ -50,7 +50,9 @@ LogFieldAliasTable::init(size_t numPairs, ...)
      at the call site of this method. Because the numeric values aren't
      explicitly cast, they will come through as "int" sized values.
   */
+  // 最初の値はint型であることを期待されています
   m_min = m_max = va_arg(ap, int);
+
   va_arg(ap, char *); // ignore next arg. for now
 
   for (n = 1; n < numPairs; n++) {

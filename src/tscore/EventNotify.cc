@@ -84,6 +84,7 @@ EventNotify::wait()
   uint64_t value = 0;
   struct epoll_event ev;
 
+  // シグナルをepoll_waitで待ちます
   do {
     nr_fd = epoll_wait(m_epoll_fd, &ev, 1, 500000);
   } while (nr_fd == -1 && errno == EINTR);
@@ -92,12 +93,14 @@ EventNotify::wait()
     return errno;
   }
 
+  // 読み込んだ内容はvalueに保存されます
   nr = read(m_event_fd, &value, sizeof(uint64_t));
   if (nr == sizeof(uint64_t)) {
     return 0;
   } else {
     return errno;
   }
+
 #else
   ink_cond_wait(&m_cond, &m_mutex);
   return 0;

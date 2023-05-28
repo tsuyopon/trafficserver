@@ -53,35 +53,43 @@ should_roll_on_size(Log::RollingEnabledValues roll)
   return roll == Log::ROLL_ON_SIZE_ONLY || roll == Log::ROLL_ON_TIME_OR_SIZE;
 }
 
+// 登録されているバッファの確認を行い、問題なければLOG_FLUSHスレッドにログ書き出しの依頼を行う
 size_t
 LogBufferManager::preproc_buffers(LogBufferSink *sink)
 {
   SList(LogBuffer, write_link) q(write_list.popall()), new_q;
   LogBuffer *b = nullptr;
+
+  // 下記のwhileでは登録されたキューの中身のフィルタリング(問題ない状態か、Flushする最大個数を超過していないか)を実施し、問題ないものだけ new_qのキューに再登録する
   while ((b = q.pop())) {
     if (b->m_references || b->m_state.s.num_writers) {
       // Still has outstanding references.
       write_list.push(b);
-    } else if (_num_flush_buffers > FLUSH_ARRAY_SIZE) {
+    } else if (_num_flush_buffers > FLUSH_ARRAY_SIZE) {  // FLUSH_ARRAY_SIZE = 512 * 4 なので 2048を超過したらskipするのでpopした値をdeleteする
       ink_atomic_increment(&_num_flush_buffers, -1);
       Warning("Dropping log buffer, can't keep up.");
       RecIncrRawStat(log_rsb, this_thread()->mutex->thread_holding, log_stat_bytes_lost_before_preproc_stat,
                      b->header()->byte_count);
       delete b;
     } else {
+      // 上記のifとelse ifの2つのifの条件分岐に問題なければ、問題ないとしてnew_qのキューに再登録される
       new_q.push(b);
     }
   }
 
   int prepared = 0;
+  // 直前のwhileループでフィルタリングして残ったnew_qのキューに対して実施する
   while ((b = new_q.pop())) {
     b->update_header_data();
+    // (重要) 下記がLOG_FLUSHへ依頼するためのflush_data_listへのpushとLOG_FLUSHヘのシグナルの送付が行われている
     sink->preproc_and_try_delete(b);
     ink_atomic_increment(&_num_flush_buffers, -1);
     prepared++;
   }
 
   Debug("log-logbuffer", "prepared %d buffers", prepared);
+
+  // LOG_FLUSHスレッドにログ書き込み依頼した数をreturnする
   return prepared;
 }
 
@@ -470,6 +478,7 @@ LogObject::va_log(LogAccess *lad, const char *fmt, va_list ap)
   return this->log(lad, entry);
 }
 
+// LogObject::va_logから呼ばれる
 int
 LogObject::log(LogAccess *lad, const char *text_entry)
 {
@@ -477,6 +486,8 @@ LogObject::log(LogAccess *lad, const char *text_entry)
   return this->log(lad, std::string_view{text_entry ? text_entry : ""});
 }
 
+// accessログを出力する関数はこれ
+// LogObject::log(LogAccess *lad, const char *text_entry) から呼ばれる
 int
 LogObject::log(LogAccess *lad, std::string_view text_entry)
 {
@@ -592,7 +603,9 @@ void
 LogObject::_setup_rolling(LogConfig *cfg, Log::RollingEnabledValues rolling_enabled, int rolling_interval_sec,
                           int rolling_offset_hr, int rolling_size_mb)
 {
+
   if (!LogRollingEnabledIsValid(static_cast<int>(rolling_enabled))) {
+
     m_rolling_enabled      = Log::NO_ROLLING;
     m_rolling_interval_sec = 0;
     m_rolling_offset_hr    = 0;
@@ -604,11 +617,13 @@ LogObject::_setup_rolling(LogConfig *cfg, Log::RollingEnabledValues rolling_enab
     } else {
       Status("Rolling disabled for %s", m_filename);
     }
+
   } else {
     // do checks for rolling based on time
     //
     if (rolling_enabled == Log::ROLL_ON_TIME_ONLY || rolling_enabled == Log::ROLL_ON_TIME_OR_SIZE ||
         rolling_enabled == Log::ROLL_ON_TIME_AND_SIZE) {
+
       if (rolling_interval_sec < Log::MIN_ROLLING_INTERVAL_SEC) {
         // check minimum
         m_rolling_interval_sec = Log::MIN_ROLLING_INTERVAL_SEC;
@@ -649,8 +664,10 @@ LogObject::_setup_rolling(LogConfig *cfg, Log::RollingEnabledValues rolling_enab
         m_rolling_size_mb = rolling_size_mb;
       }
     }
+
     cfg->register_rolled_log_auto_delete(m_basename, m_min_rolled);
     m_rolling_enabled = rolling_enabled;
+
   }
 }
 

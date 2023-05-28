@@ -65,6 +65,7 @@ BaseManager::dequeue()
   return msg;
 }
 
+// コールバック情報をcb_listの末尾に登録する
 int
 BaseManager::registerMgmtCallback(int msg_id, MgmtCallback const &cb)
 {

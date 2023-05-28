@@ -217,16 +217,19 @@ BaseLogFile::roll(long interval_start, long interval_end)
  *
  * Returns 1 on success, 0 otherwise
  */
+// ログのローテートを行う
 int
 BaseLogFile::roll()
 {
   time_t start;
   time_t now = time(nullptr);
 
+  // get_creation_time関数でstartの値を設定できなかったら0Lにセットしておく
   if (!m_meta_info || !m_meta_info->get_creation_time(&start)) {
     start = 0L;
   }
 
+  // nowには現在時刻を指定する
   return roll(start, now);
 }
 

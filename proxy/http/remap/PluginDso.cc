@@ -51,6 +51,8 @@ PluginDso::~PluginDso()
   (void)unload(error);
 }
 
+// trafficserverのプラグインをdlopenする
+// RemapPluginInfo::loadからこの関数が呼ばれます
 bool
 PluginDso::load(std::string &error)
 {
@@ -90,6 +92,7 @@ PluginDso::load(std::string &error)
       PluginDebug(_tag, "plugin '%s' modification time %ld", _configPath.c_str(), _mtime);
 
       /* Now attempt to load the plugin DSO */
+      // ここでdlopenによりtrafficserverプラグインを読み込みます
       if ((_dlh = dlopen(_runtimePath.c_str(), RTLD_NOW | RTLD_LOCAL)) == nullptr) {
 #if defined(freebsd) || defined(openbsd)
         char *err = (char *)dlerror();
@@ -327,6 +330,7 @@ PluginDso::LoadedPlugins::findByEffectivePath(const fs::path &path, bool dynamic
   return spot == _list.end() ? nullptr : static_cast<PluginDso *>(spot);
 }
 
+// PluginFactory::indicatePreReload()から呼ばれる
 void
 PluginDso::LoadedPlugins::indicatePreReload(const char *factoryId)
 {
@@ -335,6 +339,13 @@ PluginDso::LoadedPlugins::indicatePreReload(const char *factoryId)
   PluginDebug(_tag, "indicated config is going to be reloaded by factory '%s' to %zu plugin%s", factoryId, _list.count(),
               _list.count() != 1 ? "s" : "");
 
+  // ラムダ式
+  //    []内にキャプチャリスト（変数へのアクセス方法）を指定する(下記では[]として何も指定されていない)
+  //    ()内に引数リストを指定する
+  //    ->の直後には戻り値の型を指定する (下記ではvoid)
+  //    その後の{}には関数の本体を記述する
+  // TODO: plugin.indicatePreReload()は どこの関数を呼び出しているのか? おそらくRemapPluginInfo::indicatePreReload()な気がしているが確証がない
+  //        memo: PluginFactory::getRemapPluginでlistにPemapPluginInfoクラスを登録してそう?
   _list.apply([](PluginDso &plugin) -> void { plugin.indicatePreReload(); });
 }
 
@@ -354,6 +365,7 @@ PluginDso::LoadedPlugins::indicatePostReload(bool reloadSuccessful, const std::u
       status = (pluginUsed.end() == pluginUsed.find(&plugin) ? TSREMAP_CONFIG_RELOAD_SUCCESS_PLUGIN_UNUSED :
                                                                TSREMAP_CONFIG_RELOAD_SUCCESS_PLUGIN_USED);
     }
+    // おそらく RemapPluginInfo::indicatePostReload を呼び出している
     plugin.indicatePostReload(status);
   }
 }

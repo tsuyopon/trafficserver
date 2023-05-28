@@ -279,6 +279,7 @@ RemapProcessor::finish_remap(HttpTransact::State *s, UrlRewrite *table)
   return true;
 }
 
+// remap処理を実行する
 Action *
 RemapProcessor::perform_remap(Continuation *cont, HttpTransact::State *s)
 {
@@ -298,6 +299,7 @@ RemapProcessor::perform_remap(Continuation *cont, HttpTransact::State *s)
 
   RemapPlugins plugins(s, request_url, request_header, hh_info);
 
+  // 主要なremap実行処理
   while (!plugins.run_single_remap()) {
     ; // EMPTY
   }

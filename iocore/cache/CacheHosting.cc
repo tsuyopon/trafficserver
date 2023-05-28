@@ -188,9 +188,12 @@ CacheHostTable::CacheHostTable(Cache *c, CacheType typ)
   cache        = c;
   matcher_name = "[CacheHosting]";
 
+  // proxy.config.cache.hosting_filenameは一般的にhosting.configとなる。
+  // ただし、この設定はATS9.2ではdeprecated扱いになっている模様: see: https://docs.trafficserver.apache.org/en/9.2.x/release-notes/upgrading.en.html
   config_path = RecConfigReadConfigPath("proxy.config.cache.hosting_filename");
   ink_release_assert(config_path);
 
+  // BuildTableにはhosting.configが指定される
   m_numEntries = this->BuildTable(config_path);
 }
 

@@ -827,16 +827,27 @@ MemSpan<void>::contains(value_type const *ptr) const
 inline MemSpan<void>
 MemSpan<void>::prefix(size_t n) const
 {
+  // MemSpan構造体を返却します
   return {_ptr, std::min(n, _size)};
 }
 
+// 指定されたサイズ分のprefixを除去する
 inline MemSpan<void> &
 MemSpan<void>::remove_prefix(size_t n)
 {
+
+  // _sizeとnの中で大きい方を取得する
   n = std::max(_size, n);
+
+  // prefixを除去するので指定されたサイズだけ減算する
   _size -= n;
+
+  // 先頭ポインタから指定されたサイズだけprefixを進める
   _ptr = static_cast<char *>(_ptr) + n;
+
+  // 値を戻す
   return *this;
+
 }
 
 inline MemSpan<void>
@@ -849,7 +860,11 @@ MemSpan<void>::suffix(size_t count) const
 inline MemSpan<void> &
 MemSpan<void>::remove_suffix(size_t count)
 {
+
+  // 引数で指定されたcountか文字列の長さ_sizeの大きい方の値を_sideから減算する(これにより、countで指定された値のサイズのsuffixが除去された)
   _size -= std::max(count, _size);
+
+  // ポインタを戻す
   return *this;
 }
 

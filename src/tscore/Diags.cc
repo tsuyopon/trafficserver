@@ -106,6 +106,7 @@ Diags::Diags(std::string_view prefix_string, const char *bdt, const char *bat, B
     base_action_tags(nullptr),
     prefix_str(prefix_string)
 {
+
   ink_release_assert(!prefix_str.empty());
   int i;
 
@@ -584,10 +585,12 @@ Diags::should_roll_diagslog()
 
   // Roll diags_log if necessary
   if (diags_log && diags_log->is_init()) {
+
     if (diagslog_rolling_enabled == RollingEnabledValues::ROLL_ON_SIZE ||
         diagslog_rolling_enabled == RollingEnabledValues::ROLL_ON_TIME_OR_SIZE) {
       // if we can't even check the file, we can forget about rotating
       struct stat buf;
+
       if (fstat(fileno(diags_log->m_fp), &buf) != 0) {
         return false;
       }
@@ -610,6 +613,7 @@ Diags::should_roll_diagslog()
           ret_val = true;
         }
       }
+
     }
 
     if (diagslog_rolling_enabled == RollingEnabledValues::ROLL_ON_TIME ||

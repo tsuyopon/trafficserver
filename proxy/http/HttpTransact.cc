@@ -951,6 +951,8 @@ HttpTransact::HandleBlindTunnel(State *s)
 void
 HttpTransact::StartRemapRequest(State *s)
 {
+
+  // このフラグはTSAPIからTSSkipRemappingSet関数が呼ばれた場合にtrueがセットされる。それが呼ばれない限りデフォルトはfalseである
   if (s->api_skip_all_remapping) {
     TxnDebug("http_trans", "API request to skip remapping");
 
@@ -987,10 +989,13 @@ HttpTransact::StartRemapRequest(State *s)
   //   requesters of a particular URL to.                        //
   /////////////////////////////////////////////////////////////////
 
+  // デバッグタグが付与されていたら、
   if (is_debug_tag_set("http_chdr_describe") || is_debug_tag_set("http_trans")) {
     TxnDebug("http_trans", "Before Remapping:");
     obj_describe(s->hdr_info.client_request.m_http, true);
   }
+
+  // デバッグ時にログに表示される「+++++++++ Incoming Reques +++++++++」のような内容の出力を行う
   DUMP_HEADER("http_hdrs", &s->hdr_info.client_request, s->state_machine_id, "Incoming Request");
 
   if (s->http_config_param->referer_filter_enabled) {
@@ -1067,10 +1072,12 @@ HttpTransact::EndRemapRequest(State *s)
     s->reverse_proxy = false;
     goto done;
   }
+
   /////////////////////////////////////////////////////
   // Quick HTTP filtering (primary key: http method) //
   /////////////////////////////////////////////////////
   process_quick_http_filter(s, method);
+
   /////////////////////////////////////////////////////////////////////////
   // We must close this connection if client_connection_enabled == false //
   /////////////////////////////////////////////////////////////////////////
@@ -3025,6 +3032,8 @@ HttpTransact::HandleCacheOpenReadHit(State *s)
 //              and HandleCacheOpenReadHit().
 //
 ///////////////////////////////////////////////////////////////////////////////
+
+// キャッシュからレスポンスを構築します
 void
 HttpTransact::build_response_from_cache(State *s, HTTPWarningCode warning_code)
 {
@@ -3304,6 +3313,7 @@ HttpTransact::HandleCacheOpenReadMiss(State *s)
     s->next_action       = SM_ACTION_INTERNAL_CACHE_NOOP;
     return;
   }
+
   // reinitialize some variables to reflect cache miss state.
   s->cache_info.object_read = nullptr;
   s->request_sent_time      = UNDEFINED_TIME;
@@ -3312,6 +3322,7 @@ HttpTransact::HandleCacheOpenReadMiss(State *s)
   if (GET_VIA_STRING(VIA_DETAIL_CACHE_LOOKUP) == ' ') {
     SET_VIA_STRING(VIA_DETAIL_CACHE_LOOKUP, VIA_DETAIL_MISS_NOT_CACHED);
   }
+
   // We do a cache lookup for some non-GET requests as well.
   // We must, however, not cache the responses to these requests.
   if (does_method_require_cache_copy_deletion(s->http_config_param, s->method) && s->api_req_cacheable == false) {
@@ -3397,6 +3408,7 @@ HttpTransact::HandleCacheOpenReadMiss(State *s)
 void
 HttpTransact::OriginServerRawOpen(State *s)
 {
+
   TxnDebug("http_trans", "Entering HttpTransact::OriginServerRawOpen");
 
   switch (s->current.state) {
@@ -3773,6 +3785,7 @@ HttpTransact::handle_response_from_server(State *s)
   // plugin call
   s->server_info.state = s->current.state;
   if (s->os_response_plugin_inst) {
+    // TS_REMAP_OS_RESPONSE はここから呼ばれる
     s->os_response_plugin_inst->osResponse(reinterpret_cast<TSHttpTxn>(s->state_machine), s->current.state);
   }
 
@@ -4987,6 +5000,7 @@ HttpTransact::set_header_for_transform(State *s, HTTPHdr *base_header)
   DUMP_HEADER("http_hdrs", &s->hdr_info.transform_response, s->state_machine_id, "Header To Transform");
 }
 
+// キャッシュに書き込むためのヘッダをセットする。Cookie, Via, Authenticateなど不要なヘッダはキャッシュ前に除去する
 void
 HttpTransact::set_headers_for_cache_write(State *s, HTTPInfo *cache_info, HTTPHdr *request, HTTPHdr *response)
 {
@@ -5034,13 +5048,19 @@ HttpTransact::set_headers_for_cache_write(State *s, HTTPInfo *cache_info, HTTPHd
 
   // Set-Cookie should not be put in the cache to prevent
   //  sending person A's cookie to person B
+  // キャッシュに書き込みする際にはCookieヘッダは除去する
   cache_info->response_get()->field_delete(MIME_FIELD_SET_COOKIE, MIME_LEN_SET_COOKIE);
+
+  // キャッシュに書き込みする際にはViaヘッダは除去する
   cache_info->request_get()->field_delete(MIME_FIELD_VIA, MIME_LEN_VIA);
+
   // server 200 Ok for Range request
+  // キャッシュに書き込みする際にはRangeヘッダは除去する
   cache_info->request_get()->field_delete(MIME_FIELD_RANGE, MIME_LEN_RANGE);
 
   // If we're ignoring auth, then we don't want to cache WWW-Auth headers
   if (s->txn_conf->cache_ignore_auth) {
+    // キャッシュに書き込みする際にはAuthenticateヘッダは除去する
     cache_info->response_get()->field_delete(MIME_FIELD_WWW_AUTHENTICATE, MIME_LEN_WWW_AUTHENTICATE);
   }
 
@@ -7761,7 +7781,10 @@ HttpTransact::build_request(State *s, HTTPHdr *base_request, HTTPHdr *outgoing_r
   HttpTransactHeaders::copy_header_fields(base_request, outgoing_request, s->txn_conf->fwd_proxy_auth_to_parent);
   add_client_ip_to_outgoing_request(s, outgoing_request);
   HttpTransactHeaders::add_forwarded_field_to_request(s, outgoing_request);
+
+  // From, Referer, User-Agent, Cookie, Client-ipや設定値で指定されたヘッダリストを元に、各種設定値に基づいて外部に送出しないようにする
   HttpTransactHeaders::remove_privacy_headers_from_request(s->http_config_param, s->txn_conf, outgoing_request);
+
   HttpTransactHeaders::add_global_user_agent_header_to_request(s->txn_conf, outgoing_request);
   handle_request_keep_alive_headers(s, outgoing_version, outgoing_request);
 

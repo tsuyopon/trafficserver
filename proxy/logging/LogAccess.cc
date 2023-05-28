@@ -63,8 +63,10 @@ LogAccess::LogAccess(HttpSM *sm) : m_http_sm(sm)
 void
 LogAccess::init()
 {
+
   HttpTransact::HeaderInfo *hdr = &(m_http_sm->t_state.hdr_info);
 
+  // クライアントリクエストを保存しておく
   if (hdr->client_request.valid()) {
     m_client_request = &(hdr->client_request);
 
@@ -79,6 +81,7 @@ LogAccess::init()
     m_client_req_url_path_str = m_client_request->path_get(&m_client_req_url_path_len);
   }
 
+  // クライアントレスポンスを保存しておく
   if (hdr->client_response.valid()) {
     m_proxy_response = &(hdr->client_response);
     MIMEField *field = m_proxy_response->field_find(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE);
@@ -96,15 +99,22 @@ LogAccess::init()
     }
     m_proxy_resp_reason_phrase_str = const_cast<char *>(m_proxy_response->reason_get(&m_proxy_resp_reason_phrase_len));
   }
+
+  // サーバリクエスト情報を保存しておく
   if (hdr->server_request.valid()) {
     m_proxy_request = &(hdr->server_request);
   }
+
+  // サーバレスポンス情報を保存しておく
   if (hdr->server_response.valid()) {
     m_server_response = &(hdr->server_response);
   }
+
+  // キャッシュレスポンス情報を保存しておく
   if (hdr->cache_response.valid()) {
     m_cache_response = &(hdr->cache_response);
   }
+
 }
 
 int
@@ -1245,9 +1255,11 @@ resolve_logfield_string(LogAccess *context, const char *format_str)
   // initialized first.
   //
   Debug("log-resolve", "Marshaling data from LogAccess into buffer ...");
-  context->init();
+  context->init(); // LogAccess::initが呼ばれる
   unsigned bytes_needed = fields.marshal_len(context);
   char *buf             = static_cast<char *>(ats_malloc(bytes_needed));
+
+  // ログへの
   unsigned bytes_used   = fields.marshal(context, buf);
 
   ink_assert(bytes_needed == bytes_used);
@@ -1277,6 +1289,7 @@ resolve_logfield_string(LogAccess *context, const char *format_str)
 
   return result;
 }
+
 void
 LogAccess::set_client_req_url(char *buf, int len)
 {

@@ -51,11 +51,14 @@ SetHomePageRedirectFlag(url_mapping *new_mapping, URL &new_to_url)
   new_mapping->homePageRedirect = (from_path && !to_path) ? true : false;
 }
 
+// init_reverse_proxy関数から呼ばれる
 bool
 UrlRewrite::load()
 {
   ats_scoped_str config_file_path;
 
+  // proxy.config.url_remap.filenameはremap.configの名前をセットします(デフォルト: remap.config)
+  // https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/files/records.config.en.html
   config_file_path = RecConfigReadConfigPath("proxy.config.url_remap.filename", ts::filename::REMAP);
   if (!config_file_path) {
     pmgmt->signalManager(MGMT_SIGNAL_CONFIG_ERROR, "Unable to find proxy.config.url_remap.filename");
@@ -63,6 +66,8 @@ UrlRewrite::load()
     return false;
   }
 
+  // proxy.config.proxy_nameはTrafficServerのノード名が入ります
+  // https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/files/records.config.en.html#proxy-config-proxy-name
   this->ts_name = nullptr;
   REC_ReadConfigStringAlloc(this->ts_name, "proxy.config.proxy_name");
   if (this->ts_name == nullptr) {
@@ -89,7 +94,8 @@ UrlRewrite::load()
   Debug("url_rewrite_regex", "strategyFactory file: %s", sf.c_str());
   strategyFactory = new NextHopStrategyFactory(sf.c_str());
 
-  if (0 == this->BuildTable(config_file_path)) {
+  // TSRemapInit
+  if (0 == this->BuildTable(config_file_path)) { // conig_file_pathにはremap.configが指定される
     _valid = true;
     if (is_debug_tag_set("url_rewrite")) {
       Print();
@@ -113,7 +119,9 @@ UrlRewrite::~UrlRewrite()
   _valid = false;
 
   /* Deactivate the factory when all SM are gone for sure. */
+  // TSRemapDeleteInstanceが呼ばれます
   pluginFactory.deactivate();
+
   delete strategyFactory;
 }
 
@@ -678,6 +686,8 @@ UrlRewrite::InsertForwardMapping(mapping_type maptype, url_mapping *mapping, con
   @return zero on success and non-zero on failure.
 
 */
+// pathにはhosting.configやremap.conigなどのpathが指定されてくることがあるようです。
+// remap.configが指定される場合にはUrlRewrite::load()から呼ばれます。
 int
 UrlRewrite::BuildTable(const char *path)
 {

@@ -257,6 +257,7 @@ struct AutoStopCont : public Continuation {
   AutoStopCont() : Continuation(new_ProxyMutex()) { SET_HANDLER(&AutoStopCont::mainEvent); }
 };
 
+// main関数から定期実行スレッドとして呼ばれます
 class SignalContinuation : public Continuation
 {
 public:
@@ -266,9 +267,12 @@ public:
     SET_HANDLER(&SignalContinuation::periodic);
   }
 
+  // SignalContinuationコンストラクタから呼ばれます
   int
   periodic(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
   {
+
+    // SIGUSR1シグナルを受信した場合
     if (signal_received[SIGUSR1]) {
       signal_received[SIGUSR1] = false;
 
@@ -290,6 +294,7 @@ public:
       snap = now;
     }
 
+    // SIGUSR2シグナルを受信した場合
     if (signal_received[SIGUSR2]) {
       signal_received[SIGUSR2] = false;
 
@@ -306,6 +311,7 @@ public:
       Log::handle_log_rotation_request();
     }
 
+    // SIGTERMまたはSIGINTシグナルを受信した場合
     if (signal_received[SIGTERM] || signal_received[SIGINT]) {
       signal_received[SIGTERM] = false;
       signal_received[SIGINT]  = false;
@@ -391,6 +397,8 @@ class DiagsLogContinuation : public Continuation
 {
 public:
   DiagsLogContinuation() : Continuation(new_ProxyMutex()) { SET_HANDLER(&DiagsLogContinuation::periodic); }
+
+  // DiagsLogContinuationコンストラクタからSET_HANDLERされる
   int
   periodic(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
   {
@@ -987,14 +995,20 @@ enum class plugin_type_t {
  *
  * @return True if the plugin loaded successfully, false otherwise.
  */
+// プラグインの読み込み処理を行います。
+// この関数自体はオプションからのヘルパー関数の時にしか呼ばれないように思われる
 static bool
 load_plugin(plugin_type_t plugin_type, const fs::path &plugin_path, std::string &error)
 {
+
   switch (plugin_type) {
+  // グローバルプラグインの読み込み処理
   case plugin_type_t::GLOBAL: {
     void *handle, *initptr;
     return plugin_dso_load(plugin_path.c_str(), handle, initptr, error);
   }
+
+  // Remapプラグインの読み込み処理
   case plugin_type_t::REMAP: {
     auto temporary_directory = fs::temp_directory_path();
     temporary_directory /= fs::path(std::string("verify_plugin_") + std::to_string(getpid()));
@@ -1008,6 +1022,7 @@ load_plugin(plugin_type_t plugin_type, const fs::path &plugin_path, std::string 
     const auto runtime_path = temporary_directory / ts::file::filename(plugin_path);
     const fs::path unused_config;
     auto plugin_info = std::make_unique<RemapPluginInfo>(unused_config, plugin_path, runtime_path);
+    // remapプラグインとして指定されたプラグイン情報dlopenはここで行われる(globalプラグインはここでは行わない)(。RemapPluginInfo::loadを呼び出します。
     bool loaded      = plugin_info->load(error);
     if (!fs::remove(temporary_directory, ec)) {
       fprintf(stderr, "ERROR: could not remove temporary directory '%s': %s\n", temporary_directory.c_str(), ec.message().c_str());
@@ -2042,6 +2057,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   // This means any spawn scheduling must be done before this point.
   eventProcessor.start(num_of_net_threads, stacksize);
 
+  // 定期的に実行されるスレッドが定義される
   eventProcessor.schedule_every(new SignalContinuation, HRTIME_MSECOND * 500, ET_CALL);
   eventProcessor.schedule_every(new DiagsLogContinuation, HRTIME_SECOND, ET_TASK);
   eventProcessor.schedule_every(new MemoryLimit, HRTIME_SECOND * 10, ET_TASK);
@@ -2104,6 +2120,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
     (void)parsePluginConfig();
 
     // Init plugins as soon as logging is ready.
+    // globalプラグインのdlopenはここを経由して実行されます。
     (void)plugin_init(); // plugin.config
 
     SSLConfigParams::init_ssl_ctx_cb  = init_ssl_ctx_callback;
@@ -2138,6 +2155,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
     // main server logic initiated here //
     //////////////////////////////////////
 
+    // remapプラグインのdlopenはここを経由して行われます
     init_accept_HttpProxyServer(num_accept_threads);
     transformProcessor.start();
 

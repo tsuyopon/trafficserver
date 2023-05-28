@@ -480,16 +480,22 @@ LogUtils::seconds_to_next_roll(time_t time_now, int rolling_offset, int rolling_
   return ((tr >= sidl ? (tr - sidl) % rolling_interval : (86400 - (sidl - tr)) % rolling_interval));
 }
 
+// ログファイル名称から元のrollされる前のログファイル名を取得します。
+// 例えば引数に「squid.log_some.hostname.com.20191029.18h15m02s-20191029.18h30m02s.old」が指定されると、戻りは「squid.log_some」の部分を返します。
 ts::TextView
 LogUtils::get_unrolled_filename(ts::TextView rolled_filename)
 {
+
   auto unrolled_name = rolled_filename;
 
   // A rolled log will look something like:
   //   squid.log_some.hostname.com.20191029.18h15m02s-20191029.18h30m02s.old
   auto suffix = rolled_filename;
 
+  // ロールされたファイル名の接尾辞（suffix）を取得します。接尾辞は、最初のドット（.）以降の部分です。
+  // suffixが「squid.log_some.hostname.com.20191029.18h15m02s-20191029.18h30m02s.old」なら「log_some.hostname.com.20191029.18h15m02s-20191029.18h30m02s.old」に変換します
   suffix.remove_prefix_at('.');
+
   // Using the above squid.log example, suffix now looks like:
   //   log_some.hostname.com.20191029.18h15m02s-20191029.18h30m02s.old
 
@@ -499,10 +505,17 @@ LogUtils::get_unrolled_filename(ts::TextView rolled_filename)
   //
   // For these, the second delimiter will be a period. For this reason, we also
   // split_prefix_at with a period as well.
+  // 接尾辞にアンダースコア（）またはドット（.）が存在する場合、unrolled_nameから接尾辞の部分を削除します。削除する際に、アンダースコア（）またはドット（.）自体も除去します。
+  //
+  // suffixが「log_some.hostname.com.20191029.18h15m02s-20191029.18h30m02s.oldなら
+  // 最初の「suffix.split_prefix_at('_')」で「some.hostname.com.20191029.18h15m02s-20191029.18h30m02s.old」に変換します
+  // 次の「suffix.split_prefix_at('.')」で「hostname.com.20191029.18h15m02s-20191029.18h30m02s.old」に変換します
   if (suffix.split_prefix_at('_') || suffix.split_prefix_at('.')) {
     // ' + 1' to remove the '_' or second '.':
+    // 下記ではもともとの「squid.log_some.hostname.com.20191029.18h15m02s-20191029.18h30m02s.old」という名称から、「.hostname.com.20191029.18h15m02s-20191029.18h30m02s.old」のsuffixを除去しています(+1しているのは先頭のドットの文字列を含めるため)
     return unrolled_name.remove_suffix(suffix.size() + 1);
   }
+‘
   // If there isn't a '.' or an '_' after the first '.', then this
   // doesn't look like a rolled file.
   return rolled_filename;

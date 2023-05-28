@@ -429,12 +429,15 @@ LogFile::reopen_if_moved()
   preprocess the given buffer data before write to target file
   and try to delete it when its reference become zero.
   -------------------------------------------------------------------------*/
+
+// (重要) この関数はLOG_PREPROCで実行されているもので、この関数からLOG_FLUSHへのログ書き込み依頼が行われます。
 int
 LogFile::preproc_and_try_delete(LogBuffer *lb)
 {
   int ret = -1;
   LogBufferHeader *buffer_header;
 
+  // 引数で指定されたLogBufferがnullptrの場合
   if (lb == nullptr) {
     Note("Cannot write LogBuffer to LogFile %s; LogBuffer is NULL", m_name);
     return -1;
@@ -464,6 +467,9 @@ LogFile::preproc_and_try_delete(LogBuffer *lb)
     m_log->m_end_time = buffer_header->high_timestamp;
   }
 
+  // ログファイルフォーマットがバイナリ(binary)の場合
+  // ログフォーマットについては下記を参考のこと
+  //   cf. https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/logging/destinations.en.html#ascii-log-files
   if (m_file_format == LOG_FILE_BINARY) {
     //
     // Ok, now we need to write the binary buffer to the file, and we
@@ -481,8 +487,10 @@ LogFile::preproc_and_try_delete(LogBuffer *lb)
 
     RecIncrRawStat(log_rsb, mutex->thread_holding, log_stat_bytes_flush_to_disk_stat, lb->header()->byte_count);
 
+    // LOG_FLUSHへこの後シグナルを送る前に、flush_data_listにログ用オブジェクトであるflush_dataをプッシュします
     ink_atomiclist_push(Log::flush_data_list, flush_data);
 
+    // LOG_FLUSHスレッドへとシグナルを送付します
     Log::flush_notify->signal();
 
     //
@@ -490,9 +498,11 @@ LogFile::preproc_and_try_delete(LogBuffer *lb)
     //
     return 0;
   } else if (m_file_format == LOG_FILE_ASCII || m_file_format == LOG_FILE_PIPE) {
+    //以下の関数でflush_data_listへの登録やLOG_FLUSHスレッドへのシグナルを送出しています
     write_ascii_logbuffer3(buffer_header);
     ret = 0;
   } else {
+    // ログファイルフォーマットがbinary, ascii, ascii_pipe以外は不正とみなす
     Note("Cannot write LogBuffer to LogFile %s; invalid file format: %d", m_name, m_file_format);
   }
 
@@ -575,6 +585,8 @@ LogFile::write_ascii_logbuffer(LogBufferHeader *buffer_header, int fd, const cha
   return bytes;
 }
 
+// ログフォーマットがbinary以外(ascii, ascii_pipeの場合)にこの関数が呼ばれます
+// この関数ではバイナリからASCIIへ変換して、LOG_FLUSHスレッドで必要なオブジェクトをflush_data_listにプッシュして、LOG_FLUSHにシグナルを送付しています
 int
 LogFile::write_ascii_logbuffer3(LogBufferHeader *buffer_header, const char *alt_format)
 {
@@ -610,7 +622,9 @@ LogFile::write_ascii_logbuffer3(LogBufferHeader *buffer_header, const char *alt_
     return 0;
   }
 
+  // LogBufferHeaderをイテレーションする
   while ((entry_header = iter.next())) {
+
     fmt_entry_count = 0;
     fmt_buf_bytes   = 0;
 
@@ -623,6 +637,8 @@ LogFile::write_ascii_logbuffer3(LogBufferHeader *buffer_header, const char *alt_
     // fill the buffer with as many records as possible
     //
     do {
+
+      // ログの行としてエントリされているサイズが、設定されている最大行サイズを超過していたらtruncateされる旨のエラーメッセージを表示する
       if (entry_header->entry_len >= m_max_line_size) {
         Warning("Log is too long(%" PRIu32 "), it would be truncated. max_len:%zu", entry_header->entry_len, m_max_line_size);
       }
@@ -665,6 +681,7 @@ LogFile::write_ascii_logbuffer3(LogBufferHeader *buffer_header, const char *alt_
 
     ink_atomiclist_push(Log::flush_data_list, flush_data);
 
+    // LOG_FLUSHスレッドにシグナルを送って、上記で登録したLog::flush_data_listの内容のログ書き出しを依頼します
     Log::flush_notify->signal();
 
     total_bytes += fmt_buf_bytes;

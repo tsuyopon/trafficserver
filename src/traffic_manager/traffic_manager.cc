@@ -707,6 +707,8 @@ main(int argc, const char **argv)
   }
 
   umask(oldmask);
+
+  // 2つのUnix Domain Socketを監視するスレッドをそれぞれで生成します
   ink_thread_create(nullptr, ts_ctrl_main, &mgmtapiFD, 0, 0, nullptr);
   ink_thread_create(nullptr, event_callback_main, &eventapiFD, 0, 0, nullptr);
 

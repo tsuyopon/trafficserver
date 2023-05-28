@@ -54,6 +54,8 @@ RemapPlugins::run_plugin(RemapPluginInst *plugin)
   }
 
   HttpTransact::milestone_start_api_time(_s);
+
+  // RemapPluginInst::doRemap
   plugin_retcode = plugin->doRemap(reinterpret_cast<TSHttpTxn>(_s->state_machine), &rri);
   HttpTransact::milestone_update_api_time(_s);
 
@@ -79,6 +81,7 @@ RemapPlugins::run_plugin(RemapPluginInst *plugin)
     there actually *is* something to do).
 
 */
+// RemapProcessor::perform_remapから呼び出される
 bool
 RemapPlugins::run_single_remap()
 {
@@ -104,6 +107,7 @@ RemapPlugins::run_single_remap()
 
   // If the plugin redirected, we need to end the remap chain now. Otherwise see what's next.
   if (!_s->remap_redirect) {
+
     if (TSREMAP_DID_REMAP_STOP == plugin_retcode || TSREMAP_DID_REMAP == plugin_retcode) {
       ++_rewritten;
     }
@@ -120,6 +124,8 @@ RemapPlugins::run_single_remap()
   return zret;
 }
 
+// 調べた限りこの関数自体はどこからも呼ばれていないと思われる。
+// この中で主要で実行されるrun_single_remap()はRemapProcessor::perform_remapから呼ばれることでremap処理を制御していると思われる
 int
 RemapPlugins::run_remap(int event, Event *e)
 {

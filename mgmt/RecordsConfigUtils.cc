@@ -28,9 +28,12 @@
 // LibRecordsConfigInit
 //-------------------------------------------------------------------------
 
+// RecordsConfigIterateから呼ばれている
+// records.configの内容を受け取り、設定情報の登録を行う
 static void
 initialize_record(const RecordElement *record, void *)
 {
+
   RecInt tempInt         = 0;
   RecFloat tempFloat     = 0.0;
   RecCounter tempCounter = 0;
@@ -82,7 +85,9 @@ initialize_record(const RecordElement *record, void *)
     } // switch
 
     RecDataZero(record->value_type, &data);
+
   } else { // Everything else, except PROCESS, are stats. TODO: Should modularize this too like PROCESS was done.
+
     ink_assert(REC_TYPE_IS_STAT(type));
 
     switch (record->value_type) {

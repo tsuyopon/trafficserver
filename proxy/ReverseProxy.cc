@@ -58,6 +58,7 @@ thread_local PluginThreadContext *pluginThreadContext = nullptr;
 //
 // Begin API Functions
 //
+// init_accept_HttpProxyServer から呼ばれます
 int
 init_reverse_proxy()
 {
@@ -66,6 +67,7 @@ init_reverse_proxy()
   rewrite_table  = new UrlRewrite();
 
   Note("%s loading ...", ts::filename::REMAP);
+  // UrlRewrite::load()
   if (!rewrite_table->load()) {
     Fatal("%s failed to load", ts::filename::REMAP);
   }

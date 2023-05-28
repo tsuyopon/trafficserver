@@ -76,15 +76,20 @@ RemapPluginInfo::RemapPluginInfo(const fs::path &configPath, const fs::path &eff
 {
 }
 
+// RemapPluginとして登録されたシンボル情報の読み込みを行います
+// PluginFactory::getRemapPluginやload_plugin関数から呼ばれます (load_pluginはtraffic_serverのヘルパーコマンドラインのみに適用)
 bool
 RemapPluginInfo::load(std::string &error)
 {
+
   error.clear();
 
+  // プラグインの読み込み(dlopen等を行います)
   if (!PluginDso::load(error)) {
     return false;
   }
 
+  // remapプラグインとして必要となるコールバックはここで設定されます。
   init_cb               = getFunctionSymbol<Init_F>(TSREMAP_FUNCNAME_INIT);
   pre_config_reload_cb  = getFunctionSymbol<PreReload_F>(TSREMAP_FUNCNAME_PRE_CONFIG_RELOAD);
   post_config_reload_cb = getFunctionSymbol<PostReload_F>(TSREMAP_FUNCNAME_POST_CONFIG_RELOAD);
@@ -95,6 +100,7 @@ RemapPluginInfo::load(std::string &error)
   os_response_cb        = getFunctionSymbol<OS_Response_F>(TSREMAP_FUNCNAME_OS_RESPONSE);
 
   /* Validate if the callback TSREMAP functions are specified correctly in the plugin. */
+  // TSRemapInit, TSRemapDoRemapは必須。TSRemapNewInstanceとTSRemapDeleteInstanceは相互で依存により必須条件が変わってくる
   bool valid = true;
   if (!init_cb) {
     error = missingRequiredSymbolError(_configPath.string(), TSREMAP_FUNCNAME_INIT);
@@ -119,6 +125,7 @@ RemapPluginInfo::load(std::string &error)
 }
 
 /* Initialize plugin (required). */
+// PluginFactory::getRemapPlugin から呼ばれる
 bool
 RemapPluginInfo::init(std::string &error)
 {
@@ -137,6 +144,7 @@ RemapPluginInfo::init(std::string &error)
 
   setPluginContext();
 
+  // init_cbにてTSRemapInitが呼ばれます
   if (init_cb && init_cb(&ri, tmpbuf, sizeof(tmpbuf) - 1) != TS_SUCCESS) {
     error.assign("failed to initialize plugin ")
       .append(_configPath.string())
@@ -157,6 +165,7 @@ void
 RemapPluginInfo::done()
 {
   if (done_cb) {
+    // TSRemapDoneが呼ばれた際に下記が呼ばれます
     done_cb();
   }
 }
@@ -187,6 +196,7 @@ RemapPluginInfo::initInstance(int argc, char **argv, void **ih, std::string &err
 
     setPluginContext();
 
+    // Remapプラグインとして定義したTSRemapNewInstanceが呼ばれます
     res = new_instance_cb(argc, argv, ih, tmpbuf, sizeof(tmpbuf) - 1);
 
     resetPluginContext();
@@ -211,12 +221,14 @@ RemapPluginInfo::doneInstance(void *ih)
   setPluginContext();
 
   if (delete_instance_cb) {
+    // remapプラグインに定義した TSRemapDeleteInstance を呼び出します
     delete_instance_cb(ih);
   }
 
   resetPluginContext();
 }
 
+// RemapPluginInst::doRemapから呼び出される
 TSRemapStatus
 RemapPluginInfo::doRemap(void *ih, TSHttpTxn rh, TSRemapRequestInfo *rri)
 {
@@ -225,6 +237,7 @@ RemapPluginInfo::doRemap(void *ih, TSHttpTxn rh, TSRemapRequestInfo *rri)
   setPluginContext();
 
   if (do_remap_cb) {
+    // TSRemapDoRemapが呼ばれます
     result = do_remap_cb(ih, rh, rri);
   }
 
@@ -253,6 +266,7 @@ RemapPluginInfo::indicatePreReload()
   setPluginContext();
 
   if (pre_config_reload_cb) {
+    // TSRemapPreConfigReload が定義されていたら呼び出す
     pre_config_reload_cb();
   }
 
@@ -265,6 +279,7 @@ RemapPluginInfo::indicatePostReload(TSRemapReloadStatus reloadStatus)
   setPluginContext();
 
   if (post_config_reload_cb) {
+    // TSRemapPostConfigReload が定義されていたら呼び出す
     post_config_reload_cb(reloadStatus);
   }
 

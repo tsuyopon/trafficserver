@@ -182,6 +182,8 @@ protected:
 
 extern Thread *this_thread();
 
+// この関数はキャッシュされた現在時刻を返します (おそらくパフォーマンスの観点?)
+// Thread::get_hrtime_updated()によって現在時刻が更新されます
 TS_INLINE ink_hrtime
 Thread::get_hrtime()
 {

@@ -142,6 +142,7 @@ public:
   int
   get_max_space_mb() const
   {
+    // proxy.config.log.max_space_mb_for_logs(デフォルト: 25000)
     return max_space_mb_for_logs;
   }
 

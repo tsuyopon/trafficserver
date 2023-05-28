@@ -101,6 +101,7 @@ LogConfig::setup_default_values()
 void LogConfig::reconfigure_mgmt_variables(ts::MemSpan<void>)
 {
   Note("received log reconfiguration event, rolling now");
+  // 下記フラグをtrueにすると、ログの定期実行スレッド(Log::periodic_tasks)にてログファイルのローリングが必要と判定されます
   Log::config->roll_log_files_now = true;
 }
 
@@ -117,17 +118,20 @@ LogConfig::register_rolled_log_auto_delete(std::string_view logname, int rolling
   rolledLogDeleter.register_log_type_for_deletion(logname, rolling_min_count);
 }
 
+// ログに関連するrecords.configの設定値を読み込みます
 void
 LogConfig::read_configuration_variables()
 {
   int val;
   char *ptr;
 
+  // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-log-log-buffer-size
   val = static_cast<int>(REC_ConfigReadInteger("proxy.config.log.log_buffer_size"));
   if (val > 0) {
     log_buffer_size = val;
   }
 
+  // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-log-max-secs-per-buffer
   val = static_cast<int>(REC_ConfigReadInteger("proxy.config.log.max_secs_per_buffer"));
   if (val > 0) {
     max_secs_per_buffer = val;
@@ -199,6 +203,8 @@ LogConfig::read_configuration_variables()
     rolling_enabled = Log::NO_ROLLING;
   }
 
+  // rollされたファイルの自動削除を有効にするかどうか
+  // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-log-auto-delete-rolled-files
   val                      = static_cast<int>(REC_ConfigReadInteger("proxy.config.log.auto_delete_rolled_files"));
   auto_delete_rolled_files = (val > 0);
 
@@ -226,6 +232,7 @@ LogConfig::read_configuration_variables()
     // The following register these other core logs for log rotation deletion.
 
     // For diagnostic logs
+    // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-diags-logfile-rolling-min-count
     val = static_cast<int>(REC_ConfigReadInteger("proxy.config.diags.logfile.rolling_min_count"));
     register_rolled_log_auto_delete(DIAGS_LOG_FILENAME, val);
     register_rolled_log_auto_delete(MANAGER_LOG_FILENAME, val);
@@ -240,6 +247,7 @@ LogConfig::read_configuration_variables()
 
     ats_free(configured_name);
   }
+
   // PERFORMANCE
   val = static_cast<int>(REC_ConfigReadInteger("proxy.config.log.sampling_frequency"));
   if (val > 0) {
@@ -262,6 +270,7 @@ LogConfig::read_configuration_variables()
     ascii_buffer_size = val;
   }
 
+  // ログ1行あたりの最大サイズ (デフォルト: 9216)
   val = static_cast<int>(REC_ConfigReadInteger("proxy.config.log.max_line_size"));
   if (val > 0) {
     max_line_size = val;
@@ -302,9 +311,11 @@ LogConfig::~LogConfig()
   LogConfig::init
   -------------------------------------------------------------------------*/
 
+// Log::initから下記が呼ばれる
 void
 LogConfig::init(LogConfig *prev_config)
 {
+
   LogObject *errlog = nullptr;
 
   ink_assert(!initialized);
@@ -490,6 +501,7 @@ LogConfig::register_config_callbacks()
   function for each of the logging stats variables.
   -------------------------------------------------------------------------*/
 
+// 統計情報のコールバックを設定する
 void
 LogConfig::register_stat_callbacks()
 {
@@ -574,19 +586,29 @@ LogConfig::register_mgmt_callbacks()
   given number of bytes, false otherwise.
   -------------------------------------------------------------------------*/
 
+// 書き込み可能な十分なスペースがあるかの判定を行います。
 bool
 LogConfig::space_to_write(int64_t bytes_to_write) const
 {
+
   int64_t config_space, partition_headroom;
   int64_t logical_space_used, physical_space_left;
   bool space;
 
+  // デフォルトだと25GByteとなる
   config_space       = static_cast<int64_t>(get_max_space_mb()) * LOG_MEGABYTE;
+
+  // 下記は固定値で10MBとなる
   partition_headroom = static_cast<int64_t>(PARTITION_HEADROOM_MB) * LOG_MEGABYTE;
 
+  // m_space_usedはLogConfig::update_space_used()中で定期的に値が更新されるようです
   logical_space_used  = m_space_used + bytes_to_write;
+
+  // m_partition_space_leftはLogConfig::update_space_used()中で定期的に値が更新されるようです
   physical_space_left = m_partition_space_left - bytes_to_write;
 
+  // &&の左辺と右辺が共にtrueならばspaceはtrueになります。それ以外はfalseになります。
+  // 論理スペース使用率が設定された容量を超過していない かつ 物理スペースの残りが10MBをうわ待っている場合には、trueとして応答します
   space = ((logical_space_used < config_space) && (physical_space_left > partition_headroom));
 
   Debug("logspace",
@@ -614,6 +636,7 @@ LogConfig::space_to_write(int64_t bytes_to_write) const
 void
 LogConfig::update_space_used()
 {
+
   // no need to update space used if log directory is inaccessible
   //
   if (m_log_directory_inaccessible) {
@@ -628,7 +651,8 @@ LogConfig::update_space_used()
   DIR *ld;
 
   // check if logging directory has been specified
-  //
+  // ログファイル用のディレクトリが指定されていない場合
+  // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-log-logfile-dir
   if (!logfile_dir) {
     const char *msg = "Logging directory not specified";
     Error("%s", msg);
@@ -640,9 +664,12 @@ LogConfig::update_space_used()
   // check if logging directory exists and is searchable readable & writable
   int err;
   do {
+    // ログディレクトリのアクセス権限のチェックを行います。
+    // cf. https://linuxjm.osdn.jp/html/LDP_man-pages/man2/access.2.html
     err = access(logfile_dir, R_OK | W_OK | X_OK);
   } while ((err < 0) && (errno == EINTR));
 
+  // ログディレクトリへのアクセス権限がなければエラー
   if (err < 0) {
     const char *msg = "Error accessing logging directory %s: %s.";
     Error(msg, logfile_dir, strerror(errno));
@@ -651,6 +678,7 @@ LogConfig::update_space_used()
     return;
   }
 
+  // ログディレクトリをディレクトリとしてopenできることを確認します。
   ld = ::opendir(logfile_dir);
   if (ld == nullptr) {
     const char *msg = "Error opening logging directory %s to perform a space check: %s.";
@@ -662,19 +690,28 @@ LogConfig::update_space_used()
 
   total_space_used = 0LL;
 
+  // ログディレクトリに存在するファイルを1つずつwhileで
   while ((entry = readdir(ld))) {
     snprintf(path, MAXPATHLEN, "%s/%s", logfile_dir, entry->d_name);
 
+    // ファイルのstatを取得する
     sret = ::stat(path, &sbuf);
+
+    // ファイルのstatが取得でき、通常のファイル(S_ISREG)であることを確認する。
+    // cf. https://linuxjm.osdn.jp/html/LDP_man-pages/man2/stat.2.html
     if (sret != -1 && S_ISREG(sbuf.st_mode)) {
+
+      // ログディレクトリに存在するログファイルのサイズを加算して、合計使用量を求める
       total_space_used += static_cast<int64_t>(sbuf.st_size);
 
       if (auto_delete_rolled_files && LogFile::rolled_logfile(entry->d_name)) {
         rolledLogDeleter.consider_for_candidacy(path, sbuf.st_size, sbuf.st_mtime);
       }
+
     }
   }
 
+  // ログディレクトリをclosedirする
   ::closedir(ld);
 
   //
@@ -684,6 +721,8 @@ LogConfig::update_space_used()
 
   struct statvfs fs;
 
+  // statvfsコールを呼び出す。statvfsはマウントされたファイルシステムについての情報を返す。
+  // cf. https://linuxjm.osdn.jp/html/LDP_man-pages/man3/statvfs.3.html
   if (::statvfs(logfile_dir, &fs) >= 0) {
     partition_space_left = static_cast<int64_t>(fs.f_bavail) * static_cast<int64_t>(fs.f_bsize);
   }
@@ -711,9 +750,12 @@ LogConfig::update_space_used()
   //
 
   int64_t max_space = static_cast<int64_t>(get_max_space_mb()) * LOG_MEGABYTE;
+
+  // proxy.config.log.max_space_mb_headroomの値がMBサイズ指定される
   int64_t headroom  = static_cast<int64_t>(max_space_mb_headroom) * LOG_MEGABYTE;
 
   if (!space_to_write(headroom)) {
+
     Debug("logspace", "headroom reached, trying to clear space ...");
     if (!rolledLogDeleter.has_candidates()) {
       Note("Cannot clear space because there are no recognized Traffic Server rolled logs for auto deletion.");
@@ -721,18 +763,25 @@ LogConfig::update_space_used()
       Debug("logspace", "Considering %zu delete candidates ...", rolledLogDeleter.get_candidate_count());
     }
 
+    // ログ削除する対象の候補ファイルが存在する場合
     while (rolledLogDeleter.has_candidates()) {
+
+      // ログを書き込めるだけの十分なスペースがどうかの確認を行います
       if (space_to_write(headroom + log_buffer_size)) {
         Debug("logspace", "low water mark reached; stop deleting");
         break;
       }
 
+      // ログ削除候補が存在するかどうかのbooleanが返ります
       auto victim = rolledLogDeleter.take_next_candidate_to_delete();
+
       // Check if any candidate exists
       if (!victim) {
+        // victim = false の場合には削除対象のログは存在しません
         // This shouldn't be triggered unless min_count are configured wrong or extra non-log files occupy the directory
         Debug("logspace", "No more victims. Check your rolling_min_count settings and logging directory.");
       } else {
+        // victim = true の場合には削除対象のログは存在する
         Debug("logspace", "auto-deleting %s", victim->rolled_log_path.c_str());
 
         if (unlink(victim->rolled_log_path.c_str()) < 0) {
@@ -764,11 +813,15 @@ LogConfig::update_space_used()
   //
 
   if (!space_to_write(headroom)) {
+
+    // 書き込むべきスペースが存在しない場合
+
     if (!logging_space_exhausted) {
       Note("Logging space exhausted, any logs writing to local disk will be dropped!");
     }
 
     logging_space_exhausted = true;
+
     //
     // Despite our best efforts, we still can't write to the disk.
     // Find out why and set/clear warnings.
@@ -782,25 +835,31 @@ LogConfig::update_space_used()
         Warning(DISK_IS_CONFIG_FULL_MESSAGE);
       }
     }
+
     //
     // How about out of actual space on the partition?
     //
     else if (m_partition_space_left <= 0) {
+
       if (!m_partition_full) {
         m_partition_full = true;
         LogUtils::manager_alarm(LogUtils::LOG_ALARM_ERROR, DISK_IS_ACTUAL_FULL_MESSAGE);
         Warning(DISK_IS_ACTUAL_FULL_MESSAGE);
       }
+
     }
+
     //
     // How about being within the headroom limit?
     //
     else if (m_space_used + headroom >= max_space) {
+
       if (!m_disk_low) {
         m_disk_low = true;
         LogUtils::manager_alarm(LogUtils::LOG_ALARM_ERROR, DISK_IS_CONFIG_LOW_MESSAGE);
         Warning(DISK_IS_CONFIG_LOW_MESSAGE);
       }
+
     } else {
       if (!m_partition_low) {
         m_partition_low = true;
@@ -808,10 +867,13 @@ LogConfig::update_space_used()
         Warning(DISK_IS_ACTUAL_LOW_MESSAGE);
       }
     }
+
   } else {
+
     //
     // We have enough space to log again; clear any previous messages
     //
+    // 
     if (logging_space_exhausted) {
       Note("Logging space is no longer exhausted.");
     }
@@ -822,11 +884,13 @@ LogConfig::update_space_used()
       m_disk_full      = false;
       m_partition_full = false;
     }
+
     if (m_disk_low || m_partition_low) {
       Note("Logging disk is no longer low; access logging to local log directory resumed.");
       m_disk_low      = false;
       m_partition_low = false;
     }
+
   }
 }
 

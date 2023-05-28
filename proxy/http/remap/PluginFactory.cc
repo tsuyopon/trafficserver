@@ -47,10 +47,13 @@ RemapPluginInst::~RemapPluginInst()
   _plugin.release();
 }
 
+// PluginFactory::getRemapPluginから呼ばれる
 RemapPluginInst *
 RemapPluginInst::init(RemapPluginInfo *plugin, int argc, char **argv, std::string &error)
 {
   RemapPluginInst *inst = new RemapPluginInst(*plugin);
+
+  // remapプラグインに定義されるTSRemapNewInstanceが呼ばれます
   if (plugin->initInstance(argc, argv, &(inst->_instance), error)) {
     plugin->incInstanceCount();
     return inst;
@@ -59,26 +62,34 @@ RemapPluginInst::init(RemapPluginInfo *plugin, int argc, char **argv, std::strin
   return nullptr;
 }
 
+// PluginFactory::deactivate() から呼ばれる
 void
 RemapPluginInst::done()
 {
   _plugin.decInstanceCount();
+
+  // remapプラグインに定義されるTSRemapDeleteInstanceを呼び出す。この行の直後でTSRemapDoneを呼び出しているので、TSRemapDeleteInstanceはTSRemapDoneよりも先に呼ばれる
   _plugin.doneInstance(_instance);
 
   if (0 == _plugin.instanceCount()) {
+    // remapプラグインに定義されるTSRemapDoneを呼びだす
     _plugin.done();
   }
 }
 
+// RemapPlugins::run_pluginから呼ばれる
 TSRemapStatus
 RemapPluginInst::doRemap(TSHttpTxn rh, TSRemapRequestInfo *rri)
 {
+  // RemapPluginInfo::doRemapを呼び出す
   return _plugin.doRemap(_instance, rh, rri);
 }
 
+// HttpTransact::handle_response_from_server から呼ばれる
 void
 RemapPluginInst::osResponse(TSHttpTxn rh, int os_response_type)
 {
+  // RemapPluginInfo::osResponseを呼び出す
   _plugin.osResponse(_instance, rh, os_response_type);
 }
 
@@ -143,6 +154,7 @@ PluginFactory::getUuid()
 RemapPluginInst *
 PluginFactory::getRemapPlugin(const fs::path &configPath, int argc, char **argv, std::string &error, bool dynamicReloadEnabled)
 {
+
   /* Discover the effective path by looking into the search dirs */
   fs::path effectivePath = getEffectivePath(configPath);
   if (effectivePath.empty()) {
@@ -189,14 +201,23 @@ PluginFactory::getRemapPlugin(const fs::path &configPath, int argc, char **argv,
 
     plugin = new RemapPluginInfo(configPath, effectivePath, runtimePath);
     if (nullptr != plugin) {
+
+      // RemapPluginInfo::loadによりremapプラグイン専用の共有オブジェクトがロードされます(globaプラグインは別の箇所で行われる)
       if (plugin->load(error)) {
+
+        // 下記からRemapPluginInfo::initが呼ばれます。そこではTSRemapInitが呼ばれています。ifの中でTSRemapNewInstanceが呼ばれます。
+        // つまり、TSRemapInitの方がTSRemapNewInstanceよりも呼ばれるのが先です。
         if (plugin->init(error)) {
+
           PluginDso::loadedPlugins()->add(plugin);
+
+          // 下記の関数経由でTSRemapNewInstanceが呼ばれます
           inst = RemapPluginInst::init(plugin, argc, argv, error);
           if (nullptr != inst) {
             /* Plugin loading and instance init went fine. */
             _instList.append(inst);
           }
+
         } else {
           /* Plugin DSO load succeeded but instance init failed. */
           PluginDebug(_tag, "plugin '%s' instance init failed", configPath.c_str());
@@ -215,6 +236,7 @@ PluginFactory::getRemapPlugin(const fs::path &configPath, int argc, char **argv,
     }
   } else {
     PluginDebug(_tag, "plugin '%s' has already been loaded", configPath.c_str());
+    // 下記の関数経由でTSRemapNewInstanceが呼ばれます
     inst = RemapPluginInst::init(plugin, argc, argv, error);
     if (nullptr != inst) {
       _instList.append(inst);
@@ -273,11 +295,13 @@ PluginFactory::findByEffectivePath(const fs::path &path, bool dynamicReloadEnabl
  * This method would be useful only in case configs are reloaded independently from
  * factory/plugins instantiation and initialization.
  */
+// 各種プラグインのTSRemapDeleteInstanceを呼び出します
 void
 PluginFactory::deactivate()
 {
   PluginDebug(_tag, "deactivate configuration used by factory '%s'", getUuid());
 
+  // pluginInst.done()によりRemapPluginInst::done()が呼ばれる。そこからTSRemapDeleteInstance, TSRemapDoneなどがが呼ばれる
   _instList.apply([](RemapPluginInst &pluginInst) -> void { pluginInst.done(); });
 }
 
@@ -287,6 +311,7 @@ PluginFactory::deactivate()
 void
 PluginFactory::indicatePreReload()
 {
+  // PluginDso::LoadedPlugins::indicatePreReload を呼び出す
   PluginDso::loadedPlugins()->indicatePreReload(getUuid());
 }
 

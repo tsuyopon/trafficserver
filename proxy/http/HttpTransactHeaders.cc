@@ -554,6 +554,7 @@ HttpTransactHeaders::generate_and_set_squid_codes(HTTPHdr *header, char *via_str
   } else if (via_string[VIA_DETAIL_TUNNEL] == VIA_DETAIL_TUNNEL_NO_FORWARD) {
     hier_code = SQUID_HIER_NONE;
   } else {
+    // PARENT縺ｪ縺ｩ繧堤ｵ檎罰縺帙★縺ｫ逶ｴ謗･繧｢繧ｯ繧ｻ繧ｹ縺吶ｋ繧ｱ繝ｼ繧ｹ
     hier_code = SQUID_HIER_DIRECT;
   }
 
@@ -1155,10 +1156,12 @@ HttpTransactHeaders::add_server_header_to_response(const OverridableHttpConfigPa
   }
 }
 
+/
 void
 HttpTransactHeaders::remove_privacy_headers_from_request(HttpConfigParams *http_config_param,
                                                          const OverridableHttpConfigParams *http_txn_conf, HTTPHdr *header)
 {
+
   if (!header) {
     return;
   }
@@ -1168,21 +1171,27 @@ HttpTransactHeaders::remove_privacy_headers_from_request(HttpConfigParams *http_
     Debug("anon", "removing 'From' headers");
     header->field_delete(MIME_FIELD_FROM, MIME_LEN_FROM);
   }
+
   // Referer
   if (http_txn_conf->anonymize_remove_referer) {
     Debug("anon", "removing 'Referer' headers");
     header->field_delete(MIME_FIELD_REFERER, MIME_LEN_REFERER);
   }
+
   // User-Agent
   if (http_txn_conf->anonymize_remove_user_agent) {
     Debug("anon", "removing 'User-agent' headers");
     header->field_delete(MIME_FIELD_USER_AGENT, MIME_LEN_USER_AGENT);
   }
+
   // Cookie
+  // 下記設定が有効ならばCookieヘッダの削除を行う
+  // https://docs.trafficserver.apache.org/en/7.1.x/admin-guide/files/records.config.en.html#proxy-config-http-anonymize-remove-cookie
   if (http_txn_conf->anonymize_remove_cookie) {
     Debug("anon", "removing 'Cookie' headers");
     header->field_delete(MIME_FIELD_COOKIE, MIME_LEN_COOKIE);
   }
+
   // Client-ip
   if (http_txn_conf->anonymize_remove_client_ip) {
     Debug("anon", "removing 'Client-ip' headers");
@@ -1194,7 +1203,11 @@ HttpTransactHeaders::remove_privacy_headers_from_request(HttpConfigParams *http_
 
   // FIXME: we shouldn't parse this list every time, only when the
   // FIXME: config file changes.
+
+  // 下記オプションにより任意のヘッダを送付できないようにできる。リスト形式で複数指定することが可能です。
+  //  cf. https://docs.trafficserver.apache.org/en/7.1.x/admin-guide/files/records.config.en.html#proxy-config-http-anonymize-other-header-list
   if (http_config_param->anonymize_other_header_list) {
+
     Str *field;
     StrList anon_list(false);
     const char *anon_string;
@@ -1202,6 +1215,8 @@ HttpTransactHeaders::remove_privacy_headers_from_request(HttpConfigParams *http_
     anon_string = http_config_param->anonymize_other_header_list;
     Debug("anon", "removing other headers (%s)", anon_string);
     HttpCompat::parse_comma_list(&anon_list, anon_string);
+
+    // 削除したいヘッダ情報はリスト形式で指定できるので、1つずつのヘッダ削除のイテレーションを行う
     for (field = anon_list.head; field != nullptr; field = field->next) {
       Debug("anon", "removing '%s' headers", field->str);
       header->field_delete(field->str, field->len);
