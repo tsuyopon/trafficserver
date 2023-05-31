@@ -124,6 +124,7 @@ ts_ctrl_main(void *arg)
   int *socket_fd;
   int con_socket_fd; // main socket for listening to new connections
 
+  // mgmtapiFDのfdが入る
   socket_fd     = static_cast<int *>(arg);
   con_socket_fd = *socket_fd;
 
@@ -172,6 +173,7 @@ ts_ctrl_main(void *arg)
           Debug("ts_main", "[ts_ctrl_main] can't allocate new ClientT");
         } else { // accept connection
           socklen_t addr_len = (sizeof(struct sockaddr));
+          // mgmtapi.sockのacceptをする
           new_con_fd         = mgmt_accept(con_socket_fd, new_client_con->adr, &addr_len);
           new_client_con->fd = new_con_fd;
           accepted_con.emplace(new_client_con->fd, new_client_con);
@@ -200,6 +202,7 @@ ts_ctrl_main(void *arg)
               continue;
             }
 
+            // 主要なコマンドはここで実行される
             ret = handle_control_message(client_entry->fd, req, reqlen);
             ats_free(req);
 
@@ -559,6 +562,7 @@ handle_restart(int fd, void *req, size_t reqlen)
   MgmtMarshallInt options;
   MgmtMarshallInt err;
 
+  // mgmtapi.sockから受信する
   err = recv_mgmt_request(req, reqlen, OpType::RESTART, &optype, &options);
   if (err == TS_ERR_OKAY) {
     switch (optype) {
@@ -1003,7 +1007,10 @@ handle_lifecycle_message(int fd, void *req, size_t reqlen)
   MgmtMarshallString tag;
   MgmtMarshallData data;
 
+  // リクエストを確認する
   err = recv_mgmt_request(req, reqlen, OpType::LIFECYCLE_MESSAGE, &optype, &tag, &data);
+
+  // 正常にリクエストを送付できた場合にif文が実行される
   if (err == TS_ERR_OKAY) {
     lmgmt->signalEvent(MGMT_EVENT_LIFECYCLE_MESSAGE, static_cast<char *>(req), reqlen);
   }
@@ -1017,6 +1024,8 @@ struct control_message_handler {
   TSMgmtError (*handler)(int, void *, size_t);
 };
 
+// ここで定義された権限とハンドラ関数とのマッピングはhandle_control_message関数で利用される
+// ここがコマンドの定義となります
 static const control_message_handler handlers[] = {
   /* RECORD_SET                 */ {MGMT_API_PRIVILEGED, handle_record_set},
   /* RECORD_GET                 */ {0, handle_record_get},
@@ -1048,6 +1057,7 @@ static const control_message_handler handlers[] = {
 static_assert((sizeof(handlers) / sizeof(handlers[0])) == static_cast<unsigned>(OpType::UNDEFINED_OP),
               "handlers array is not of correct size");
 
+// ts_ctrl_mainから実行される
 static TSMgmtError
 handle_control_message(int fd, void *req, size_t reqlen)
 {
@@ -1058,6 +1068,7 @@ handle_control_message(int fd, void *req, size_t reqlen)
     goto fail;
   }
 
+  // 定義されたハンドラがなければfail
   if (handlers[static_cast<unsigned>(optype)].handler == nullptr) {
     goto fail;
   }
@@ -1067,6 +1078,7 @@ handle_control_message(int fd, void *req, size_t reqlen)
     gid_t egid = -1;
 
     // For privileged calls, ensure we have caller credentials and that the caller is privileged.
+    // MGMT_API_PRIVILEGEDフラグがセットされているコマンドの場合には、権限の確認を行います
     if (handlers[static_cast<unsigned>(optype)].flags & MGMT_API_PRIVILEGED) {
       if (mgmt_get_peereid(fd, &euid, &egid) == -1 || (euid != 0 && euid != geteuid())) {
         Debug("ts_main", "denied privileged API access on fd=%d for uid=%d gid=%d", fd, euid, egid);
@@ -1077,6 +1089,7 @@ handle_control_message(int fd, void *req, size_t reqlen)
 
   Debug("ts_main", "handling message type=%d ptr=%p len=%zu on fd=%d", static_cast<int>(optype), req, reqlen, fd);
 
+  // static const control_message_handler handlers[ として定義された関数が呼び出されます
   error = handlers[static_cast<unsigned>(optype)].handler(fd, req, reqlen);
   if (error != TS_ERR_OKAY) {
     // NOTE: if the error was produced by the handler sending a response, this could attempt to

@@ -524,6 +524,7 @@ TransformVConnection::backlog(uint64_t limit)
 /*-------------------------------------------------------------------------
   -------------------------------------------------------------------------*/
 
+// m_hooksはproxy/TransformInternal.hでAPIHooksクラスと定義されている
 TransformControl::TransformControl() : Continuation(new_ProxyMutex()), m_hooks()
 {
   SET_HANDLER(&TransformControl::handle_event);

@@ -21,6 +21,9 @@
   limitations under the License.
  */
 
+// CoreAPIRemote.ccはtraffic_control用途に利用される
+
+
 /*****************************************************************************
  * Filename: CoreAPIRemote.cc
  * Purpose: Implementation of CoreAPI.h interface but from remote client
@@ -189,6 +192,7 @@ mgmt_record_set(const char *rec_name, const char *rec_val, TSActionNeedT *action
 TSMgmtError
 Init(const char *socket_path, TSInitOptionT options)
 {
+
   TSMgmtError err = TS_ERR_OKAY;
 
   ts_init_options = options;

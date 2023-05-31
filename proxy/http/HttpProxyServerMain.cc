@@ -282,6 +282,7 @@ init_accept_HttpProxyServer(int n_accept_threads)
   HttpProxyPort::Group &proxy_ports = HttpProxyPort::global();
 
   init_reverse_proxy();
+
   http_pages_init();
 
 #ifdef USE_HTTP_DEBUG_LISTS

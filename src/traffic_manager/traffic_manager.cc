@@ -675,6 +675,7 @@ main(int argc, const char **argv)
     HttpProxyPort::loadValue(lmgmt->m_proxy_ports, proxy_port);
   }
 
+  // processserver.sockのunix domai socketをbindします
   lmgmt->initMgmtProcessServer(); /* Setup p-to-p process server */
 
   lmgmt->listenForProxy();
@@ -741,6 +742,7 @@ main(int argc, const char **argv)
   for (;;) {
 
     lmgmt->processEventQueue();
+
     lmgmt->pollMgmtProcessServer();
 
     // Handle rotation of output log (aka traffic.out) as well as DEFAULT_DIAGS_LOG_FILENAME (aka manager.log)
@@ -826,7 +828,9 @@ main(int argc, const char **argv)
 
     if (lmgmt->run_proxy && !lmgmt->processRunning() && lmgmt->proxy_recoverable &&
         (retry_cap > 0 || ignore_retry_cap)) { /* Make sure we still have a proxy up */
+
       const uint64_t now = static_cast<uint64_t>(time(nullptr));
+
       if (sleep_time && ((now - last_start_epoc_s) < static_cast<uint64_t>(sleep_ceiling))) {
         const auto variance = dis(gen);
         // We add a bit of variance to the regular sleep time.
@@ -840,13 +844,16 @@ main(int argc, const char **argv)
       } else {
         sleep_time = 1;
       }
+
       if (ProxyStateSet(TS_PROXY_ON, TS_CACHE_CLEAR_NONE) == TS_ERR_OKAY) {
         just_started      = 0;
         last_start_epoc_s = static_cast<uint64_t>(time(nullptr));
       } else {
         just_started++;
       }
+
     } else {
+
       // Even if we shouldn't try to start the proxy again, leave manager around to
       // avoid external automated restarts
       if (!lmgmt->proxy_recoverable && !printed_unrecoverable) {

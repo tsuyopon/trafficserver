@@ -677,13 +677,15 @@ TSRecordSetMlt(TSList rec_list, TSActionNeedT *action_need)
 tsapi TSMgmtError
 TSInit(const char *socket_path, TSInitOptionT options)
 {
-  // mgmt/api/CoreAPI.cc のInitが呼ばれる
+  // MEMO: この関数がtraffic_ctlから呼ばれる際にmgmt/api/CoreAPI.cc or mgmt/api/CoreAPIRemote.cc のどちらが呼ばれるのか? 
+  //  => libtsmgmtの共有ライブラリにCoreAPIRemote.ccが含まれていて、traffic_ctlをビルドする際にlibtsmgmtのライブラリにリンクする様になっているため。よってmgmt/api/CoreAPIRemote.ccが呼ばれる
   return Init(socket_path, options);
 }
 
 tsapi TSMgmtError
 TSTerminate()
 {
+  // traffic_ctlからこの関数が呼ばれる場合にはmgmt/api/CoreAPIRemote.ccのTerminate()が呼ばれます
   return Terminate();
 }
 

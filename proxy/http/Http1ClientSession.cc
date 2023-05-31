@@ -442,7 +442,9 @@ Http1ClientSession::release(ProxyTransaction *trans)
       _vc->cancel_active_timeout();
       _vc->add_to_keep_alive_queue();
     }
+
   }
+
 }
 
 ProxyTransaction *

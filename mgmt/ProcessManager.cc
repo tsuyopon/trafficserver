@@ -21,6 +21,9 @@
   limitations under the License.
  */
 
+// このクラスはTrafficServerから利用されます。
+// TrafficServerからTrafficManagerへのリクエストに利用されています。
+
 #include "InkAPIInternal.h"
 #include "ProcessManager.h"
 
@@ -81,6 +84,7 @@ read_management_message(int sockfd, MgmtMessageHdr **msg)
   }
 }
 
+// 呼び出し元のtrafficserverからは pmgmt->start のようにして呼ばれると思われる
 void
 ProcessManager::start(std::function<TSThread()> const &cb_init, std::function<void(TSThread)> const &cb_destroy)
 {
@@ -91,6 +95,8 @@ ProcessManager::start(std::function<TSThread()> const &cb_init, std::function<vo
 
   ink_release_assert(running == 0);
   ink_atomic_increment(&running, 1);
+
+  // 専用のスレッドを生成する
   ink_thread_create(&poll_thread, processManagerThread, nullptr, 0, 0, nullptr);
 }
 
@@ -167,6 +173,7 @@ ProcessManager::processManagerThread(void *arg)
     int ret;
 
     if (pmgmt->require_lm) {
+      // 下記でTrafficServerからTrafficManagerのprocessserver.sockに定期的にポーリングする
       ret = pmgmt->pollLMConnection();
       if (ret < 0 && pmgmt->running && !TSSystemState::is_event_system_shut_down()) {
         Alert("exiting with read error from process manager: %s", strerror(-ret));
@@ -318,6 +325,8 @@ void
 ProcessManager::initLMConnection()
 {
   std::string rundir(RecConfigReadRuntimeDir());
+
+  // processerver.sock
   std::string sockpath(Layout::relative_to(rundir, LM_CONNECTION_SERVER));
 
   MgmtMessageHdr *mh_full;
@@ -350,6 +359,7 @@ ProcessManager::initLMConnection()
     Fatal("unable to set close-on-exec flag: %s", strerror(errno));
   }
 
+  // processerver.sockのunix domain socketへと接続しています
   if ((connect(local_manager_sockfd, reinterpret_cast<struct sockaddr *>(&serv_addr), servlen)) < 0) {
     Fatal("failed to connect management socket '%s': %s", sockpath.c_str(), strerror(errno));
   }
@@ -373,6 +383,7 @@ ProcessManager::initLMConnection()
   }
 }
 
+// TrafficServerからTrafficManagerのprocessserver.sockに対して定期的にpollingする
 int
 ProcessManager::pollLMConnection()
 {
@@ -415,6 +426,7 @@ ProcessManager::pollLMConnection()
     if (local_manager_sockfd != ts::NO_FD && FD_ISSET(local_manager_sockfd, &fdlist)) { /* Message from manager */
       MgmtMessageHdr *msg;
 
+      // processserver.sockから読み込みます
       int ret = read_management_message(local_manager_sockfd, &msg);
       if (ret < 0) {
         return ret;
@@ -450,6 +462,7 @@ ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
 
   Debug("pmgmt", "processing event id '%d' payload=%d", mh->msg_id, mh->data_len);
 
+  // TrafficManagerの応答で帰ってきたmsg_idを元にTrafficServerの処理を分岐する
   switch (mh->msg_id) {
   case MGMT_EVENT_SHUTDOWN:
     // executeMgmtCallbackについてはBaseManager::executeMgmtCallbackが実行される

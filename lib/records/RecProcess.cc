@@ -154,7 +154,9 @@ struct raw_stat_sync_cont : public Continuation {
 // config_update_cont
 //-------------------------------------------------------------------------
 struct config_update_cont : public Continuation {
+
   config_update_cont(ProxyMutex *m) : Continuation(m) { SET_HANDLER(&config_update_cont::exec_callbacks); }
+
   int
   exec_callbacks(int /* event */, Event * /* e */)
   {
@@ -189,6 +191,7 @@ struct sync_cont : public Continuation {
   sync(int /* event */, Event * /* e */)
   {
     send_push_message();
+
     RecSyncStatsFile();
 
     Debug("statsproc", "sync_cont() processed");
@@ -260,22 +263,28 @@ RecProcessInitMessage(RecModeT mode_type)
 //-------------------------------------------------------------------------
 // RecProcessStart
 //-------------------------------------------------------------------------
+// traffic_server.ccのmainから呼ばれます
 int
 RecProcessStart()
 {
+
   if (g_started) {
     return REC_ERR_OKAY;
   }
 
+
+  // ET_TASKにraw_stat_sync_contクラスの定期的な実行を指定する (デフォルト: 5秒毎)
   Debug("statsproc", "Starting sync continuations:");
   raw_stat_sync_cont *rssc = new raw_stat_sync_cont(new_ProxyMutex());
   Debug("statsproc", "raw-stat syncer");
   raw_stat_sync_cont_event = eventProcessor.schedule_every(rssc, HRTIME_MSECONDS(g_rec_raw_stat_sync_interval_ms), ET_TASK);
 
+  // ET_TASKにconfig_update_contクラスの定期的な実行を指定する (デフォルト: 3秒毎)
   config_update_cont *cuc = new config_update_cont(new_ProxyMutex());
   Debug("statsproc", "config syncer");
   config_update_cont_event = eventProcessor.schedule_every(cuc, HRTIME_MSECONDS(g_rec_config_update_interval_ms), ET_TASK);
 
+  // ET_TASKにsync_contクラスの定期的な実行を指定する (デフォルト: 5秒毎)
   sync_cont *sc = new sync_cont(new_ProxyMutex());
   Debug("statsproc", "remote syncer");
   sync_cont_event = eventProcessor.schedule_every(sc, HRTIME_MSECONDS(g_rec_remote_sync_interval_ms), ET_TASK);

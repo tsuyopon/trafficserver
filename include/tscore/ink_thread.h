@@ -108,6 +108,7 @@ typedef timestruc_t ink_timestruc;
 
 // NOTE(cmcfarlen): removed posix thread local key functions, use thread_local
 
+// スレッドを生成します。trafficserverではスレッド生成時はink_thread_create経由で呼ばれます
 static inline void
 ink_thread_create(ink_thread *tid, void *(*f)(void *), void *a, int detached, size_t stacksize, void *stack)
 {
@@ -119,6 +120,7 @@ ink_thread_create(ink_thread *tid, void *(*f)(void *), void *a, int detached, si
     tid = &t;
   }
 
+  // 下記でスレッド起動時に関連する設定を行います
   pthread_attr_init(&attr);
   pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
 
@@ -134,11 +136,13 @@ ink_thread_create(ink_thread *tid, void *(*f)(void *), void *a, int detached, si
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
   }
 
+  // ここでスレッドを生成します
   ret = pthread_create(tid, &attr, f, a);
   if (ret != 0) {
     ink_abort("pthread_create() failed: %s (%d)", strerror(ret), ret);
   }
   pthread_attr_destroy(&attr);
+
 }
 
 static inline void

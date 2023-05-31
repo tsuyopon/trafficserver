@@ -822,7 +822,7 @@ remap_load_plugin(const char **argv, int argc, url_mapping *mp, char *errbuf, in
     REC_ReadConfigInteger(elevate_access, "proxy.config.plugin.load_elevated");
     ElevateAccess access(elevate_access ? ElevateAccess::FILE_PRIVILEGE : 0);
 
-    // TSRemapInitは下記を辿ると呼ばれる。plugin情報のdlopenもここで行われる
+    // TSRemapNewInstance, TSRemapInitは下記を辿ると呼ばれる。plugin情報のdlopenもここで行われる
     pi = rewrite->pluginFactory.getRemapPlugin(ts::file::path(const_cast<const char *>(c)), parc, pargv, error,
                                                isPluginDynamicReloadEnabled());
   } // done elevating access
@@ -1309,7 +1309,7 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
         int jump_to_argc    = 0;
 
         // this loads the first plugin
-        // TSRemapInitはここで呼ばれる
+        // TSRemapNewInstance, TSRemapInitは下記を辿ると呼ばれる
         if (!remap_load_plugin((const char **)bti->argv, bti->argc, new_mapping, errStrBuf, sizeof(errStrBuf), 0, &plugin_found_at,
                                bti->rewrite)) {
           Debug("remap_plugin", "Remap plugin load error - %s", errStrBuf[0] ? errStrBuf : "Unknown error");
@@ -1319,7 +1319,7 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
         // this loads any subsequent plugins (if present)
         while (plugin_found_at) {
           jump_to_argc += plugin_found_at;
-          // TSRemapInitはここで呼ばれる
+          // TSRemapNewInstance, TSRemapInitは下記を辿ると呼ばれる
           if (!remap_load_plugin((const char **)bti->argv, bti->argc, new_mapping, errStrBuf, sizeof(errStrBuf), jump_to_argc,
                                  &plugin_found_at, bti->rewrite)) {
             Debug("remap_plugin", "Remap plugin load error - %s", errStrBuf[0] ? errStrBuf : "Unknown error");
@@ -1368,6 +1368,8 @@ remap_parse_config(const char *path, UrlRewrite *rewrite)
   rewrite->pluginFactory.indicatePreReload();
 
   bti.rewrite = rewrite;
+
+  // 重要処理
   bool status = remap_parse_config_bti(path, &bti);
 
   /* Now after we parsed the configuration and (re)loaded plugins and plugin instances

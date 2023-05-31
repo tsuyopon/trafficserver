@@ -1560,6 +1560,7 @@ plugins required to work with sni_routing.
         api_timer = Thread::get_hrtime();
       }
 
+      // TS_EVENT_HTTP_READ_REQUEST_HDR=60002ã ãŒã€cur_hook_idã¯1ã‹ã‚‰å§‹ã¾ã‚‹ã‚ãŸã„ã§ã€TS_EVENTã®å‡¦ç†ã¨cur_hook_idã®é †ç•ªã¯åŒã˜ãªã®ã§å˜ç´”ãªåŠ ç®—ã§å•é¡Œãªã„
       hook->invoke(TS_EVENT_HTTP_READ_REQUEST_HDR + cur_hook_id, this);
       if (api_timer > 0) { // true if the hook did not call TxnReenable()
         this->milestone_update_api_time();
@@ -4207,7 +4208,7 @@ HttpSM::check_sni_host()
   }
 }
 
-// remap½èÍı¤ò¼Â¹Ô¤¹¤ë
+// remapå‡¦ç†ã‚’å®Ÿè¡Œã™ã‚‹
 void
 HttpSM::do_remap_request(bool run_inline)
 {
@@ -7244,7 +7245,7 @@ HttpSM::kill_this()
     if (Log::transaction_logging_enabled() && t_state.api_info.logging_enabled) {
       LogAccess accessor(this);
 
-      //  ret¤Ç¤ÏLog::SKIP, Log::FULL, Log::FAIL¤Î3¤Ä¤Î¥Õ¥é¥°¤òÈ½Äê²ÄÇ½¤Ç¤¹¡£ÀâÌÀ¤Ïproxy/logging/Log.h¤Ëµ­ºÜ¤µ¤ì¤Æ¤¤¤Ş¤¹¡£
+      //  retã§ã¯Log::SKIP, Log::FULL, Log::FAILã®3ã¤ã®ãƒ•ãƒ©ã‚°ã‚’åˆ¤å®šå¯èƒ½ã§ã™ã€‚èª¬æ˜ã¯proxy/logging/Log.hã«è¨˜è¼‰ã•ã‚Œã¦ã„ã¾ã™ã€‚
       int ret = Log::access(&accessor);
 
       if (ret & Log::FULL) {
@@ -7588,7 +7589,7 @@ HttpSM::set_next_state()
   }
 
   case HttpTransact::SM_ACTION_REMAP_REQUEST: {
-    // remap½èÍı¤Ï¤³¤³¤Ç¹Ô¤ï¤ì¤Ş¤¹¡£²¼µ­¤òÃ©¤ë¤ÈTSRemapDoRemap¤¬¸Æ¤Ğ¤ì¤Ş¤¹
+    // remapå‡¦ç†ã¯ã“ã“ã§è¡Œã‚ã‚Œã¾ã™ã€‚ä¸‹è¨˜ã‚’è¾¿ã‚‹ã¨TSRemapDoRemapãŒå‘¼ã°ã‚Œã¾ã™
     do_remap_request(true); /* run inline */
 
     SMDebug("url_rewrite", "completed inline remapping request");
@@ -8095,7 +8096,7 @@ HttpSM::redirect_request(const char *arg_redirect_url, const int arg_redirect_le
     int _host_len   = -1;
     if (redirectUrl.scheme_get(&_scheme_len) == nullptr && redirectUrl.host_get(&_host_len) != nullptr &&
         arg_redirect_url[0] != '/') {
-      // RFC7230 Â§ 5.5
+      // RFC7230 å‰‡ 5.5
       // The redirect URL lacked a scheme and so it is a relative URL.
       // The redirect URL did not begin with a slash, so we parsed some or all
       // of the relative URI path as the host.

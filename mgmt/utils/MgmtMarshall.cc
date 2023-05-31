@@ -60,13 +60,19 @@ socket_read_bytes(int fd, void *buf, size_t needed)
   size_t nread = 0;
 
   // makes sure the descriptor is readable
+  // 最大60秒待つ
   if (mgmt_read_timeout(fd, MAX_TIME_WAIT, 0) <= 0) {
     return -1;
   }
 
+  // バイト数がneededになるまで読み込みを行います。
   while (needed > nread) {
+
+    // readシステムコールで読み込みます。戻り値は読み込んだバイト数です
+    // cf. https://linuxjm.osdn.jp/html/LDP_man-pages/man2/read.2.html
     ssize_t ret = read(fd, buf, needed - nread);
 
+    // retが負数ということは、読み込みエラーであることを意味します。readは読み込みエラーだと-1を返します
     if (ret < 0) {
       if (mgmt_transient_error()) {
         continue;
@@ -75,6 +81,7 @@ socket_read_bytes(int fd, void *buf, size_t needed)
       }
     }
 
+    // retが0ということは、エラーではなく、何も読み込むデータが存在しないということを意味します
     if (ret == 0) {
       // End of file before reading the remaining bytes.
       errno = ECONNRESET;
@@ -85,6 +92,7 @@ socket_read_bytes(int fd, void *buf, size_t needed)
     nread += ret;
   }
 
+  // 読み込んだバイト数をreturnします
   return nread;
 }
 
@@ -120,11 +128,13 @@ socket_write_buffer(int fd, const MgmtMarshallData *data)
 {
   ssize_t nwrite;
 
+  // 最初の4byte分はサイズ情報を書き込みする模様
   nwrite = socket_write_bytes(fd, &(data->len), 4);
   if (nwrite != 4) {
     goto fail;
   }
 
+  // その後、バッファ情報の書き出しをしている
   if (data->len) {
     nwrite = socket_write_bytes(fd, data->ptr, data->len);
     if (nwrite != static_cast<ssize_t>(data->len)) {
@@ -145,11 +155,16 @@ socket_read_buffer(int fd, MgmtMarshallData *data)
 
   ink_zero(*data);
 
+  // 4バイト読み込む様に引数で指定しています。
+  // TODO: この4byteは何を意味しているのか? (メッセージのサイズ (data->len相当)が入っていて取り出しているようだが、使っていない?)
   nread = socket_read_bytes(fd, &(data->len), 4);
+
+  // 引数でsocket_read_bytesに指定した4byteを読み込めなかったら
   if (nread != 4) {
     goto fail;
   }
 
+  // MgmtMarshallData構造体のlenに何かしらの値が設定されていた場合には(0でない場合には)
   if (data->len) {
     data->ptr = ats_malloc(data->len);
     nread     = socket_read_bytes(fd, data->ptr, data->len);
@@ -171,18 +186,26 @@ buffer_read_buffer(const uint8_t *buf, size_t len, MgmtMarshallData *data)
 {
   ink_zero(*data);
 
+  // socket_write_bufferを見るとわかるが、最初に4byte分のメッセージサイズ情報を書き出している。
+  // つまり、4byteなければエラーになるものと思われる
   if (len < 4) {
     goto fail;
   }
 
+  // 4byte分のbufをdata->lenアドレスへとコピーします。
   memcpy(&(data->len), buf, 4);
+
+  // bufのポインタを4つ分先に進めます
   buf += 4;
+
+  // lenのサイズを4減算します
   len -= 4;
 
   if (len < data->len) {
     goto fail;
   }
 
+  // data->lenが値を持っていたら、buf情報をdata->len分のサイズだけdata->ptrにコピーします
   if (data->len) {
     data->ptr = ats_malloc(data->len);
     memcpy(data->ptr, buf, data->len);
@@ -321,12 +344,16 @@ mgmt_message_read(int fd, const MgmtMarshallType *fields, unsigned count, ...)
   return nbytes;
 }
 
+
+// mgmtapi.sockから読み取ります
 ssize_t
 mgmt_message_read_v(int fd, const MgmtMarshallType *fields, unsigned count, va_list ap)
 {
+
   MgmtMarshallAnyPtr ptr;
   ssize_t nbytes = 0;
 
+  // 指定された個数分のフィールドを読み込みます
   for (unsigned n = 0; n < count; ++n) {
     ssize_t nread;
 

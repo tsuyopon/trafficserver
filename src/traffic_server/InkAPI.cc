@@ -1359,6 +1359,7 @@ APIHook::prev() const
   return m_link.prev;
 }
 
+// プラグイン実行はここを起点に行われる
 int
 APIHook::invoke(int event, void *edata) const
 {
@@ -1367,6 +1368,7 @@ APIHook::invoke(int event, void *edata) const
       ink_assert(!"not reached");
     }
   }
+
   WEAK_MUTEX_TRY_LOCK(lock, m_cont->mutex, this_ethread());
   if (!lock.is_locked()) {
     // If we cannot get the lock, the caller needs to restructure to handle rescheduling
@@ -4952,7 +4954,11 @@ TSHttpHookAdd(TSHttpHookID id, TSCont contp)
   icontp = reinterpret_cast<INKContInternal *>(contp);
 
   TSSslHookInternalID internalId{id};
+
+  // TSHttpHookAdd, TSHttpSsnHookAdd, TSHttpTxnHookAdd, TSLifecycleHookAddいずれも登録先は同一オブジェクトであるFeatureAPIHooksのm_hooks配列に登録されるのは同じ
+  // TODO: 下記の2つのappendは結局やっていることが変わらない気がするんだけどなぜ処理が分岐しているのか?
   if (internalId.is_in_bounds()) {
+    // SSLの番号に含まれる場合にはSSL専用のフックに追加する
     ssl_hooks->append(internalId, icontp);
   } else { // Follow through the regular HTTP hook framework
     http_global_hooks->append(id, icontp);
@@ -4965,6 +4971,7 @@ TSLifecycleHookAdd(TSLifecycleHookID id, TSCont contp)
   sdk_assert(sdk_sanity_check_continuation(contp) == TS_SUCCESS);
   sdk_assert(sdk_sanity_check_lifecycle_hook_id(id) == TS_SUCCESS);
 
+  // // TSHttpHookAdd, TSHttpSsnHookAdd, TSHttpTxnHookAdd, TSLifecycleHookAddいずれも登録先は同一オブジェクトであるFeatureAPIHooksのm_hooks配列に登録されるのは同じ
   lifecycle_hooks->append(id, (INKContInternal *)contp);
 }
 
@@ -4976,6 +4983,7 @@ TSHttpSsnHookAdd(TSHttpSsn ssnp, TSHttpHookID id, TSCont contp)
   sdk_assert(sdk_sanity_check_continuation(contp) == TS_SUCCESS);
   sdk_assert(sdk_sanity_check_hook_id(id) == TS_SUCCESS);
 
+  // // TSHttpHookAdd, TSHttpSsnHookAdd, TSHttpTxnHookAdd, TSLifecycleHookAddいずれも登録先は同一オブジェクトであるFeatureAPIHooksのm_hooks配列に登録されるのは同じ
   ProxySession *cs = reinterpret_cast<ProxySession *>(ssnp);
   cs->hook_add(id, (INKContInternal *)contp);
 }
@@ -5092,6 +5100,7 @@ TSHttpSsnReenable(TSHttpSsn ssnp, TSEvent event)
 void
 TSHttpTxnHookAdd(TSHttpTxn txnp, TSHttpHookID id, TSCont contp)
 {
+
   sdk_assert(sdk_sanity_check_txn(txnp) == TS_SUCCESS);
   sdk_assert(sdk_sanity_check_continuation(contp) == TS_SUCCESS);
   sdk_assert(sdk_sanity_check_hook_id(id) == TS_SUCCESS);
@@ -5106,7 +5115,10 @@ TSHttpTxnHookAdd(TSHttpTxn txnp, TSHttpHookID id, TSCont contp)
     }
     hook = hook->m_link.next;
   }
+
+  // TSHttpHookAdd, TSHttpSsnHookAdd, TSHttpTxnHookAdd, TSLifecycleHookAddいずれも登録先は同一オブジェクトであるFeatureAPIHooksのm_hooks配列に登録されるのは同じ
   sm->txn_hook_add(id, (INKContInternal *)contp);
+
 }
 
 // Private api function for gzip plugin.

@@ -144,6 +144,8 @@ send_mgmt_request(const mgmt_message_sender &snd, OpType optype, ...)
   }
 
   va_end(ap);
+
+  // mgmtapi_sender::send を呼び出す
   return snd.send(msgbuf, msglen + 4);
 }
 

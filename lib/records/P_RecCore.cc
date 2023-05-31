@@ -108,20 +108,31 @@ send_push_message()
 
   m           = RecMessageAlloc(RECG_PUSH);
   num_records = g_num_records;
+
+  // 全レコードに対して処理を行います。
   for (i = 0; i < num_records; i++) {
+
     r = &(g_records[i]);
     rec_mutex_acquire(&(r->lock));
     if (i_am_the_record_owner(r->rec_type)) {
+
+      // REC_PEER_SYNC_REQUIREDはRecExecRawStatSyncCbs関数やRecRawStatUpdateSum関数でフラグがセットされる
       if (r->sync_required & REC_PEER_SYNC_REQUIRED) {
         m = RecMessageMarshal_Realloc(m, r);
+        // REC_PEER_SYNC_REQUIREDフラグの処理を行ったのでリセットする
         r->sync_required &= ~REC_PEER_SYNC_REQUIRED;
+
+        // メッセージを送信するかどうかの判定フラグをセットする
         send_msg = true;
       }
     }
     rec_mutex_release(&(r->lock));
   }
+
+  // 手前の条件分岐でREC_PEER_SYNC_REQUIREDフラグがセットされた場合にsend_msgがtrueにセットされるので、メッセージを送信する
   if (send_msg) {
     RecDebug(DL_Note, "[send] RECG_PUSH [%d bytes]", sizeof(RecMessageHdr) + m->o_write - m->o_start);
+    // ここでメッセージを送信します
     RecMessageSend(m);
   }
   RecMessageFree(m);
@@ -515,6 +526,7 @@ CheckSnapFileVersion(const char *path)
 //-------------------------------------------------------------------------
 // RecReadStatsFile
 //-------------------------------------------------------------------------
+// records.snapファイルを読む
 RecErrT
 RecReadStatsFile()
 {
@@ -522,6 +534,8 @@ RecReadStatsFile()
   RecMessage *m;
   RecMessageItr itr;
   RecPersistT persist_type = RECP_NULL;
+
+  // records.snapへのファイルパスを取得する(統計情報ファイル)
   ats_scoped_str snap_fpath(RecConfigReadPersistentStatsPath());
 
   // lock our hash table
@@ -580,6 +594,8 @@ RecSyncStatsFile()
   RecMessage *m;
   int i, num_records;
   bool sync_to_disk;
+
+  // records.snapへのファイルパスを取得する(統計情報ファイル)
   ats_scoped_str snap_fpath(RecConfigReadPersistentStatsPath());
 
   /*
@@ -592,9 +608,12 @@ RecSyncStatsFile()
     m            = RecMessageAlloc(RECG_NULL);
     num_records  = g_num_records;
     sync_to_disk = false;
+
+    // 全レコードでイテレーション
     for (i = 0; i < num_records; i++) {
       r = &(g_records[i]);
       rec_mutex_acquire(&(r->lock));
+      // 統計情報のタイプの場合に
       if (REC_TYPE_IS_STAT(r->rec_type)) {
         if (r->stat_meta.persist_type == RECP_PERSISTENT) {
           m            = RecMessageMarshal_Realloc(m, r);
@@ -603,8 +622,10 @@ RecSyncStatsFile()
       }
       rec_mutex_release(&(r->lock));
     }
+
     if (sync_to_disk) {
       RecDebug(DL_Note, "Writing '%s' [%d bytes]", (const char *)snap_fpath, m->o_write - m->o_start + sizeof(RecMessageHdr));
+      // records.snapファイルへの書き込みを行う
       RecMessageWriteToDisk(m, snap_fpath);
     }
     RecMessageFree(m);
@@ -676,11 +697,18 @@ RecExecConfigUpdateCbs(unsigned int update_required_type)
         }
       }
 
+      // REC_UPDATE_REQUIREDフラグがupdate_requiredに指定されていて、r->config_meta.update_cb_listに値があれば、
       if ((r->config_meta.update_required & update_required_type) && (r->config_meta.update_cb_list)) {
+
         RecConfigUpdateCbList *cur_callback = nullptr;
+
+        // RecRegisterConfigUpdateCbにてupdate_cb_listに登録されたコールバックはここで実行される
         for (cur_callback = r->config_meta.update_cb_list; cur_callback; cur_callback = cur_callback->next) {
+          // REC_RegisterConfigUpdateFuncに指定されたコールバック関数が実行されます。たとえば、remap.configだとurl_rewrite_CBがコールバック関数として呼ばれます
           (*(cur_callback->update_cb))(r->name, r->data_type, r->data, cur_callback->update_cookie);
         }
+
+        // r->config_meta.update_requriredに指定されているREC_UPDATE_REQUIREDのフラグを音します。
         r->config_meta.update_required = r->config_meta.update_required & ~update_required_type;
       }
     }

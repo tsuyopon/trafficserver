@@ -138,6 +138,9 @@ initCacheControl()
 //   infrequently, we do the load of new file as blocking I/O and
 //   lock acquire is also blocking
 //
+
+// cache.configの変更時に呼ばれる
+// cf. https://docs.trafficserver.apache.org/admin-guide/files/cache.config.en.html
 void
 reloadCacheControl()
 {

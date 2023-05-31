@@ -60,6 +60,7 @@ preprocess_msg(int fd, void **req, size_t *reqlen)
   *req    = nullptr;
   *reqlen = 0;
 
+  // メッセージを受信します。fdにはmgmtapi.sockのfdが入ります。
   ret = recv_mgmt_message(fd, msg);
   if (ret != TS_ERR_OKAY) {
     return ret;

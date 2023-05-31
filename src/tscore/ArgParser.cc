@@ -503,9 +503,12 @@ ArgParser::Command::append_option_data(Arguments &ret, AP_StrVec &args, int inde
 bool
 ArgParser::Command::parse(Arguments &ret, AP_StrVec &args)
 {
+
   bool command_called = false;
+
   // iterate through all arguments
   for (unsigned i = 0; i < args.size(); i++) {
+
     if (_name == args[i]) {
       command_called = true;
       // handle the option
@@ -521,6 +524,7 @@ ArgParser::Command::parse(Arguments &ret, AP_StrVec &args)
       if (!err.empty()) {
         help_message(err);
       }
+
       // set ENV var
       if (!_envvar.empty()) {
         ret.set_env(_key, getenv(_envvar.c_str()) ? getenv(_envvar.c_str()) : "");
@@ -528,6 +532,7 @@ ArgParser::Command::parse(Arguments &ret, AP_StrVec &args)
       break;
     }
   }
+
   if (command_called) {
     bool flag = false;
     // recursively call subcommand
@@ -537,15 +542,18 @@ ArgParser::Command::parse(Arguments &ret, AP_StrVec &args)
         break;
       }
     }
+
     // check for command required
     if (!flag && _command_required) {
       help_message("No subcommand found for " + _name);
     }
+
     if (_name == parser_program_name) {
       // if we are at the top level
       return flag;
     }
   }
+
   return command_called;
 }
 
@@ -617,7 +625,7 @@ Arguments::show_all_configuration() const
 void
 Arguments::invoke()
 {
-  // _actionのコールバック自体は ArgParser::Command::parse 関数に第１引数として渡されるArguments &retのアドレスに対して関数内でret._actionがコールバックとしてセットされる
+  // _actionのコールバック自体は ArgParser::Command::parse() 関数に第１引数として渡されるArguments &retのアドレスに対して関数内でret._actionがコールバックとしてセットされている
   if (_action) {
     // call the std::function
     // ここで実行されているコールバック関数はtraffic_ctl.ccのmain関数のadd_commandの第３引数で指定されているラムダ式のコールバック関数であると思われる。

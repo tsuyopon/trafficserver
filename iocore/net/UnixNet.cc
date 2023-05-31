@@ -42,10 +42,13 @@ extern "C" void fd_reify(struct ev_loop *);
 // INKqa10496
 // One Inactivity cop runs on each thread once every second and
 // loops through the list of NetEvents and calls the timeouts
+// TrafficCopに相当する部分
 class InactivityCop : public Continuation
 {
 public:
   explicit InactivityCop(Ptr<ProxyMutex> &m) : Continuation(m.get()) { SET_HANDLER(&InactivityCop::check_inactivity); }
+
+
   int
   check_inactivity(int event, Event *e)
   {
@@ -54,6 +57,7 @@ public:
     NetHandler &nh = *get_NetHandler(this_ethread());
 
     Debug("inactivity_cop_check", "Checking inactivity on Thread-ID #%d", this_ethread()->id);
+
     // The rest NetEvents in cop_list which are not triggered between InactivityCop runs.
     // Use pop() to catch any closes caused by callbacks.
     while (NetEvent *ne = nh.cop_list.pop()) {
@@ -100,6 +104,7 @@ public:
         ne->callback(VC_EVENT_ACTIVE_TIMEOUT, e);
       }
     }
+
     // The cop_list is empty now.
     // Let's reload the cop_list from open_list again.
     forl_LL(NetEvent, ne, nh.open_list)

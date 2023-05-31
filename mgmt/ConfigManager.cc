@@ -104,14 +104,22 @@ ConfigManager::checkForUserUpdate(RollBackCheckType how)
 
   ink_mutex_acquire(&fileAccessLock);
 
+  // ConfigManagerのインスタンス生成時に指定されたファイル名のstat情報を取得する
   if (this->statFile(&fileInfo) < 0) {
     ink_mutex_release(&fileAccessLock);
     return false;
   }
 
+  // 保存しておいたファイルの前回更新時刻とstatから取得した最新の前回更新時刻を比較する
   if (fileLastModified < TS_ARCHIVE_STAT_MTIME(fileInfo)) {
+
+    // ROLLBACK_CHECK_AND_UPDATEの場合には、設定されたファイルに対するコールバック関数を実行する
     if (how == ROLLBACK_CHECK_AND_UPDATE) {
+
+      // statから取得した最新の前回更新時刻をfileLastModifiedとして次回実行の判断のために保存しておきます
       fileLastModified = TS_ARCHIVE_STAT_MTIME(fileInfo);
+
+      // TBD: 不明。ssl_multicert.configの様な場合にtrueとなるっぽい?
       if (!this->isChildManaged()) {
         configFiles->fileChanged(fileName.c_str(), configName.c_str());
       }

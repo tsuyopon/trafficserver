@@ -234,6 +234,8 @@ RecMessageRegisterRecvCb(RecMessageRecvCb recv_cb, void *cookie)
   if (g_recv_cb) {
     return REC_ERR_FAIL;
   }
+
+  // このグローバル変数はこの関数直下で定義されるRecMessageRecvThisでコールバックg_recv_cbが呼ばれる
   g_recv_cookie = cookie;
   g_recv_cb     = recv_cb;
 
@@ -248,6 +250,8 @@ void
 RecMessageRecvThis(ts::MemSpan<void> span)
 {
   RecMessage *msg = static_cast<RecMessage *>(span.data());
+
+  // RecMessageRegisterRecvCbで登録されたg_recv_cbを実行する
   g_recv_cb(msg, msg->msg_type, g_recv_cookie);
 }
 

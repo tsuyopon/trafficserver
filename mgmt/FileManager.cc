@@ -237,6 +237,8 @@ FileManager::isConfigStale()
   bool stale = false;
 
   ink_mutex_acquire(&accessLock);
+
+  // TBD: &&itを確認する
   for (auto &&it : bindings) {
     rb = it.second;
     if (rb->checkForUserUpdate(ROLLBACK_CHECK_ONLY)) {

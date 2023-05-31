@@ -85,6 +85,9 @@ register_record(RecT rec_type, const char *name, RecDataT data_type, RecData dat
       *updated_p = true;
     }
   } else {
+
+    // g_records_htに指定したnameが見つからなかった場合には、g_records_htに追加します
+
     if ((r = RecAlloc(rec_type, name, data_type)) == nullptr) {
       return nullptr;
     }
@@ -210,6 +213,7 @@ RecCoreInit(RecModeT mode_type, Diags *_diags)
 
   // read stats
   if ((mode_type == RECM_SERVER) || (mode_type == RECM_STAND_ALONE)) {
+    // records.snapを読み込む
     RecReadStatsFile();
   }
 
@@ -307,6 +311,7 @@ RecLinkConfigBool(const char *name, RecBool *rec_bool)
 //-------------------------------------------------------------------------
 // RecRegisterConfigUpdateCb
 //-------------------------------------------------------------------------
+// コールバックに登録するための構造体の割り当て、登録を行い、コールバックのリスト(r->config_meta.update_cb_list)の末尾に登録を行います。
 RecErrT
 RecRegisterConfigUpdateCb(const char *name, RecConfigUpdateCb update_cb, void *cookie)
 {
@@ -315,9 +320,12 @@ RecRegisterConfigUpdateCb(const char *name, RecConfigUpdateCb update_cb, void *c
   ink_rwlock_rdlock(&g_records_rwlock);
 
   if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
+
     RecRecord *r = it->second;
 
     rec_mutex_acquire(&(r->lock));
+
+    // 登録タイプが設定値の場合
     if (REC_TYPE_IS_CONFIG(r->rec_type)) {
       /* -- upgrade to support a list of callback functions
          if (!(r->config_meta.update_cb)) {
@@ -327,27 +335,39 @@ RecRegisterConfigUpdateCb(const char *name, RecConfigUpdateCb update_cb, void *c
          }
        */
 
+      // コールバックに登録するための構造体(RecConfigUpdateCbList)をmallocして、必要なコールバックやオプション情報(cookie)を登録します
       RecConfigUpdateCbList *new_callback = static_cast<RecConfigUpdateCbList *>(ats_malloc(sizeof(RecConfigUpdateCbList)));
       memset(new_callback, 0, sizeof(RecConfigUpdateCbList));
       new_callback->update_cb     = update_cb;
       new_callback->update_cookie = cookie;
 
+      // 末尾であることを示すためにnextにはnullptrを入れておきます。
       new_callback->next = nullptr;
 
       ink_assert(new_callback);
+
+
       if (!r->config_meta.update_cb_list) {
+        // r->config_meta.update_cb_listがnullptrだったら、何もリストに値がないのでnew_callbackをそのまま代入します
         r->config_meta.update_cb_list = new_callback;
       } else {
         RecConfigUpdateCbList *cur_callback  = nullptr;
         RecConfigUpdateCbList *prev_callback = nullptr;
+
+        // 下記のfor文を実行することでcur_callbackがnullptrでない間は実行されます。つまり、prev_callbackにはnullptrの直前の末尾の構造体ポインタが入ります。
         for (cur_callback = r->config_meta.update_cb_list; cur_callback; cur_callback = cur_callback->next) {
           prev_callback = cur_callback;
         }
         ink_assert(prev_callback);
         ink_assert(!prev_callback->next);
+
+        // 末尾のポインタの後続のポインタに先ほど生成したコールバックを登録するための構造体new_callbackをnextに登録しておきます。
         prev_callback->next = new_callback;
       }
+
+      // OKを返す
       err = REC_ERR_OKAY;
+
     }
 
     rec_mutex_release(&(r->lock));
@@ -1255,6 +1275,7 @@ RecConfigReadConfigPath(const char *file_variable, const char *default_value)
 //-------------------------------------------------------------------------
 // RecConfigReadPersistentStatsPath
 //-------------------------------------------------------------------------
+// records.snapへのパスを設定する
 std::string
 RecConfigReadPersistentStatsPath()
 {

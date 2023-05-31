@@ -33,6 +33,8 @@
 #include "FileManager.h"
 #include <tscore/TSSystemState.h>
 
+// このクラスはsuffixにLocalが含まれているので(おそらく)TrafficManagerから実行されると思われる
+
 // Marks whether the message handler has been initialized.
 static bool message_initialized_p = false;
 
@@ -62,14 +64,20 @@ i_am_the_record_owner(RecT rec_type)
 static void *
 sync_thr(void *data)
 {
+
   FileManager *configFiles = static_cast<FileManager *>(data);
 
+  // Shutdownシグナルを受信するまでループし続ける
   while (!TSSystemState::is_event_system_shut_down()) {
+
     send_push_message();
     RecSyncStatsFile();
 
     // If we didn't successfully sync to disk, check whether we need to update ....
     bool found;
+
+    // 下記設定値によって設定ファイルの変更をtrackするかどうかを行います。
+    // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-track-config-files
     int track_time = static_cast<int>(REC_readInteger("proxy.config.track_config_files", &found));
     if (found && track_time > 0) {
       if (configFiles->isConfigStale()) {
@@ -77,6 +85,7 @@ sync_thr(void *data)
       }
     }
 
+    // 5秒待つ
     usleep(REC_REMOTE_SYNC_INTERVAL_MS * 1000);
   }
 
@@ -122,6 +131,7 @@ RecMessageInit()
 //-------------------------------------------------------------------------
 // RecLocalInit
 //-------------------------------------------------------------------------
+// traffic_manager.ccから呼ばれます
 int
 RecLocalInit(Diags *_diags)
 {
@@ -168,6 +178,7 @@ RecLocalInitMessage()
 //-------------------------------------------------------------------------
 // RecLocalStart
 //-------------------------------------------------------------------------
+// TrafficManagerから実行される
 int
 RecLocalStart(FileManager *configFiles)
 {

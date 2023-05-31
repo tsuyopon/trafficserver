@@ -75,6 +75,7 @@ NextHopStrategyFactory::NextHopStrategyFactory(const char *file) : fn(file)
         error_loading     = true;
       }
     }
+
     // loop through the strategies document.
     for (auto &&strategie : strategies) {
       ts::Yaml::Map strategy{strategie};
@@ -87,6 +88,8 @@ NextHopStrategyFactory::NextHopStrategyFactory(const char *file) : fn(file)
       const auto &policy_value = policy.Scalar();
       NHPolicyType policy_type = NH_UNDEFINED;
 
+      // consistent_hash, first_live, rr_strict, rr_ip, latchedなどの定義は下記ドキュメントを参照のこと
+      // cf. https://docs.trafficserver.apache.org/en/9.1.x/admin-guide/files/strategies.yaml.en.html#strategies-definitions
       if (policy_value == consistent_hash) {
         policy_type = NH_CONSISTENT_HASH;
       } else if (policy_value == first_live) {
@@ -140,6 +143,9 @@ NextHopStrategyFactory::createStrategy(const std::string &name, const NHPolicyTy
   }
 
   try {
+
+    // consistent_hash, first_live, rr_strict, rr_ip, latchedなどの定義は下記ドキュメントを参照のこと
+    // cf. https://docs.trafficserver.apache.org/en/9.1.x/admin-guide/files/strategies.yaml.en.html#strategies-definitions
     switch (policy_type) {
     case NH_FIRST_LIVE:
     case NH_RR_STRICT:

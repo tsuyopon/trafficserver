@@ -191,6 +191,8 @@ mgmt_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *errorfds, struc
 // MGMT_MAX_TRANSIENT_ERRORS times.
 #if defined(linux)
   int r, retries;
+
+  // 64回waitする
   for (retries = 0; retries < MGMT_MAX_TRANSIENT_ERRORS; retries++) {
     r = ::select(nfds, readfds, writefds, errorfds, timeout);
     if (r >= 0) {
@@ -305,14 +307,18 @@ mgmt_read_timeout(int fd, int sec, int usec)
   timeout.tv_sec  = sec;
   timeout.tv_usec = usec;
 
+  // 負数やFD最大値を超えるような、不正なファイルディスクリプタが指定されたらエラー
   if (fd < 0 || fd >= FD_SETSIZE) {
     errno = EBADF;
     return -1;
   }
 
+  // readSet変数を初期化しておく
   FD_ZERO(&readSet);
   FD_SET(fd, &readSet);
 
+  // 指定されたfdをselect()システムコールでwaitする。
+  // select()により開始可能であれば戻り値は0より大きい値を返し、準備できてなければ0を返します
   return mgmt_select(fd + 1, &readSet, nullptr, nullptr, &timeout);
 }
 

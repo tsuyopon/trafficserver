@@ -52,6 +52,7 @@ SetHomePageRedirectFlag(url_mapping *new_mapping, URL &new_to_url)
 }
 
 // init_reverse_proxy関数から呼ばれる
+// 再読み込み時のreloadUrlRewrite()からもよばれる
 bool
 UrlRewrite::load()
 {
@@ -90,11 +91,13 @@ UrlRewrite::load()
   pluginFactory.setRuntimeDir(RecConfigReadRuntimeDir()).addSearchDir(RecConfigReadPluginDir());
 
   /* Initialize the next hop strategy factory */
+  // cf. https://docs.trafficserver.apache.org/en/9.1.x/admin-guide/files/strategies.yaml.en.html
   std::string sf = RecConfigReadConfigPath("proxy.config.url_remap.strategies.filename", "strategies.yaml");
   Debug("url_rewrite_regex", "strategyFactory file: %s", sf.c_str());
   strategyFactory = new NextHopStrategyFactory(sf.c_str());
 
   // TSRemapInit
+  // 重要な処理です
   if (0 == this->BuildTable(config_file_path)) { // conig_file_pathにはremap.configが指定される
     _valid = true;
     if (is_debug_tag_set("url_rewrite")) {

@@ -57,8 +57,8 @@ set_socket_paths(const char *path)
   // construct paths based on user input
   // form by replacing "mgmtapi.sock" with "eventapi.sock"
   if (path) {
-    main_socket_path  = ats_stringdup(Layout::relative_to(path, MGMTAPI_MGMT_SOCKET_NAME));
-    event_socket_path = ats_stringdup(Layout::relative_to(path, MGMTAPI_EVENT_SOCKET_NAME));
+    main_socket_path  = ats_stringdup(Layout::relative_to(path, MGMTAPI_MGMT_SOCKET_NAME));  // mgmtapi.sock
+    event_socket_path = ats_stringdup(Layout::relative_to(path, MGMTAPI_EVENT_SOCKET_NAME)); // eventapi.sock
   } else {
     main_socket_path  = nullptr;
     event_socket_path = nullptr;
@@ -102,6 +102,7 @@ socket_test(int fd)
  *        otherwise traffic server will assume mgmt stopped request and
  *        goes back to just sitting and listening for connection.
  ***************************************************************************/
+// mgmtapi.sockとeventapi.sockにconnect()できることを確認する
 TSMgmtError
 ts_connect()
 {
@@ -111,37 +112,47 @@ ts_connect()
   int sockaddr_len;
 
   // make sure a socket path is set up
+  // mgmtapi.sockとeventapi.sock
   if (!main_socket_path || !event_socket_path) {
     goto ERROR;
   }
+
   // make sure the length of main_socket_path do not exceed the sizeof(sun_path)
   if (strlen(main_socket_path) > sizeof(client_sock.sun_path) - 1) {
     goto ERROR;
   }
+
   // make sure the length of event_socket_path do not exceed the sizeof(sun_path)
   if (strlen(event_socket_path) > sizeof(client_event_sock.sun_path) - 1) {
     goto ERROR;
   }
+
   // create a socket
   main_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
   if (main_socket_fd < 0) {
     goto ERROR; // ERROR - can't open socket
   }
+
   // setup Unix domain socket
   memset(&client_sock, 0, sizeof(sockaddr_un));
   client_sock.sun_family = AF_UNIX;
+
+  // client_sock構造体のsun_pathにmgmtapi.sockをセット
   ink_strlcpy(client_sock.sun_path, main_socket_path, sizeof(client_sock.sun_path));
 #if defined(darwin) || defined(freebsd)
   sockaddr_len = sizeof(sockaddr_un);
 #else
   sockaddr_len = sizeof(client_sock.sun_family) + strlen(client_sock.sun_path);
 #endif
+
   // connect call
+  // mgmtapi.sockへとconnect
   if (connect(main_socket_fd, reinterpret_cast<struct sockaddr *>(&client_sock), sockaddr_len) < 0) {
     close(main_socket_fd);
     main_socket_fd = -1;
     goto ERROR; // connection is down
   }
+
   // -------- set up the event socket ------------------
   // create a socket
   event_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -150,16 +161,21 @@ ts_connect()
     main_socket_fd = -1;
     goto ERROR; // ERROR - can't open socket
   }
+
   // setup Unix domain socket
   memset(&client_event_sock, 0, sizeof(sockaddr_un));
   client_event_sock.sun_family = AF_UNIX;
+
+  // client_event_sock構造体のsun_pathにeventtapi.sockをセット
   ink_strlcpy(client_event_sock.sun_path, event_socket_path, sizeof(client_event_sock.sun_path));
 #if defined(darwin) || defined(freebsd)
   sockaddr_len = sizeof(sockaddr_un);
 #else
   sockaddr_len = sizeof(client_event_sock.sun_family) + strlen(client_event_sock.sun_path);
 #endif
+
   // connect call
+  // eventapi.sockへconnectする
   if (connect(event_socket_fd, reinterpret_cast<struct sockaddr *>(&client_event_sock), sockaddr_len) < 0) {
     close(event_socket_fd);
     close(main_socket_fd);
@@ -357,6 +373,7 @@ socket_write_conn(int fd, const void *msg_buf, size_t bytes)
   return TS_ERR_OKAY;
 }
 
+// mgmtapi.sockへとリクエストを送付する
 TSMgmtError
 mgmtapi_sender::send(void *msg, size_t msglen) const
 {

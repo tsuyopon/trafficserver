@@ -32,8 +32,12 @@
 // Macros
 //-------------------------------------------------------------------------
 
+// 統計値に関連したタイプ
+// タイプでgrepするとわかりますが、さまざまな箇所に散在しています。
 #define REC_TYPE_IS_STAT(rec_type) (((rec_type) == RECT_PROCESS) || ((rec_type) == RECT_PLUGIN) || ((rec_type) == RECT_NODE))
 
+// RECT_CONFIGかRECT_LOCALが指定されていれば設定値(config)であると判断する
+// RECT_CONFIGとRECT_LOCALの設定値についてはmgmt/RecordsConfig.ccに定義されています(統計のタイプはここにはない)
 #define REC_TYPE_IS_CONFIG(rec_type) (((rec_type) == RECT_CONFIG) || ((rec_type) == RECT_LOCAL))
 
 //-------------------------------------------------------------------------

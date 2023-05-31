@@ -706,10 +706,14 @@ HttpSM::find_server_buffer_size()
   return find_http_resp_buffer_size(t_state.hdr_info.response_content_length);
 }
 
+// TSHttpTxnHookAddから呼ばれる
 inline void
 HttpSM::txn_hook_add(TSHttpHookID id, INKContInternal *cont)
 {
+  // TSHttpHookAdd, TSHttpSsnHookAdd, TSHttpTxnHookAdd, TSLifecycleHookAddいずれも登録先は同一オブジェクトであるFeatureAPIHooksのm_hooks配列に登録されるのは同じ
   api_hooks.append(id, cont);
+
+  // TSHttpHookAddやTSHttpSsnHookAddと異なり、下記のグローバル変数へのフラグがセットされる部分に大きな違いがある
   hooks_set = true;
 }
 

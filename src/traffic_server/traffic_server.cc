@@ -423,6 +423,7 @@ public:
   }
 };
 
+// Trafficserverのmainからschedule_everyにより定期実行されるクラス
 class MemoryLimit : public Continuation
 {
 public:
@@ -430,6 +431,8 @@ public:
   {
     memset(&_usage, 0, sizeof(_usage));
     SET_HANDLER(&MemoryLimit::periodic);
+
+    // メモリの統計情報を取得する
     RecRegisterStatInt(RECT_PROCESS, "proxy.process.traffic_server.memory.rss", static_cast<RecInt>(0), RECP_NON_PERSISTENT);
   }
 
@@ -446,13 +449,18 @@ public:
     }
 
     // "reload" the setting, we don't do this often so not expensive
+    // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-memory-max-usage
     _memory_limit = REC_ConfigReadInteger("proxy.config.memory.max_usage");
     _memory_limit = _memory_limit >> 10; // divide by 1024
 
+    // getrusageでRUSAGE_SELFを指定することにより、呼び出したプロセスの資源の使用量を取得する
+    // cf. https://linuxjm.osdn.jp/html/LDP_man-pages/man2/getrusage.2.html
     if (getrusage(RUSAGE_SELF, &_usage) == 0) {
       RecSetRecordInt("proxy.process.traffic_server.memory.rss", _usage.ru_maxrss << 10, REC_SOURCE_DEFAULT); // * 1024
       Debug("server", "memory usage - ru_maxrss: %ld memory limit: %" PRId64, _usage.ru_maxrss, _memory_limit);
       if (_memory_limit > 0) {
+
+        // ru_maxrssは「RAM 上に存在する仮想ページのサイズ(resident set size)の最大値」とのこと
         if (_usage.ru_maxrss > _memory_limit) {
           if (net_memory_throttle == false) {
             net_memory_throttle = true;
@@ -464,6 +472,7 @@ public:
             Debug("server", "memory usage under limit - ru_maxrss: %ld memory limit: %" PRId64, _usage.ru_maxrss, _memory_limit);
           }
         }
+
       } else {
         // this feature has not been enabled
         Debug("server", "limiting connections based on memory usage has been disabled");
@@ -695,6 +704,7 @@ initialize_process_manager()
   pmgmt->start(TSThreadInit, TSThreadDestroy);
 
   RecProcessInitMessage(remote_management_flag ? RECM_CLIENT : RECM_STAND_ALONE);
+
   pmgmt->reconfigure();
   check_config_directories();
 
@@ -2058,9 +2068,15 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   eventProcessor.start(num_of_net_threads, stacksize);
 
   // 定期的に実行されるスレッドが定義される
+  // 500m seconds毎に実行される
   eventProcessor.schedule_every(new SignalContinuation, HRTIME_MSECOND * 500, ET_CALL);
+
+  // 1秒毎に実行される
   eventProcessor.schedule_every(new DiagsLogContinuation, HRTIME_SECOND, ET_TASK);
+
+  // 10秒毎に実行される
   eventProcessor.schedule_every(new MemoryLimit, HRTIME_SECOND * 10, ET_TASK);
+
   REC_RegisterConfigUpdateFunc("proxy.config.dump_mem_info_frequency", init_memory_tracker, nullptr);
   init_memory_tracker(nullptr, RECD_NULL, RecData(), nullptr);
 
@@ -2125,10 +2141,14 @@ main(int /* argc ATS_UNUSED */, const char **argv)
 
     SSLConfigParams::init_ssl_ctx_cb  = init_ssl_ctx_callback;
     SSLConfigParams::load_ssl_file_cb = load_ssl_file_callback;
+
+
     sslNetProcessor.start(-1, stacksize);
 #if TS_USE_QUIC == 1
     quic_NetProcessor.start(-1, stacksize);
 #endif
+
+    // TSMgmtUpdateRegisterからglobal_config_cbs変数に登録される模様。つまり、プラグインから登録される仕組みと思われる
     pmgmt->registerPluginCallbacks(global_config_cbs);
 
     cacheProcessor.afterInitCallbackSet(&CB_After_Cache_Init);
@@ -2198,6 +2218,8 @@ main(int /* argc ATS_UNUSED */, const char **argv)
         //
         // In either case we should not delay to accept the ports.
         Debug("http_listen", "Not delaying listen");
+
+        // TS_LIFECYCLE_PORTS_READY_HOOK は下記でinvokeされる
         start_HttpProxyServer(); // PORTS_READY_HOOK called from in here
         emit_fully_initialized_message();
       }
@@ -2258,6 +2280,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   delete main_thread;
 }
 
+// MGMT_EVENT_SHUTDOWNやMGMT_EVENT_RESTARTを受け取った場合に呼ばれるコールバック
 static void mgmt_restart_shutdown_callback(ts::MemSpan<void>)
 {
   sync_cache_dir_on_shutdown();

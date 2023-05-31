@@ -145,6 +145,7 @@ init_mgmt_events()
 void
 delete_mgmt_events()
 {
+
   // obtain lock
   ink_mutex_acquire(&mgmt_events_lock);
 
@@ -206,6 +207,7 @@ apiEventCallback(alarm_t newAlarm, const char * /* ip ATS_UNUSED */, const char 
   newEvent       = TSEventCreate();
   newEvent->id   = newAlarm;
   newEvent->name = get_event_name(newEvent->id);
+
   // newEvent->ip   = ats_strdup(ip);
   if (desc) {
     newEvent->description = ats_strdup(desc);
@@ -214,6 +216,7 @@ apiEventCallback(alarm_t newAlarm, const char * /* ip ATS_UNUSED */, const char 
   }
 
   // add it to the mgmt_events list
+  // mutex lockを確保してatomicにenqueueします
   ink_mutex_acquire(&mgmt_events_lock);
   enqueue(mgmt_events, newEvent);
   ink_mutex_release(&mgmt_events_lock);
@@ -230,7 +233,7 @@ apiEventCallback(alarm_t newAlarm, const char * /* ip ATS_UNUSED */, const char 
  * until receives a request from the remote API client. Parse the request
  * to determine which CoreAPI call to make.
  *********************************************************************/
-// eventapi.sockを監視します。
+// eventapi.sockを監視します。この関数はスレッドのメイン関数として呼ばれます
 void *
 event_callback_main(void *arg)
 {
@@ -247,6 +250,7 @@ event_callback_main(void *arg)
   if (init_mgmt_events() != TS_ERR_OKAY) {
     return nullptr;
   }
+
   // register callback with alarms processor
   lmgmt->alarm_keeper->registerCallback(apiEventCallback);
 
@@ -257,7 +261,9 @@ event_callback_main(void *arg)
   EventClientT *client_entry; // an entry of fd to alarms mapping
   struct timeval timeout;
 
+  // 無限ループ
   while (true) {
+
     // LINUX fix: to prevent hard-spin reset timeout on each loop
     timeout.tv_sec  = 1;
     timeout.tv_usec = 0;
@@ -268,6 +274,7 @@ event_callback_main(void *arg)
       FD_SET(con_socket_fd, &selectFDs);
       Debug("event", "[event_callback_main] add fd %d to select set", con_socket_fd);
     }
+
     // see if there are more fd to set
     for (auto &&it : accepted_clients) {
       client_entry = it.second;
@@ -277,6 +284,7 @@ event_callback_main(void *arg)
     }
 
     // select call - timeout is set so we can check events at regular intervals
+    // mgmtのfdをselectシステムコールにより待ちます(timeout指定によりこの箇所で最大1秒待ちます。つまり、while中ではここで定期的にsleepされるイメージです)。
     int fds_ready = mgmt_select(FD_SETSIZE, &selectFDs, (fd_set *)nullptr, (fd_set *)nullptr, &timeout);
 
     // check return
@@ -344,6 +352,7 @@ event_callback_main(void *arg)
 
     TSMgmtEvent *event;
 
+    // mgmt_eventsはapiEventCallbackによりenqueuされます
     if (!mgmt_events || queue_is_empty(mgmt_events)) { // no events to process
       // fprintf(stderr, "[event_callback_main] NO EVENTS TO PROCESS\n");
       Debug("event", "[event_callback_main] NO EVENTS TO PROCESS");
@@ -352,6 +361,8 @@ event_callback_main(void *arg)
 
     // iterate through each event in mgmt_events
     while (!queue_is_empty(mgmt_events)) {
+
+      // mutexロックを獲得してからdequeueして、mgmt_eventsを取得します
       ink_mutex_acquire(&mgmt_events_lock);                     // acquire lock
       event = static_cast<TSMgmtEvent *>(dequeue(mgmt_events)); // get what we want
       ink_mutex_release(&mgmt_events_lock);                     // release lock
@@ -370,6 +381,7 @@ event_callback_main(void *arg)
           MgmtMarshallString name = event->name;
           MgmtMarshallString desc = event->description;
 
+          // mgmtapi.sockにリクエストを送る
           ret = send_mgmt_request(client_entry->fd, OpType::EVENT_NOTIFY, &optype, &name, &desc);
           if (ret != TS_ERR_OKAY) {
             Debug("event", "sending even notification to fd [%d] failed.", client_entry->fd);

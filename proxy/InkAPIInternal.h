@@ -224,6 +224,7 @@ FeatureAPIHooks<ID, N>::get(ID id) const
   return likely(is_valid(id)) ? m_hooks[id].head() : nullptr;
 }
 
+// 指定されたIDのhookを取得する
 template <typename ID, int N>
 APIHooks const *
 FeatureAPIHooks<ID, N>::operator[](ID id) const
@@ -231,11 +232,13 @@ FeatureAPIHooks<ID, N>::operator[](ID id) const
   return likely(is_valid(id)) ? &(m_hooks[id]) : nullptr;
 }
 
+// 指定されたhookを実行する
 template <typename ID, int N>
 void
 FeatureAPIHooks<ID, N>::invoke(ID id, int event, void *data)
 {
   if (likely(is_valid(id))) {
+    // 下記invokでは、APIHook::invokeを実行する
     m_hooks[id].invoke(event, data);
   }
 }
@@ -277,6 +280,7 @@ private:
   const int _id;
 };
 
+// FeatureAPIHooksのtemplate型は最初にTSSslHookInternalID、2つ目にはTSSslHookInternalID::NUMが入ります
 class SslAPIHooks : public FeatureAPIHooks<TSSslHookInternalID, TSSslHookInternalID::NUM>
 {
 };

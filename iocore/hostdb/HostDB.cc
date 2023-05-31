@@ -1656,23 +1656,34 @@ HostDBContinuation::backgroundEvent(int /* event ATS_UNUSED */, Event * /* e ATS
     struct stat info;
     char path[sizeof(hostdb_hostfile_path)];
 
+    // HostDBは/etc/hostsのような形式で持つことができます
+    // cf. https://docs.trafficserver.apache.org/en/7.1.x/admin-guide/files/records.config.en.html#proxy-config-hostdb-host-file-path
     REC_ReadConfigString(path, "proxy.config.hostdb.host_file.path", sizeof(path));
+
+     // hostdb_hostfile_pathの値とproxy.config.hostdb.host_file.pathから取得した値が一致しなければ
     if (0 != strcasecmp(hostdb_hostfile_path, path)) {
+      // hostdbファイルがアップデートされたものとみなす
       Debug("hostdb", "Update host file '%s' -> '%s'", (*hostdb_hostfile_path ? hostdb_hostfile_path : "*-none-*"),
             (*path ? path : "*-none-*"));
+
       // path to hostfile changed
       hostdb_hostfile_update_timestamp = 0; // never updated from this file
+
       if ('\0' != *path) {
+        // pathがnullでなければ、hostdb_hostfile_path変数にセット
         memcpy(hostdb_hostfile_path, path, sizeof(hostdb_hostfile_path));
       } else {
         hostdb_hostfile_path[0] = 0; // mark as not there
       }
       update_p = true;
+
     } else {
       hostdb_last_interval = hostdb_current_interval;
       if (*hostdb_hostfile_path) {
         if (0 == stat(hostdb_hostfile_path, &info)) {
+          // statシステムコールが成功した場合
           if (info.st_mtime > static_cast<time_t>(hostdb_hostfile_update_timestamp)) {
+            // hostdb_hostfile_update_timestampに保存されている時間よりもstatシステムコールで取得したinfo.st_mtimeの方が大きい場合には更新が必要と判断される
             update_p = true; // same file but it's changed.
           }
         } else {
@@ -1680,6 +1691,9 @@ HostDBContinuation::backgroundEvent(int /* event ATS_UNUSED */, Event * /* e ATS
         }
       }
     }
+
+    // 上記の判定で付与されたupdate_pフラグを利用して、host fileを更新するかどうかをチェックします
+    // 上記判定ではhostdbのファイル名が以前と変更になっていたり、前回のhostdb更新時刻(hostdb_hostfile_update_timestamp)よりもファイルの更新時刻が後であればupdate_pがtrueとなります
     if (update_p) {
       Debug("hostdb", "Updating from host file");
       ParseHostFile(hostdb_hostfile_path, hostdb_hostfile_check_interval);
@@ -2151,11 +2165,16 @@ HostDBFileContinuation::destroy()
 // globals.
 int HostDBFileUpdateActive = 0;
 
+// この関数はhostdb(/etc/hosts形式フォーマット)の行を解析する関数です。行を解析するたびに呼ばれます。
 static void
 ParseHostLine(Ptr<RefCountedHostsFileMap> &map, char *l)
 {
+
+  // スペースかタブ
   Tokenizer elts(" \t");
   int n_elts = elts.Initialize(l, SHARE_TOKS);
+
+  // 上記によって elts[0]はIPアドレス、elts[1]はホスト名 となります。
 
   // Elements should be the address then a list of host names.
   // Don't use RecHttpLoadIp because the address *must* be literal.
@@ -2171,7 +2190,7 @@ ParseHostLine(Ptr<RefCountedHostsFileMap> &map, char *l)
   }
 }
 
-void
+// hostdbをパースします。hostdbは/etc/hostsのようなaddr, hostnameの形式となっています void
 ParseHostFile(const char *path, unsigned int hostdb_hostfile_check_interval_parse)
 {
   Ptr<RefCountedHostsFileMap> parsed_hosts_file_ptr;
@@ -2183,11 +2202,19 @@ ParseHostFile(const char *path, unsigned int hostdb_hostfile_check_interval_pars
   }
   Debug("hostdb", "Loading host file '%s'", path);
 
+  // hostdbが設定されていたら
   if (*path) {
+
+    // hostdbをopenしてfdを取得する
     ats_scoped_fd fd(open(path, O_RDONLY));
+
+    // fdが取得できた場合
     if (fd >= 0) {
       struct stat info;
+
+      // fstatシステムコールが成功したら
       if (0 == fstat(fd, &info)) {
+
         // +1 in case no terminating newline
         int64_t size = info.st_size + 1;
 
@@ -2206,24 +2233,34 @@ ParseHostFile(const char *path, unsigned int hostdb_hostfile_check_interval_pars
           // pairs have pointer back in to the text storage for the file
           // so we need to keep that until we're done with @a pairs.
           while (base < limit) {
+
+            // baseから改行が見つかった位置へのポインタを返します
             char *spot = strchr(base, '\n');
 
             // terminate the line.
             if (nullptr == spot) {
+              // 改行が見つからなかった場合
               spot = limit; // no trailing EOL, grab remaining
             } else {
+              // ヌル文字を代入することによって、文字列を終端させています
               *spot = 0;
             }
 
+            // baseからspotの範囲の文字列に対して、行のprefix部分が空白文字(スペース)の場合にはポインタを進めて空白文字をskipさせます
             while (base < spot && isspace(*base)) {
               ++base; // skip leading ws
             }
+
+            // 先頭が「#」はコメントなので除外します。また、行の長さが
             if (*base != '#' && base < spot) { // non-empty non-comment line
               ParseHostLine(parsed_hosts_file_ptr, base);
             }
+
+            // 次の行に進めます
             base = spot + 1;
           }
 
+          // 更新した時刻を保存しておきます。これはこの関数を呼び出す HostDBContinuation::backgroundEvent により、hostdbの更新処理をするかどうかの判定に利用されます。
           hostdb_hostfile_update_timestamp = hostdb_current_interval;
         }
       }

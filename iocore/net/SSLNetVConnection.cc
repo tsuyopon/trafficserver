@@ -129,10 +129,12 @@ public:
   )
   {
     EThread *eth = this_ethread();
+    // 対象プラグインがlockをとれるかどうかを確認する
     if (!target->mutex) {
       // If there's no mutex, plugin doesn't care about locking so why should we?
       target->handleEvent(eventId, edata);
     } else {
+      // mutex指定があればlockを取ってから実行
       MUTEX_TRY_LOCK(lock, target->mutex, eth);
       if (lock.is_locked()) {
         target->handleEvent(eventId, edata);
@@ -1210,6 +1212,7 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
       sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_HELLO;
     } else {
       sslHandshakeHookState = HANDSHAKE_HOOKS_PRE_INVOKE;
+      // iocore/net/SSLNetVConnection.ccにwrap関数の定義があります。
       ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_START, this);
       return SSL_WAIT_FOR_HOOK;
     }
@@ -1495,6 +1498,7 @@ SSLNetVConnection::sslClientHandShakeEvent(int &err)
     // If no more hooks, carry on
     if (nullptr != curHook) {
       sslHandshakeHookState = HANDSHAKE_HOOKS_OUTBOUND_PRE_INVOKE;
+      // iocore/net/SSLNetVConnection.ccにwrap関数の定義があります。
       ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_OUTBOUND_START, this);
       return SSL_WAIT_FOR_HOOK;
     }
@@ -1623,37 +1627,54 @@ SSLNetVConnection::reenable(NetHandler *nh, int event)
     curHook = curHook->next();
     Debug("ssl", "iterate from reenable curHook=%p", curHook);
   }
+
   if (curHook != nullptr) {
+
     // Invoke the hook and return, wait for next reenable
     if (sslHandshakeHookState == HANDSHAKE_HOOKS_CLIENT_HELLO) {
       sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE;
+      // プラグインのhookを実行する
       curHook->invoke(TS_EVENT_SSL_CLIENT_HELLO, this);
+
     } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_CLIENT_CERT) {
       sslHandshakeHookState = HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE;
+      // プラグインのhookを実行する
       curHook->invoke(TS_EVENT_SSL_VERIFY_CLIENT, this);
+
     } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_CERT) {
       sslHandshakeHookState = HANDSHAKE_HOOKS_CERT_INVOKE;
+      // プラグインのhookを実行する
       curHook->invoke(TS_EVENT_SSL_CERT, this);
+
     } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_SNI) {
+      // プラグインのhookを実行する
       curHook->invoke(TS_EVENT_SSL_SERVERNAME, this);
+
     } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_PRE) {
       Debug("ssl", "Reenable preaccept");
       sslHandshakeHookState = HANDSHAKE_HOOKS_PRE_INVOKE;
+      // iocore/net/SSLNetVConnection.ccにwrap関数の定義があります。
       ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_START, this);
+
     } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_OUTBOUND_PRE) {
       Debug("ssl", "Reenable outbound connect");
       sslHandshakeHookState = HANDSHAKE_HOOKS_OUTBOUND_PRE_INVOKE;
       ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_OUTBOUND_START, this);
+
     } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_DONE) {
+
       if (this->get_context() == NET_VCONNECTION_OUT) {
         ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_OUTBOUND_CLOSE, this);
       } else {
         ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_VCONN_CLOSE, this);
       }
+
     } else if (sslHandshakeHookState == HANDSHAKE_HOOKS_VERIFY_SERVER) {
       Debug("ssl", "ServerVerify");
       ContWrapper::wrap(nh->mutex.get(), curHook->m_cont, TS_EVENT_SSL_VERIFY_SERVER, this);
+
     }
+
     return;
   } else {
     // Move onto the "next" state

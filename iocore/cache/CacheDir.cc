@@ -941,6 +941,7 @@ sync_cache_dir_on_shutdown()
   size_t buflen = 0;
   bool buf_huge = false;
 
+  // DEADBEEF
   EThread *t = (EThread *)0xdeadbeef;
   for (int i = 0; i < gnvol; i++) {
     // the process is going down, do a blocking call
@@ -953,12 +954,14 @@ sync_cache_dir_on_shutdown()
       Debug("cache_dir_sync", "Dir %s: ignoring -- bad disk", d->hash_text.get());
       continue;
     }
+
     size_t dirlen = d->dirlen();
     ink_assert(dirlen > 0); // make clang happy - if not > 0 the vol is seriously messed up
     if (!d->header->dirty && !d->dir_sync_in_progress) {
       Debug("cache_dir_sync", "Dir %s: ignoring -- not dirty", d->hash_text.get());
       continue;
     }
+
     // recompute hit_evacuate_window
     d->hit_evacuate_window = (d->data_blocks * cache_config_hit_evacuate_percent) / 100;
 
@@ -984,6 +987,7 @@ sync_cache_dir_on_shutdown()
     }
 
     if (buflen < dirlen) {
+
       if (buf) {
         if (buf_huge) {
           ats_free_hugepage(buf, buflen);
@@ -992,11 +996,13 @@ sync_cache_dir_on_shutdown()
         }
         buf = nullptr;
       }
+
       buflen = dirlen;
       if (ats_hugepage_enabled()) {
         buf      = static_cast<char *>(ats_alloc_hugepage(buflen));
         buf_huge = true;
       }
+
       if (buf == nullptr) {
         buf      = static_cast<char *>(ats_memalign(ats_pagesize(), buflen));
         buf_huge = false;
@@ -1008,6 +1014,7 @@ sync_cache_dir_on_shutdown()
     } else {
       Debug("cache_dir_sync", "Periodic dir sync in progress -- overwriting");
     }
+
     d->footer->sync_serial = d->header->sync_serial;
 
     CHECK_DIR(d);
@@ -1017,7 +1024,9 @@ sync_cache_dir_on_shutdown()
     B           = pwrite(d->fd, buf, dirlen, start);
     ink_assert(B == dirlen);
     Debug("cache_dir_sync", "done syncing dir for vol %s", d->hash_text.get());
+
   }
+
   Debug("cache_dir_sync", "sync done");
   if (buf) {
     if (buf_huge) {

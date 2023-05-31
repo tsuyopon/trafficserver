@@ -424,6 +424,7 @@ Restart(unsigned options)
  *-------------------------------------------------------------------------
  * Bounces traffic_server process(es).
  */
+// TrafficManager内部で実行される
 TSMgmtError
 Bounce(unsigned options)
 {

@@ -69,7 +69,11 @@ BaseManager::dequeue()
 int
 BaseManager::registerMgmtCallback(int msg_id, MgmtCallback const &cb)
 {
+  // 下記ではmgmt_callback_table[msg_id]に対応する値への参照がcb_listとなります。その後cb_listにcbをemplace_backしています。
+  // cb_listという変数名は他では使われていません。探したい場合にはmgmt_callback_tableで検索する必要があります。 
   auto &cb_list{mgmt_callback_table[msg_id]};
+
+  // 下記ではmgmt_callback_table[msg_id]の参照への値にcbをemplace_backしていますが、ここで登録した値というのはこの関数直後のBaseManager::executeMgmtCallbackで呼び出されることになります
   cb_list.emplace_back(cb);
   return msg_id;
 }
@@ -78,9 +82,14 @@ void
 BaseManager::executeMgmtCallback(int msg_id, ts::MemSpan<void> span)
 {
   // mgmt_callback_tableについてはこの関数の上に定義されているBaseManager::registerMgmtCallbackで登録される
+  // mgmt_callback_tableからmsg_idに関連付けられた値を探索します。
   if (auto it = mgmt_callback_table.find(msg_id); it != mgmt_callback_table.end()) {
+
+    // 登録されているコールバックは it->second に格納されます。
     for (auto &&cb : it->second) {
+      // BaseManager::registerMgmtCallbackで登録されたコールバックはここで実行されます。
       cb(span);
     }
+
   }
 }

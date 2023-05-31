@@ -21,6 +21,9 @@
   limitations under the License.
  */
 
+// このクラスはTrafficManagerが利用します。
+// TrafficManagerがTrafficServerへのリクエストを行う際に利用します
+
 #include "tscore/ink_platform.h"
 #include "tscore/ink_sock.h"
 #include "tscore/ink_file.h"
@@ -167,7 +170,11 @@ LocalManager::clearStats(const char *name)
   //   that operation works even when the proxy is off
   //
   if (this->proxy_running == 0) {
+
+    // records.snapのパス(統計情報用ファイル)
     ats_scoped_str statsPath(RecConfigReadPersistentStatsPath());
+
+    // records.snapを削除する
     if (unlink(statsPath) < 0) {
       if (errno != ENOENT) {
         mgmt_log("[LocalManager::clearStats] Unlink of %s failed : %s\n", (const char *)statsPath, strerror(errno));
@@ -274,10 +281,14 @@ LocalManager::initAlarm()
  * initMgmtProcessServer()
  *   sets up the server socket that proxy processes connect to.
  */
+// traffic_managerから呼ばれます
 void
 LocalManager::initMgmtProcessServer()
 {
+
   std::string rundir(RecConfigReadRuntimeDir());
+
+  // processserver.sock
   std::string sockpath(Layout::relative_to(rundir, LM_CONNECTION_SERVER));
   mode_t oldmask = umask(0);
 
@@ -288,6 +299,8 @@ LocalManager::initMgmtProcessServer()
   }
 #endif
 
+  // processserver.sock をUnix Domain Socketとしてバインドします
+  // processserver.sockではtrafficserverからtrafficmanagerへの依頼が行われます。
   process_server_sockfd = bind_unix_domain_socket(sockpath.c_str(), 00700);
   if (process_server_sockfd == -1) {
     mgmt_fatal(errno, "[LocalManager::initMgmtProcessServer] failed to bind socket at %s\n", sockpath.c_str());
@@ -383,6 +396,8 @@ LocalManager::pollMgmtProcessServer()
       if (process_server_sockfd != ts::NO_FD && FD_ISSET(process_server_sockfd, &fdlist)) { /* New connection */
         struct sockaddr_in clientAddr;
         socklen_t clientLen = sizeof(clientAddr);
+
+        // processerver.sockへのaccept
         int new_sockfd      = mgmt_accept(process_server_sockfd, reinterpret_cast<struct sockaddr *>(&clientAddr), &clientLen);
 
         mgmt_log("[LocalManager::pollMgmtProcessServer] New process connecting fd '%d'\n", new_sockfd);
@@ -396,6 +411,7 @@ LocalManager::pollMgmtProcessServer()
         }
         --num;
         keep_polling = true;
+
       }
 
       if (ts::NO_FD != watched_process_fd && FD_ISSET(watched_process_fd, &fdlist)) {
@@ -406,6 +422,7 @@ LocalManager::pollMgmtProcessServer()
 
         // read the message
         if ((res = mgmt_read_pipe(watched_process_fd, reinterpret_cast<char *>(&mh_hdr), sizeof(MgmtMessageHdr))) > 0) {
+
           MgmtMessageHdr *mh_full = static_cast<MgmtMessageHdr *>(malloc(sizeof(MgmtMessageHdr) + mh_hdr.data_len));
           memcpy(mh_full, &mh_hdr, sizeof(MgmtMessageHdr));
           char *data_raw = reinterpret_cast<char *>(mh_full) + sizeof(MgmtMessageHdr);
@@ -414,7 +431,9 @@ LocalManager::pollMgmtProcessServer()
           } else if (res < 0) {
             mgmt_fatal(0, "[LocalManager::pollMgmtProcessServer] Error in read (errno: %d)\n", -res);
           }
+
           free(mh_full);
+
         } else if (res < 0) {
           mgmt_fatal(0, "[LocalManager::pollMgmtProcessServer] Error in read (errno: %d)\n", -res);
         }
@@ -667,19 +686,23 @@ LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
             close_socket(watched_process_fd);
             mgmt_log("[LocalManager::pollMgmtProcessServer] "
                      "Server Process has been terminated\n");
+
             if (lmgmt->run_proxy) {
               mgmt_log("[Alarms::signalAlarm] Server Process was reset\n");
               lmgmt->alarm_keeper->signalAlarm(MGMT_ALARM_PROXY_PROCESS_DIED, nullptr);
             } else {
               mgmt_log("[TrafficManager] Server process shutdown\n");
             }
+
             watched_process_fd = watched_process_pid = -1;
             if (tmp_pid != -1) { /* Incremented after a pid: message is sent */
               proxy_running--;
             }
+
             proxy_started_at = -1;
             RecSetRecordInt("proxy.node.proxy_running", 0, REC_SOURCE_DEFAULT);
             // End of TS down
+
           } else {
             // TS is still up, but the connection is lost
             const char *err_msg = "The TS-TM connection is broken for some reason. Either restart TS and TM or correct this error "
@@ -694,7 +717,9 @@ LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
           // else (TS is still up)
           //     raise an alarm stating the problem
         }
+
       }
+
     }
   }
 }
@@ -781,6 +806,7 @@ LocalManager::processEventQueue()
       }
     }
 
+    // msg_idがMGMT_EVENT_CONFIG_FILE_UPDATE以外の場合にはまだ、mgmtによって処理されていないのでifの中を処理する
     if (!handled_by_mgmt) {
       // trafficserverが起動していない場合には、dequeueにより取得したキューを再度enqueuして戻していると思われる
       if (processRunning() == false) {
@@ -792,7 +818,7 @@ LocalManager::processEventQueue()
       }
 
       Debug("lm", "[TrafficManager] ==> Sending signal event '%d' %s payload=%d", mh->msg_id, payload.begin(), int(payload.size()));
-      // 下記によりtraffic_ctlなどで送られてきた命令を
+      // (重要) 下記によりtraffic_ctlなどで送られてきた命令をここで処理する
       lmgmt->sendMgmtMsgToProcesses(mh);
     }
     ats_free(mh);
@@ -979,6 +1005,8 @@ LocalManager::listenForProxy()
     } else {
       // read backlog configuration value and overwrite the default value if found
       bool found;
+
+      // c. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-net-listen-backlog
       RecInt backlog = REC_readInteger("proxy.config.net.listen_backlog", &found);
       backlog        = (found && backlog >= 0) ? backlog : ats_tcp_somaxconn();
 

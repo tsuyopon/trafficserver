@@ -511,11 +511,17 @@ RecRegisterRawStatSyncCb(const char *name, RecRawStatSyncCb sync_cb, RecRawStatB
   int err = REC_ERR_FAIL;
 
   ink_rwlock_rdlock(&g_records_rwlock);
+
+  // 指定したnameに一致するレコードがあれば同期する
   if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
     RecRecord *r = it->second;
 
     rec_mutex_acquire(&(r->lock));
+
+    // 統計タイプに限る
     if (REC_TYPE_IS_STAT(r->rec_type)) {
+
+      // コールバックが登録されているのに、この関数を呼び出そうとしているのは２度目の登録になるのでfatalエラーとする
       if (r->stat_meta.sync_cb) {
         // We shouldn't register sync callbacks twice...
         Fatal("attempted to register %s twice", name);
@@ -525,6 +531,8 @@ RecRegisterRawStatSyncCb(const char *name, RecRawStatSyncCb sync_cb, RecRawStatB
 
       r->stat_meta.sync_rsb = rsb;
       r->stat_meta.sync_id  = id;
+
+      // コールバック情報を登録する
       r->stat_meta.sync_cb  = sync_cb;
 
       raw = RecGetGlobalRawStatPtr(r->stat_meta.sync_rsb, r->stat_meta.sync_id);
@@ -547,21 +555,39 @@ RecRegisterRawStatSyncCb(const char *name, RecRawStatSyncCb sync_cb, RecRawStatB
 int
 RecExecRawStatSyncCbs()
 {
+
   RecRecord *r;
   int i, num_records;
 
+  // 登録されている全レコード数を取得し、その回数分イテレーション操作を行う
   num_records = g_num_records;
   for (i = 0; i < num_records; i++) {
+
+    // レコード毎の操作となる。
+    // rはそのレコードとして保持しているRecRecord構造体情報の参照が返ります。
     r = &(g_records[i]);
     rec_mutex_acquire(&(r->lock));
+
+    // 統計情報を表すタイプ(RECT_PROCESS,RECT_PLUGIN,RECT_NODE)に限る。それ以外のREC_TYPE_IS_CONFIG相当には何もしない。
     if (REC_TYPE_IS_STAT(r->rec_type)) {
+
+      // そのレコードに対してRecRegisterRawStatSyncCbによりコールバックが登録されていたら、実行する
       if (r->stat_meta.sync_cb) {
+
+        // TBD: r->stat_meta.sync_rsb->global[r->stat_meta.sync_id]->version にはグローバルに登録中のそのレコードのバージョン情報が含まれていて、r->versionはこれから同期しようとしているバージョンの情報であると思われる
         if (r->version && r->version != r->stat_meta.sync_rsb->global[r->stat_meta.sync_id]->version) {
+          // 統計値をクリアする
           raw_stat_clear(r->stat_meta.sync_rsb, r->stat_meta.sync_id);
+
+          // グローバルに設定されたversion情報を置き換える
           r->stat_meta.sync_rsb->global[r->stat_meta.sync_id]->version = r->version;
+
         } else {
+          // コールバック関数が実行される。ここで実行されるコールバック関数はRecRegisterRawStatSyncCbで登録される
           (*(r->stat_meta.sync_cb))(r->name, r->data_type, &(r->data), r->stat_meta.sync_rsb, r->stat_meta.sync_id);
         }
+
+        // そのレコードの同期が完了したのでREC_SYNC_REQUIREDフラグをセットしておく
         r->sync_required = REC_SYNC_REQUIRED;
       }
     }
@@ -578,8 +604,12 @@ RecRawStatUpdateSum(RecRawStatBlock *rsb, int id)
   if (nullptr != raw) {
     RecRecord *r = reinterpret_cast<RecRecord *>(reinterpret_cast<char *>(raw) - offsetof(struct RecRecord, stat_meta));
 
+    // データタイプによって加算か、置き換えかなどが決まります。
     RecDataSetFromInt64(r->data_type, &r->data, rsb->global[id]->sum);
+
+    // 下記の値(REC_SYNC_REQUIRED)がセットされているかどうかはsend_push_message関数で利用される
     r->sync_required = REC_SYNC_REQUIRED;
+
     return REC_ERR_OKAY;
   }
   return REC_ERR_FAIL;

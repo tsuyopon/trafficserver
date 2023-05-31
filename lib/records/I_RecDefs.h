@@ -48,14 +48,15 @@ typedef int64_t RecCounter;
 typedef int8_t RecByte;
 typedef bool RecBool;
 
+// definition: https://docs.trafficserver.apache.org/en/7.1.x/developer-guide/config-vars.en.html
 enum RecT {
-  RECT_NULL    = 0x00,
-  RECT_CONFIG  = 0x01,
-  RECT_PROCESS = 0x02,
-  RECT_NODE    = 0x04,
-  RECT_LOCAL   = 0x10,
-  RECT_PLUGIN  = 0x20,
-  RECT_ALL     = 0x3F
+  RECT_NULL    = 0x00,  // 未定義のレコード
+  RECT_CONFIG  = 0x01,  // 一般的な設定変数
+  RECT_PROCESS = 0x02,  // 統計に関連したプロセス
+  RECT_NODE    = 0x04,  // ローカルの統計情報
+  RECT_LOCAL   = 0x10,  // クラスタに跨って明示的に共有されていない設定変数(直訳) (Trafficserver ver 10では存在しない)
+  RECT_PLUGIN  = 0x20,  // プラグインが生成した統計
+  RECT_ALL     = 0x3F   // 
 };
 
 enum RecDataT {
