@@ -223,6 +223,7 @@ RecCoreInit(RecModeT mode_type, Diags *_diags)
 
     ink_mutex_init(&g_rec_config_lock);
 
+    // records.configのパス
     g_rec_config_fpath = ats_stringdup(RecConfigReadConfigPath(nullptr, ts::filename::RECORDS));
     if (RecFileExists(g_rec_config_fpath) == REC_ERR_FAIL) {
       RecLog(DL_Warning, "Could not find '%s', system will run with defaults\n", ts::filename::RECORDS);

@@ -1089,7 +1089,7 @@ handle_control_message(int fd, void *req, size_t reqlen)
 
   Debug("ts_main", "handling message type=%d ptr=%p len=%zu on fd=%d", static_cast<int>(optype), req, reqlen, fd);
 
-  // static const control_message_handler handlers[ として定義された関数が呼び出されます
+  // この関数の直前にて「static const control_message_handler handlers[]」 として定義された関数が呼び出されます
   error = handlers[static_cast<unsigned>(optype)].handler(fd, req, reqlen);
   if (error != TS_ERR_OKAY) {
     // NOTE: if the error was produced by the handler sending a response, this could attempt to

@@ -252,9 +252,14 @@ initialize_thread_for_net(EThread *thread)
   InactivityCop *inactivityCop = new InactivityCop(get_NetHandler(thread)->mutex);
   int cop_freq                 = 1;
 
+  // デフォルト1となっている
+  // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-net-inactivity-check-frequency
   REC_ReadConfigInteger(cop_freq, "proxy.config.net.inactivity_check_frequency");
+
   memcpy(&nh->config, &NetHandler::global_config, sizeof(NetHandler::global_config));
   nh->configure_per_thread_values();
+
+  // 定常的に実行される
   thread->schedule_every(inactivityCop, HRTIME_SECONDS(cop_freq));
 
   thread->set_tail_handler(nh);

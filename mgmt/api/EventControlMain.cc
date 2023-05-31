@@ -200,10 +200,12 @@ delete_event_queue(LLQ *q)
 void
 apiEventCallback(alarm_t newAlarm, const char * /* ip ATS_UNUSED */, const char *desc)
 {
+
   // create an TSMgmtEvent
   // addEvent(new_alarm, ip, desc) // adds event to mgmt_events
   TSMgmtEvent *newEvent;
 
+  // TSMgmtEvent構造体を割り当て、idやnameを入れる
   newEvent       = TSEventCreate();
   newEvent->id   = newAlarm;
   newEvent->name = get_event_name(newEvent->id);
@@ -233,7 +235,8 @@ apiEventCallback(alarm_t newAlarm, const char * /* ip ATS_UNUSED */, const char 
  * until receives a request from the remote API client. Parse the request
  * to determine which CoreAPI call to make.
  *********************************************************************/
-// eventapi.sockを監視します。この関数はスレッドのメイン関数として呼ばれます
+// eventapi.sockを監視します。
+// この関数はTrafficManagerからのスレッドで実行される関数として呼ばれる
 void *
 event_callback_main(void *arg)
 {
@@ -284,6 +287,7 @@ event_callback_main(void *arg)
     }
 
     // select call - timeout is set so we can check events at regular intervals
+    //
     // mgmtのfdをselectシステムコールにより待ちます(timeout指定によりこの箇所で最大1秒待ちます。つまり、while中ではここで定期的にsleepされるイメージです)。
     int fds_ready = mgmt_select(FD_SETSIZE, &selectFDs, (fd_set *)nullptr, (fd_set *)nullptr, &timeout);
 
@@ -303,19 +307,28 @@ event_callback_main(void *arg)
         } else {
           // accept connection
           socklen_t addr_len = (sizeof(struct sockaddr));
+
+          // eventapi.sockは下記でacceptします。
           new_con_fd         = mgmt_accept(con_socket_fd, new_client_con->adr, &addr_len);
           new_client_con->fd = new_con_fd;
+
+          // accepted_clientsにacceptされたfdを紐づけておきます。
           accepted_clients.emplace(new_client_con->fd, new_client_con);
           Debug("event", "[event_callback_main] Accept new connection: fd=%d", new_con_fd);
         }
+
       } // end if (new_con_fd >= 0 && FD_ISSET(new_con_fd, &selectFDs))
 
       // some other file descriptor; for each one, service request
       if (fds_ready > 0) { // RECEIVED A REQUEST from remote API client
+
         // see if there are more fd to set - iterate through all entries in hash table
+        // TBD: eventapi.sockしかないので、イテレートの意味があるのだろうか?
         for (auto it = accepted_clients.begin(); it != accepted_clients.end();) {
+
           client_entry = it->second;
           ++it; // prevent the breaking of remove_event_client
+
           // got information check
           if (client_entry->fd && FD_ISSET(client_entry->fd, &selectFDs)) {
             // SERVICE REQUEST - read the op and message into a buffer
@@ -323,6 +336,7 @@ event_callback_main(void *arg)
             void *req;
             size_t reqlen;
 
+            // eventapi.sockあらメッセージ情報とその長さを取得する
             ret = preprocess_msg(client_entry->fd, &req, &reqlen);
             if (ret == TS_ERR_NET_READ || ret == TS_ERR_NET_EOF) { // preprocess_msg FAILED!
               Debug("event", "[event_callback_main] preprocess_msg FAILED; skip!");
@@ -330,6 +344,7 @@ event_callback_main(void *arg)
               continue;
             }
 
+            // 取得したメッセージを扱います
             ret = handle_event_message(client_entry, req, reqlen);
             ats_free(req);
 
@@ -352,7 +367,8 @@ event_callback_main(void *arg)
 
     TSMgmtEvent *event;
 
-    // mgmt_eventsはapiEventCallbackによりenqueuされます
+    // mgmt_eventsはapiEventCallbackによりenqueueされます
+    // mgmt_eventsに値がなければ処理すべきプロセスがないとしてcontinueします
     if (!mgmt_events || queue_is_empty(mgmt_events)) { // no events to process
       // fprintf(stderr, "[event_callback_main] NO EVENTS TO PROCESS\n");
       Debug("event", "[event_callback_main] NO EVENTS TO PROCESS");
@@ -360,6 +376,7 @@ event_callback_main(void *arg)
     }
 
     // iterate through each event in mgmt_events
+    // mgmt_eventsによるイテレーションを行います。
     while (!queue_is_empty(mgmt_events)) {
 
       // mutexロックを獲得してからdequeueして、mgmt_eventsを取得します
@@ -381,7 +398,7 @@ event_callback_main(void *arg)
           MgmtMarshallString name = event->name;
           MgmtMarshallString desc = event->description;
 
-          // mgmtapi.sockにリクエストを送る
+          // mgmtapi.sockのためのリクエスト依頼用のパケットを生成して、送信を行います。
           ret = send_mgmt_request(client_entry->fd, OpType::EVENT_NOTIFY, &optype, &name, &desc);
           if (ret != TS_ERR_OKAY) {
             Debug("event", "sending even notification to fd [%d] failed.", client_entry->fd);
@@ -540,6 +557,7 @@ handle_event_message(EventClientT *client, void *req, size_t reqlen)
     goto fail;
   }
 
+  // TBD: この関数の上で定義されている「static const event_message_handler handlers[] 」を見ると eventapi.sock用途としてはEVENT_REG_CALLBACKとEVENT_UNREG_CALLBACKしかない?
   if (handlers[static_cast<unsigned>(optype)] == nullptr) {
     goto fail;
   }

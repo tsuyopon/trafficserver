@@ -59,6 +59,7 @@ enum RecT {
   RECT_ALL     = 0x3F   // 
 };
 
+// 保存するデータの型
 enum RecDataT {
   RECD_NULL = 0,
   RECD_INT,

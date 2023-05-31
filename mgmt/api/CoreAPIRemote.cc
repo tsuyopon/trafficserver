@@ -21,7 +21,25 @@
   limitations under the License.
  */
 
-// CoreAPIRemote.ccはtraffic_control用途に利用される
+/*
+
+このファイル(CoreAPIRemote.cc)はtraffic_crashlog, traffic_ctl, traffic_topから呼ばれます。
+
+
+$ git grep -B 2 CoreAPIRemote.cc | grep Makefile
+mgmt/api/Makefile.am-
+mgmt/api/Makefile.am-libtsmgmt_la_SOURCES = \
+mgmt/api/Makefile.am:	CoreAPIRemote.cc \
+$ git grep libtsmgmt.la
+mgmt/api/Makefile.am:lib_LTLIBRARIES = libtsmgmt.la
+mgmt/api/Makefile.am:libtsmgmt_la_SOURCES = \
+mgmt/api/Makefile.am:libtsmgmt_la_LDFLAGS = @AM_LDFLAGS@ -no-undefined -version-info @TS_LIBTOOL_VERSION@
+mgmt/api/Makefile.am:libtsmgmt_la_LIBADD = @LIBOBJS@ \
+mgmt/api/Makefile.am:   libtsmgmt.la \
+src/traffic_crashlog/Makefile.inc:      $(top_builddir)/mgmt/api/libtsmgmt.la \
+src/traffic_ctl/Makefile.inc:   $(top_builddir)/mgmt/api/libtsmgmt.la \
+src/traffic_top/Makefile.inc:   $(top_builddir)/mgmt/api/libtsmgmt.la \
+*/
 
 
 /*****************************************************************************

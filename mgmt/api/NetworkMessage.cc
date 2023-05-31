@@ -21,6 +21,57 @@
   limitations under the License.
  */
 
+/*
+
+下記の調査結果の通り、このNetworkMessage.ccはTraffic Serverでは利用されません。
+Traffic Managerやtraffic_ctlでは組み込まれているので利用されている可能性があります
+
+$ git grep -B 8 NetworkMessage.cc | grep Makefile.am
+mgmt/api/Makefile.am-
+mgmt/api/Makefile.am-libmgmtapi_la_SOURCES = \
+mgmt/api/Makefile.am-   CoreAPI.h \
+mgmt/api/Makefile.am-   CoreAPIShared.cc \
+mgmt/api/Makefile.am-   CoreAPIShared.h \
+mgmt/api/Makefile.am-   EventCallback.cc \
+mgmt/api/Makefile.am-   EventCallback.h \
+mgmt/api/Makefile.am-   INKMgmtAPI.cc \
+mgmt/api/Makefile.am:   NetworkMessage.cc \
+
+
+libmgmtapi.laは下記の2つのライブラリ生成に追加されます。
+(1) 
+libmgmtapilocal_la_LIBADD = \
+    libmgmtapi.la \
+    $(top_builddir)/src/tscore/libtscore.la
+
+
+(2)
+libtsmgmt_la_LIBADD = @LIBOBJS@ \
+    libmgmtapi.la \
+    $(top_builddir)/src/tscore/libtscore.la \
+    $(top_builddir)/mgmt/utils/libutils_p.la
+
+
+これら2つの利用箇所がNetworkMessage.ccの利用箇所となります。
+$ git grep libtsmgmt.la
+mgmt/api/Makefile.am:lib_LTLIBRARIES = libtsmgmt.la
+mgmt/api/Makefile.am:libtsmgmt_la_SOURCES = \
+mgmt/api/Makefile.am:libtsmgmt_la_LDFLAGS = @AM_LDFLAGS@ -no-undefined -version-info @TS_LIBTOOL_VERSION@
+mgmt/api/Makefile.am:libtsmgmt_la_LIBADD = @LIBOBJS@ \
+mgmt/api/Makefile.am:   libtsmgmt.la \
+src/traffic_crashlog/Makefile.inc:      $(top_builddir)/mgmt/api/libtsmgmt.la \
+src/traffic_ctl/Makefile.inc:   $(top_builddir)/mgmt/api/libtsmgmt.la \
+src/traffic_top/Makefile.inc:   $(top_builddir)/mgmt/api/libtsmgmt.la \
+
+$ git grep libmgmtapilocal.la
+mgmt/api/Makefile.am:noinst_LTLIBRARIES = libmgmtapilocal.la libmgmtapi.la
+mgmt/api/Makefile.am:libmgmtapilocal_la_SOURCES = \
+mgmt/api/Makefile.am:libmgmtapilocal_la_LIBADD = \
+src/traffic_manager/Makefile.inc:       $(top_builddir)/mgmt/api/libmgmtapilocal.la \
+
+
+*/
+
 #include "tscore/ink_config.h"
 #include "tscore/ink_defs.h"
 #include "tscore/ink_error.h"
@@ -37,6 +88,8 @@ struct NetCmdOperation {
 };
 
 // Requests always begin with a OpType, followed by additional fields.
+//
+// 「static const control_message_handler handlers[]」や「static const event_message_handler handlers[]」の定義と同様のコマンド定義がされている
 static const struct NetCmdOperation requests[] = {
   /* RECORD_SET                 */ {3, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_STRING}},
   /* RECORD_GET                 */ {2, {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING}},
@@ -101,6 +154,8 @@ static const struct NetCmdOperation responses[] = {
   /* HOST_STATUS_DOWN           */ {1, {MGMT_MARSHALL_INT}},
 };
 
+
+// 上記で定義されている「static const struct NetCmdOperation requests[]」の1つのコマンドで定義されるマッピング情報へと変換されます。
 #define GETCMD(ops, optype, cmd)                           \
   do {                                                     \
     if (static_cast<unsigned>(optype) >= countof(ops)) {   \
@@ -112,8 +167,9 @@ static const struct NetCmdOperation responses[] = {
     cmd = &ops[static_cast<unsigned>(optype)];             \
   } while (0);
 
+// mgmtのためのメッセージを作成して、送信します
 TSMgmtError
-send_mgmt_request(const mgmt_message_sender &snd, OpType optype, ...)
+send_mgmt_request(const mgmt_message_sender &snd, OpType optype, ...)  // 可変長引数を受け取る
 {
   va_list ap;
   ats_scoped_mem<char> msgbuf;
@@ -125,18 +181,36 @@ send_mgmt_request(const mgmt_message_sender &snd, OpType optype, ...)
     return TS_ERR_NET_ESTABLISH; // no connection.
   }
 
+  // requestsやoptypeの値を取得して、cmdにリクエストに必要となる情報を追加します
   GETCMD(requests, optype, cmd);
 
+  // mgmt_message_length_vではメッセージの長さを求めます 
+  // cmd->fields, cmd->nfieldsの値はGETCMDを呼び出したら設定されます。
+  // ここにはメッセージに指定されるフィールド配列、フィールドの個数が入ります。可変長引数のapにはフィールドに詰める値が指定されます。
+  // (送付するメッセージの長さを求めるだけなら可変長引数apは不要のようにも思えますが、MGMT_MARSHALL_STRINGやMGMT_MARSHALL_DATAだと入る長さは不定になるので長さを算出する必要があります。
+  // なお、apにはフィールド数分の値を指定する必要があります
   va_start(ap, optype);
   msglen = mgmt_message_length_v(cmd->fields, cmd->nfields, ap);
   va_end(ap);
 
   msgbuf = static_cast<char *>(ats_malloc(msglen + 4));
 
+  // メッセージの作成は2段階に分ける(1と2では指定されている引数が異なることに注意する)
+  //
+  // 1. mgmt_message_marshall
+  //     メッセージサイズを表すヘッダの部分にだけ値をコピーしている。(内部的にはmgmt_message_marshall_vも呼び出しているが1と2で役割が違うことに注意する)
+  // 2. mgmt_message_marshall_v
+  //     メッセージの本文部分に値を設定していく
+
+
   // First marshall the total message length.
+  // 1. lenfieldはこの関数の先頭に定義されていてい「{MGMT_MARSHALL_INT}」となります。そのため、countof(lenfield)は必ず1になります。そして、可変長引数の &msglenにはメッセージ全体のサイズが入ります。
   mgmt_message_marshall((char *)msgbuf, msglen, lenfield, countof(lenfield), &msglen);
 
   // Now marshall the message itself.
+  // 2. 1ではMGMT_MARSHALL_INTサイズ分のメッセージ長を保存していているため、4byte増やした位置からパケットへの登録を行います。
+  // cmd->fields, cmd->nfieldsの値はGETCMDを呼び出したら設定されているものです。
+  // 下記関数に指定される引数にはフィールド配列(cmd->fields)、フィールドの個数(cmd->nfields)が入ります。可変長引数のapにはフィールドに詰める値がフィールド配列(cmd->fields)に指定した値の順番でフィールドの個数(cmd->nfields)分指定が必要です。
   va_start(ap, optype);
   if (mgmt_message_marshall_v((char *)msgbuf + 4, msglen, cmd->fields, cmd->nfields, ap) == -1) {
     va_end(ap);
@@ -146,21 +220,28 @@ send_mgmt_request(const mgmt_message_sender &snd, OpType optype, ...)
   va_end(ap);
 
   // mgmtapi_sender::send を呼び出す
-  return snd.send(msgbuf, msglen + 4);
+  return snd.send(msgbuf, msglen + 4);  // 「+ 4」は先頭にメッセージのサイズとしてMGMT_MARSHALL_INT分のパケット長を追加しているのでその分
+
 }
 
+// 下記の様に呼ばれる
+//  (例) ret = send_mgmt_request(client_entry->fd, OpType::EVENT_NOTIFY, &optype, &name, &desc);
 TSMgmtError
 send_mgmt_request(int fd, OpType optype, ...)
 {
+
   va_list ap;
   MgmtMarshallInt msglen;
   MgmtMarshallData req            = {nullptr, 0};
   const MgmtMarshallType fields[] = {MGMT_MARSHALL_DATA};
   const NetCmdOperation *cmd;
 
+  // 下記でoptype=「OpType::EVENT_NOTIFY」としてのリクエストは下記でcmdに登録しています
+  // 例えば、cmd = &request[static_cast<unsigned>(OpType::EVENT_NOTIFY)];  として変換されます。
   GETCMD(requests, optype, cmd);
 
   // Figure out the payload length.
+  // cmdに応じてリクエストする際のデータ構造が決まっていてその長さをmgmt_message_length_vで取得して、その値をreq.lenに設定してから、mgmt_message_marshall_vを呼び出す
   va_start(ap, optype);
   msglen = mgmt_message_length_v(cmd->fields, cmd->nfields, ap);
   va_end(ap);
@@ -171,6 +252,7 @@ send_mgmt_request(int fd, OpType optype, ...)
   req.len = msglen;
 
   // Marshall the message itself.
+  // 下記でレスポンスが帰ってくる
   va_start(ap, optype);
   if (mgmt_message_marshall_v(req.ptr, req.len, cmd->fields, cmd->nfields, ap) == -1) {
     ats_free(req.ptr);

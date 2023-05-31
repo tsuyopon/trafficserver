@@ -365,15 +365,20 @@ public:
   }
 
   ~TrackerContinuation() override { mutex = nullptr; }
+
+  // freelistのメモリ状況を定期的にダンプしてくれていると思われる。おそらくデバッグ用?
   int
   periodic(int event, Event * /* e ATS_UNUSED */)
   {
+
     if (event == EVENT_IMMEDIATE) {
       // rescheduled from periodic to immediate event
       // this is the indication to terminate this tracker.
       delete this;
       return EVENT_DONE;
     }
+
+    // 下記の詳細はfreelistsに関するメモリの状態をダンプする
     if (use_baseline) {
       // TODO: TS-567 Integrate with debugging allocators "dump" features?
       ink_freelists_dump_baselinerel(stderr);
@@ -382,11 +387,14 @@ public:
       ink_freelists_dump(stderr);
       ResourceTracker::dump(stderr);
     }
+
+    // MEMTRACK_BASELINE環境変数が設定されるとuse_baseline=1となる。
     if (!baseline_taken && use_baseline) {
       ink_freelists_snap_baseline();
       // TODO: TS-567 Integrate with debugging allocators "dump" features?
       baseline_taken = 1;
     }
+
     return EVENT_CONT;
   }
 };
@@ -566,6 +574,7 @@ init_memory_tracker(const char *config_var, RecDataT /* type ATS_UNUSED */, RecD
     preE->cancel();
   }
 
+  // proxy.config.dump_mem_info_frequencyの設定が0より大きければ、定期実行スレッドを起動する
   if (dump_mem_info_frequency > 0) {
     tracker_event = eventProcessor.schedule_every(new TrackerContinuation, HRTIME_SECONDS(dump_mem_info_frequency), ET_CALL);
   }
@@ -1411,6 +1420,7 @@ struct ShowStats : public Continuation {
   int64_t last_nwb = 0;
   int64_t last_p   = 0;
   int64_t last_o   = 0;
+
   int
   mainEvent(int event, Event *e)
   {
@@ -1510,6 +1520,7 @@ struct ShowStats : public Continuation {
 #endif
     return EVENT_CONT;
   }
+
   ShowStats() : Continuation(nullptr)
 
   {

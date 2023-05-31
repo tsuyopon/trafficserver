@@ -30,6 +30,22 @@
  *
  ***************************************************************************/
 
+/*
+このファイル(NetworkUtilsLocal.cc)は、TrafficManagerから利用されています。
+
+$ git grep -B 4 NetworkUtilsLocal.cc  | grep Makefile
+mgmt/api/Makefile.am-libmgmtapilocal_la_SOURCES = \
+mgmt/api/Makefile.am-	CoreAPI.cc \
+mgmt/api/Makefile.am-	EventControlMain.cc \
+mgmt/api/Makefile.am-	EventControlMain.h \
+mgmt/api/Makefile.am:	NetworkUtilsLocal.cc \
+$ git grep libmgmtapilocal.la
+mgmt/api/Makefile.am:noinst_LTLIBRARIES = libmgmtapilocal.la libmgmtapi.la
+mgmt/api/Makefile.am:libmgmtapilocal_la_SOURCES = \
+mgmt/api/Makefile.am:libmgmtapilocal_la_LIBADD = \
+src/traffic_manager/Makefile.inc:       $(top_builddir)/mgmt/api/libmgmtapilocal.la \
+*/
+
 #include "tscore/ink_platform.h"
 #include "tscore/ink_sock.h"
 #include "tscore/Diags.h"
@@ -60,13 +76,16 @@ preprocess_msg(int fd, void **req, size_t *reqlen)
   *req    = nullptr;
   *reqlen = 0;
 
-  // メッセージを受信します。fdにはmgmtapi.sockのfdが入ります。
+  // メッセージを受信します。この関数への遷移元によってfdのsocketが変わってきます。
+  //  - mgmt/api/TSControlMain.cc のts_ctrl_main関数からの遷移の場合にはmgmtapi.sockのfdが入ります。
+  //  - mgmt/api/EventControlMain.cc のevent_callback_main関数からの遷移の場合にはeventapi.sockのfdが入ります。
   ret = recv_mgmt_message(fd, msg);
   if (ret != TS_ERR_OKAY) {
     return ret;
   }
 
   // We should never receive an empty payload.
+  // 空のペイロードを受け取るべきではないので、受け取ったらエラーとする
   if (msg.ptr == nullptr) {
     return TS_ERR_NET_READ;
   }

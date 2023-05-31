@@ -130,6 +130,7 @@ RecConfigOverrideFromEnvironment(const char *name, const char *value)
 //-------------------------------------------------------------------------
 // RecParseConfigFile
 //-------------------------------------------------------------------------
+// records.configを処理します
 int
 RecConfigFileParse(const char *path, RecConfigEntryCallback handler)
 {
@@ -144,6 +145,7 @@ RecConfigFileParse(const char *path, RecConfigEntryCallback handler)
   RecT rec_type;
   RecDataT data_type;
 
+  // 改行でrecords.configを行毎に分割します
   Tokenizer line_tok("\r\n");
   tok_iter_state line_tok_state;
 
@@ -161,6 +163,7 @@ RecConfigFileParse(const char *path, RecConfigEntryCallback handler)
   line_tok.Initialize(fbuf, SHARE_TOKS | ALLOW_EMPTY_TOKS);
   line     = line_tok.iterFirst(&line_tok_state);
   line_num = 1;
+
   while (line) {
     char *lc = ats_strdup(line);
     char *lt = lc;
@@ -169,6 +172,7 @@ RecConfigFileParse(const char *path, RecConfigEntryCallback handler)
     while (isspace(*lt)) {
       lt++;
     }
+
     rec_type_str = strtok_r(lt, " \t", &ln);
 
     // check for blank lines and comments
@@ -190,6 +194,7 @@ RecConfigFileParse(const char *path, RecConfigEntryCallback handler)
       while (isspace(*ln)) {
         ln++;
       }
+
       if (*ln == '\0') {
         data_str = nullptr;
       } else {
@@ -249,6 +254,7 @@ RecConfigFileParse(const char *path, RecConfigEntryCallback handler)
     // update our g_rec_config_contents_xxx
     g_rec_config_contents_ht.emplace(name_str);
 
+  // 次の行に移して、whileの先頭から始めるために変数を設定しています
   L_done:
     line = line_tok.iterNext(&line_tok_state);
     line_num++;

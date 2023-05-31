@@ -242,6 +242,7 @@ register_ShowNet(Continuation *c, HTTPHdr *h)
     }
     SET_CONTINUATION_HANDLER(s, &ShowNet::showConnections);
   }
+
   eventProcessor.schedule_imm(s, ET_TASK);
   return &s->action;
 }

@@ -232,9 +232,11 @@ mgmt_message_length(const MgmtMarshallType *fields, unsigned count, ...)
   return length;
 }
 
+// Mgmtメッセージを作るためにはデータ構造がメッセージ毎に決まっていますが、そのメッセージの長さを求めます
 MgmtMarshallInt
 mgmt_message_length_v(const MgmtMarshallType *fields, unsigned count, va_list ap)
 {
+
   MgmtMarshallAnyPtr ptr;
   MgmtMarshallInt nbytes = 0;
 
@@ -345,7 +347,8 @@ mgmt_message_read(int fd, const MgmtMarshallType *fields, unsigned count, ...)
 }
 
 
-// mgmtapi.sockから読み取ります
+// mgmtapi.sockやeventapi.sockからメッセージを読み込みます (どちらから呼ばれる場合もあります)
+// 下記の第４引数の「va_list ap」がメッセージのポインタを表しています。
 ssize_t
 mgmt_message_read_v(int fd, const MgmtMarshallType *fields, unsigned count, va_list ap)
 {
@@ -395,9 +398,11 @@ mgmt_message_read_v(int fd, const MgmtMarshallType *fields, unsigned count, va_l
     nbytes += nread;
   }
 
+  // 読み込んだ合計バイト数を返す
   return nbytes;
 }
 
+// 指定されたデータをmemcpyにより確保して、値をコピーします
 ssize_t
 mgmt_message_marshall(void *buf, size_t remain, const MgmtMarshallType *fields, unsigned count, ...)
 {
@@ -411,6 +416,7 @@ mgmt_message_marshall(void *buf, size_t remain, const MgmtMarshallType *fields, 
   return nbytes;
 }
 
+// memcpyにより指定されたデータ構造にデータを配置します
 ssize_t
 mgmt_message_marshall_v(void *buf, size_t remain, const MgmtMarshallType *fields, unsigned count, va_list ap)
 {
@@ -482,12 +488,15 @@ nospace:
   return -1;
 }
 
+// 指定された数(count)に対して、指定されたフィールド(fields)に基づいて、データ(可変長引数のap)を詰める。
+// apにはfieldsに指定されたフィールド情報に登録するデータの順番で、可変長引数のデータを配置しなければならない
 ssize_t
-mgmt_message_parse(const void *buf, size_t len, const MgmtMarshallType *fields, unsigned count, ...)
+mgmt_message_parse(const void *buf, size_t len, const MgmtMarshallType *fields, unsigned count, ...) // 可変長引数は内部で va_start(ap, count)としてapで受け取る
 {
   MgmtMarshallInt nbytes = 0;
   va_list ap;
 
+  // 可変長引数を取得する
   va_start(ap, count);
   nbytes = mgmt_message_parse_v(buf, len, fields, count, ap);
   va_end(ap);
@@ -495,6 +504,8 @@ mgmt_message_parse(const void *buf, size_t len, const MgmtMarshallType *fields, 
   return nbytes;
 }
 
+// 指定された数(count)に対して、指定されたフィールド(fields)に基づいて、データ(可変長引数のap)を詰める。
+// apにはfieldsに指定された順番で、可変長引数のデータを配置しなければならない
 ssize_t
 mgmt_message_parse_v(const void *buf, size_t len, const MgmtMarshallType *fields, unsigned count, va_list ap)
 {
@@ -509,6 +520,8 @@ mgmt_message_parse_v(const void *buf, size_t len, const MgmtMarshallType *fields
       if (len < 4) {
         goto nospace;
       }
+      // va_argによって可変長引数で指定されているapの値が読み込まれる
+      // http://linuxjm.osdn.jp/html/LDP_man-pages/man3/stdarg.3.html
       ptr.m_int = va_arg(ap, MgmtMarshallInt *);
       memcpy(ptr.m_int, buf, 4);
       nread = 4;

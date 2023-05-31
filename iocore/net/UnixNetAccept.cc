@@ -61,10 +61,16 @@ net_accept(NetAccept *na, void *ep, bool blockable)
   // do-while for accepting all the connections
   // added by YTS Team, yamsat
   do {
+
+    // ここでaccept関数を実行します
     if ((res = na->server.accept(&con)) < 0) {
+
+      // 
       if (res == -EAGAIN || res == -ECONNABORTED || res == -EPIPE) {
         goto Ldone;
       }
+
+      // FDが取得できて、キャンセルもされていない場合
       if (na->server.fd != NO_FD && !na->action_->cancelled) {
         if (!blockable) {
           na->action_->continuation->handleEvent(EVENT_ERROR, (void *)static_cast<intptr_t>(res));
@@ -76,8 +82,10 @@ net_accept(NetAccept *na, void *ep, bool blockable)
       count = res;
       goto Ldone;
     }
+
     NET_SUM_GLOBAL_DYN_STAT(net_tcp_accept_stat, 1);
 
+    // UnixNetVConnection構造体の割り当て
     vc = static_cast<UnixNetVConnection *>(na->getNetProcessor()->allocate_vc(e->ethread));
     if (!vc) {
       goto Ldone; // note: @a con will clean up the socket when it goes out of scope.
@@ -85,6 +93,8 @@ net_accept(NetAccept *na, void *ep, bool blockable)
 
     ++count;
     NET_SUM_GLOBAL_DYN_STAT(net_connections_currently_open_stat, 1);
+
+    // 構造体への各種設定
     vc->id = net_next_connection_number();
     vc->con.move(con);
     vc->set_remote_addr(con.addr);
@@ -102,6 +112,8 @@ net_accept(NetAccept *na, void *ep, bool blockable)
       vc->read.triggered = 1;
     }
 #endif
+
+    // continuationによる次回実行ハンドラ
     SET_CONTINUATION_HANDLER(vc, &UnixNetVConnection::acceptEvent);
 
     EThread *t;
@@ -130,6 +142,8 @@ Ldone:
   if (!blockable) {
     MUTEX_UNTAKE_LOCK(na->action_->mutex, e->ethread);
   }
+
+  // acceptで処理した数を返す
   return count;
 }
 
@@ -195,6 +209,8 @@ NetAccept::init_accept(EThread *t)
 
   SET_HANDLER(&NetAccept::acceptEvent);
   period = -HRTIME_MSECONDS(net_accept_period);
+
+  // TBD* ここで呼ばれるのは上でSET_HANDLERしているNetAccept::acceptEvent?
   t->schedule_every(this, period);
 }
 
@@ -393,6 +409,7 @@ NetAccept::acceptEvent(int event, void *ep)
 
   MUTEX_TRY_LOCK(lock, m, e->ethread);
   if (lock.is_locked()) {
+
     if (action_->cancelled) {
       e->cancel();
       NET_DECREMENT_DYN_STAT(net_accepts_currently_open_stat);
@@ -401,6 +418,7 @@ NetAccept::acceptEvent(int event, void *ep)
     }
 
     int res;
+    // accept_fnは「na->accept_fn = net_accept」としてUnixNetProcessor::accept_internalでセットされています。
     if ((res = accept_fn(this, e, false)) < 0) {
       NET_DECREMENT_DYN_STAT(net_accepts_currently_open_stat);
       /* INKqa11179 */

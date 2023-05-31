@@ -77,6 +77,7 @@ UrlRewrite::load()
     this->ts_name = ats_strdup("");
   }
 
+  // proxy.config.http.referer_default_redirectに関連する処理
   this->http_default_redirect_url = nullptr;
   REC_ReadConfigStringAlloc(this->http_default_redirect_url, "proxy.config.http.referer_default_redirect");
   if (this->http_default_redirect_url == nullptr) {
@@ -85,6 +86,7 @@ UrlRewrite::load()
     this->http_default_redirect_url = ats_strdup("http://www.apache.org");
   }
 
+  // 設定値proxy.config.http.referer_default_redirectを読み込む
   REC_ReadConfigInteger(reverse_proxy, "proxy.config.reverse_proxy.enabled");
 
   /* Initialize the plugin factory */
@@ -97,7 +99,7 @@ UrlRewrite::load()
   strategyFactory = new NextHopStrategyFactory(sf.c_str());
 
   // TSRemapInit
-  // 重要な処理です
+  // (重要)remap.configの情報テーブルの構築処理が行われます。
   if (0 == this->BuildTable(config_file_path)) { // conig_file_pathにはremap.configが指定される
     _valid = true;
     if (is_debug_tag_set("url_rewrite")) {

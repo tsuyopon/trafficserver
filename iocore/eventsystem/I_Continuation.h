@@ -219,6 +219,7 @@ public:
     @return State machine and processor specific return code.
 
   */
+  // handlerに飛ばす
   TS_INLINE int
   handleEvent(int event = CONTINUATION_EVENT_NONE, void *data = nullptr)
   {

@@ -21,6 +21,49 @@
   limitations under the License.
  */
 
+/*
+
+このファイルRecProcess.ccで定義される関数はRecLocal.ccで定義される関数と同じであるために関数シンボルが被ってしまいます。
+
+下記での調査よりわかるのは、 RecProcess.ccについてはlibrecords.pライブラリに組み込まれます。
+librecords.pをリンクしている箇所を調べたところTrafficServer等で利用されていますが、TrafficManagerでは利用されていない点に注意してください。
+
+$ git grep librecords.p
+iocore/aio/Makefile.am: $(top_builddir)/lib/records/librecords_p.a \
+iocore/cache/Makefile.am:       $(top_builddir)/lib/records/librecords_p.a \
+iocore/eventsystem/Makefile.am: $(top_builddir)/lib/records/librecords_p.a \
+iocore/hostdb/Makefile.am:      $(top_builddir)/lib/records/librecords_p.a \
+iocore/net/Makefile.am: $(top_builddir)/lib/records/librecords_p.a \
+iocore/net/Makefile.am: $(top_builddir)/lib/records/librecords_p.a \
+iocore/net/quic/Makefile.am:  $(top_builddir)/lib/records/librecords_p.a \
+lib/records/Makefile.am:noinst_LIBRARIES = librecords_lm.a librecords_p.a
+lib/records/Makefile.am:librecords_p_a_SOURCES = \
+lib/records/Makefile.am:        $(top_builddir)/lib/records/librecords_p.a \
+lib/records/Makefile.am:        $(top_builddir)/lib/records/librecords_p.a \
+lib/records/RecProcess.cc:// i_am_the_record_owner, only used for librecords_p.a
+lib/records/RecProcess.cc:// librecords_p.aでgrepしたがtraffic_serverやtraffic_ctlではこれをリンクしていると思われる
+lib/records/test_RecProcess.i:  A small test and sample program for librecords_p.a
+proxy/hdrs/Makefile.am: $(top_builddir)/lib/records/librecords_p.a \
+proxy/hdrs/Makefile.am: $(top_builddir)/lib/records/librecords_p.a \
+proxy/http/Makefile.am: $(top_builddir)/lib/records/librecords_p.a \
+proxy/http/remap/Makefile.am:   $(top_builddir)/lib/records/librecords_p.a \
+proxy/http/remap/Makefile.am:  $(top_builddir)/lib/records/librecords_p.a \
+proxy/http/remap/Makefile.am:  $(top_builddir)/lib/records/librecords_p.a \
+proxy/http/remap/Makefile.am:  $(top_builddir)/lib/records/librecords_p.a \
+proxy/http2/Makefile.am:        $(top_builddir)/lib/records/librecords_p.a \
+proxy/http2/Makefile.am:        $(top_builddir)/lib/records/librecords_p.a \
+proxy/http3/Makefile.am:  $(top_builddir)/lib/records/librecords_p.a \
+src/traffic_crashlog/Makefile.inc:      $(top_builddir)/lib/records/librecords_p.a \
+src/traffic_ctl/Makefile.inc:   $(top_builddir)/lib/records/librecords_p.a \
+src/traffic_layout/Makefile.inc:        $(top_builddir)/lib/records/librecords_p.a \
+src/traffic_logcat/Makefile.inc:        $(top_builddir)/lib/records/librecords_p.a \
+src/traffic_logstats/Makefile.inc:      $(top_builddir)/lib/records/librecords_p.a \
+src/traffic_quic/Makefile.inc:  $(top_builddir)/lib/records/librecords_p.a \
+src/traffic_server/Makefile.inc:        $(top_builddir)/lib/records/librecords_p.a \
+src/traffic_top/Makefile.inc:   $(top_builddir)/lib/records/librecords_p.a \
+
+*/
+
 #include "tscore/ink_platform.h"
 #include "tscore/EventNotify.h"
 
@@ -50,9 +93,13 @@ static Event *sync_cont_event;
 //-------------------------------------------------------------------------
 // i_am_the_record_owner, only used for librecords_p.a
 //-------------------------------------------------------------------------
+// librecords_p.aでgrepしたがtraffic_serverやtraffic_ctlではこれをリンクしていると思われる
 bool
 i_am_the_record_owner(RecT rec_type)
 {
+  // TBD: g_mode_typeは PROXY_REMOTE_MGMT環境変数が指定されない限り、RECM_STAND_ALONEになると思われる。
+  // TBD: この2つの違い何を意味しているのかわかっていない
+
   if (g_mode_type == RECM_CLIENT) {
     switch (rec_type) {
     case RECT_PROCESS:
@@ -66,6 +113,7 @@ i_am_the_record_owner(RecT rec_type)
       ink_assert(!"Unexpected RecT type");
       return false;
     }
+
   } else if (g_mode_type == RECM_STAND_ALONE) {
     switch (rec_type) {
     case RECT_CONFIG:
@@ -271,7 +319,6 @@ RecProcessStart()
   if (g_started) {
     return REC_ERR_OKAY;
   }
-
 
   // ET_TASKにraw_stat_sync_contクラスの定期的な実行を指定する (デフォルト: 5秒毎)
   Debug("statsproc", "Starting sync continuations:");

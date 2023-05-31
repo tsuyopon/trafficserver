@@ -69,7 +69,10 @@ send_set_message(RecRecord *record)
   m = RecMessageAlloc(RECG_SET);
   m = RecMessageMarshal_Realloc(m, record);
   RecDebug(DL_Note, "[send] RECG_SET [%d bytes]", sizeof(RecMessageHdr) + m->o_write - m->o_start);
+
+  // ここでメッセージを送信します
   RecMessageSend(m);
+
   RecMessageFree(m);
   rec_mutex_release(&(record->lock));
 
@@ -380,38 +383,68 @@ RecSetRecord(RecT rec_type, const char *name, RecDataT data_type, RecData *data,
   if (lock) {
     ink_rwlock_wrlock(&g_records_rwlock);
   }
+
+  // nameがg_records_htというハッシュテーブル内に存在するかの結果をitとして取得して、その結果がハッシュテーブル内に存在する場合に下記のifが実行される
   if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
+
+    // 指定した対象が見つかった場合には既に値が存在することになる
+
     r1 = it->second;
+
+    // TBD: TrafficServerで実行される際にはおそらく下記はRecProcess.cc側のi_am_the_record_ownerが呼ばれている気がする
     if (i_am_the_record_owner(r1->rec_type)) {
+
       rec_mutex_acquire(&(r1->lock));
+
+      // 指定されたデータタイプがRECD_NULLで、以前とデータタイプが変更がない場合にはエラー (おそらく、変更するものが何もないから?)
       if ((data_type != RECD_NULL) && (r1->data_type != data_type)) {
         err = REC_ERR_FAIL;
       } else {
+
         bool rec_updated_p = false;
+
+        // 手前のifでRECD_NULLは以前の状態(r1->data_type)からは変化していることが保証されるが、その場合にはRecDataSetFromStringとして登録するらしい(なぜかは不明)
         if (data_type == RECD_NULL) {
           // If the caller didn't know the data type, they gave us a string
           // and we should convert based on the record's data type.
           ink_release_assert(data->rec_string != nullptr);
           rec_updated_p = RecDataSetFromString(r1->data_type, &(r1->data), data->rec_string);
         } else {
+          // 以前の登録状態からRECD_NULL以外のRECD_INT, RECD_FLOAT, RECD_STRING, RECD_COUNTERなどに変化する場合にはこのコードパスを通ります
           rec_updated_p = RecDataSet(data_type, &(r1->data), data);
         }
 
+        // 手前の分岐で代入されたrec_updated_pの値がtrue(ちゃんと登録された)のであれば、下記if文のコードパスを実行する
         if (rec_updated_p) {
+
+          // REC_SYNC_REQUIREDフラグを立てる
           r1->sync_required = REC_SYNC_REQUIRED;
+
+          // RECT_CONFIGかRECT_LOCALのタイプであれば、
           if (REC_TYPE_IS_CONFIG(r1->rec_type)) {
+
+            // REC_UPDATE_REQUIREDフラグを下記にセットする
             r1->config_meta.update_required = REC_UPDATE_REQUIRED;
           }
         }
 
         if (REC_TYPE_IS_STAT(r1->rec_type) && (data_raw != nullptr)) {
+          // もし統計のタイプ(RECT_PROCESS, RECT_PLUGIN, RECT_NODE)で指定されたdata_rawの引数がnullptrでなければ、r1->stat_meta.data_rawにdata_rawを設定しておく
           r1->stat_meta.data_raw = *data_raw;
         } else if (REC_TYPE_IS_CONFIG(r1->rec_type)) {
+          // もし設定のタイプ(RECT_CONFIG, RECT_LOCAL)で指定されていれば、r1->config_meta.sourceにsourceを設定しておく
           r1->config_meta.source = source;
         }
+
       }
+
       rec_mutex_release(&(r1->lock));
+
     } else {
+
+      // i_am_the_record_owner(r1->rec_type) の戻り値がfalseの場合に実行される
+      // TODO: RECT_NULLのケースの場合にこの分岐に入るのか?
+
       // We don't need to ats_strdup() here as we will make copies of any
       // strings when we marshal them into our RecMessage buffer.
       RecRecord r2;
@@ -421,37 +454,57 @@ RecSetRecord(RecT rec_type, const char *name, RecDataT data_type, RecData *data,
       r2.name      = name;
       r2.data_type = (data_type != RECD_NULL) ? data_type : r1->data_type;
       r2.data      = *data;
+
+
       if (REC_TYPE_IS_STAT(r2.rec_type) && (data_raw != nullptr)) {
         r2.stat_meta.data_raw = *data_raw;
       } else if (REC_TYPE_IS_CONFIG(r2.rec_type)) {
         r2.config_meta.source = source;
       }
+
       err = send_set_message(&r2);
       RecRecordFree(&r2);
     }
+
   } else {
+
+    // findで指定した設定が見つからなかったので、新規登録を行うコードパス
+
+
     // Add the record but do not set the 'registered' flag, as this
     // record really hasn't been registered yet.  Also, in order to
     // add the record, we need to have a rec_type, so if the user
     // calls RecSetRecord on a record we haven't registered yet, we
     // should fail out here.
+    // レコードを追加するためにはrec_typeが必要なので、まだ登録されていないレコードに対してRecDataSetを呼び出す場合にはここで中断する必要があるとのこと
     if ((rec_type == RECT_NULL) || (data_type == RECD_NULL)) {
       err = REC_ERR_FAIL;
       goto Ldone;
     }
+
+    // 構造体を確保する
     r1 = RecAlloc(rec_type, name, data_type);
+
+    // r1->dataに必要なデータをセットする
     RecDataSet(data_type, &(r1->data), data);
+
     if (REC_TYPE_IS_STAT(r1->rec_type) && (data_raw != nullptr)) {
       r1->stat_meta.data_raw = *data_raw;
     } else if (REC_TYPE_IS_CONFIG(r1->rec_type)) {
       r1->config_meta.source = source;
     }
+
+    // TBD: TrafficServerで実行される際にはおそらく下記はRecProcess.cc側のi_am_the_record_ownerが呼ばれている気がする
     if (i_am_the_record_owner(r1->rec_type)) {
+      // sync_requiredにREC_PEER_SYNC_REQUIREDフラグを追加します
       r1->sync_required = r1->sync_required | REC_PEER_SYNC_REQUIRED;
     } else {
       err = send_set_message(r1);
     }
+
+    // グローバルな設定として保持しているg_records.htにnameとしてr1構造体を登録しておく。emplace_backではなくemplaceなので先頭に追加される
     g_records_ht.emplace(name, r1);
+
   }
 
 Ldone:
@@ -676,10 +729,15 @@ RecExecConfigUpdateCbs(unsigned int update_required_type)
   int i, num_records;
   RecUpdateT update_type = RECU_NULL;
 
+  // 登録されている全レコード数を取得する
   num_records = g_num_records;
+
+  // 全レコードでイテレーション操作する
   for (i = 0; i < num_records; i++) {
     r = &(g_records[i]);
     rec_mutex_acquire(&(r->lock));
+
+    // ここでは設定に関するものなので設定タイプ(RECT_CONFIG, RECT_LOCAL)に絞られる
     if (REC_TYPE_IS_CONFIG(r->rec_type)) {
       /* -- upgrade to support a list of callback functions
          if ((r->config_meta.update_required & update_required_type) &&
@@ -697,7 +755,8 @@ RecExecConfigUpdateCbs(unsigned int update_required_type)
         }
       }
 
-      // REC_UPDATE_REQUIREDフラグがupdate_requiredに指定されていて、r->config_meta.update_cb_listに値があれば、
+      // REC_UPDATE_REQUIREDフラグがupdate_requiredに指定されていて、r->config_meta.update_cb_listに値があれば、更新作業が実行される。
+      // なお、REC_UPDATE_REQUIREDフラグはRecSetRecordでセットされる
       if ((r->config_meta.update_required & update_required_type) && (r->config_meta.update_cb_list)) {
 
         RecConfigUpdateCbList *cur_callback = nullptr;

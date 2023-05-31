@@ -21,8 +21,49 @@
   limitations under the License.
  */
 
-// このクラスはTrafficServerから利用されます。
-// TrafficServerからTrafficManagerへのリクエストに利用されています。
+/*
+
+ProcessManager.ccはTrafficServerなど下記から利用されます。
+なお、似たロジックとしてLocalManager.ccがありますが、これはTrafficManagerから利用されます。
+
+$ git grep -B 2 ProcessManager.cc 
+mgmt/Makefile.am-libmgmt_p_la_SOURCES = \
+mgmt/Makefile.am-       $(libmgmt_COMMON) \
+mgmt/Makefile.am:       ProcessManager.cc \
+$ git grep libmgmt_p.la
+iocore/aio/Makefile.am: $(top_builddir)/mgmt/libmgmt_p.la \
+iocore/cache/Makefile.am:       $(top_builddir)/mgmt/libmgmt_p.la \
+iocore/eventsystem/Makefile.am: $(top_builddir)/mgmt/libmgmt_p.la \
+iocore/hostdb/Makefile.am:      $(top_builddir)/mgmt/libmgmt_p.la \
+iocore/net/Makefile.am: $(top_builddir)/mgmt/libmgmt_p.la \
+iocore/net/Makefile.am: $(top_builddir)/mgmt/libmgmt_p.la \
+iocore/net/quic/Makefile.am:  $(top_builddir)/mgmt/libmgmt_p.la \
+lib/records/Makefile.am:        $(top_builddir)/mgmt/libmgmt_p.la \
+lib/records/Makefile.am:        $(top_builddir)/mgmt/libmgmt_p.la \
+mgmt/LocalManager.cc:mgmt/Makefile.am:noinst_LTLIBRARIES = libmgmt_c.la libmgmt_p.la libmgmt_lm.la
+mgmt/Makefile.am:#      libmgmt_p.la    libmgmt for Process Manager applications (everything else)
+mgmt/Makefile.am:noinst_LTLIBRARIES = libmgmt_c.la libmgmt_p.la libmgmt_lm.la
+mgmt/Makefile.am:libmgmt_p_la_SOURCES = \
+mgmt/Makefile.am:libmgmt_p_la_LIBADD = \
+proxy/hdrs/Makefile.am: $(top_builddir)/mgmt/libmgmt_p.la \
+proxy/hdrs/Makefile.am: $(top_builddir)/mgmt/libmgmt_p.la \
+proxy/http/Makefile.am: $(top_builddir)/mgmt/libmgmt_p.la \
+proxy/http/remap/Makefile.am:   $(top_builddir)/mgmt/libmgmt_p.la \
+proxy/http/remap/Makefile.am:  $(top_builddir)/mgmt/libmgmt_p.la \
+proxy/http/remap/Makefile.am:  $(top_builddir)/mgmt/libmgmt_p.la \
+proxy/http/remap/Makefile.am:  $(top_builddir)/mgmt/libmgmt_p.la \
+proxy/http2/Makefile.am:        $(top_builddir)/mgmt/libmgmt_p.la \
+proxy/http2/Makefile.am:        $(top_builddir)/mgmt/libmgmt_p.la \
+proxy/http3/Makefile.am:  $(top_builddir)/mgmt/libmgmt_p.la \
+src/traffic_crashlog/Makefile.inc:      $(top_builddir)/mgmt/libmgmt_p.la \
+src/traffic_ctl/Makefile.inc:   $(top_builddir)/mgmt/libmgmt_p.la \
+src/traffic_layout/Makefile.inc:        $(top_builddir)/mgmt/libmgmt_p.la \
+src/traffic_logcat/Makefile.inc:        $(top_builddir)/mgmt/libmgmt_p.la \
+src/traffic_logstats/Makefile.inc:      $(top_builddir)/mgmt/libmgmt_p.la \
+src/traffic_quic/Makefile.inc:  $(top_builddir)/mgmt/libmgmt_p.la \
+src/traffic_server/Makefile.inc:        $(top_builddir)/mgmt/libmgmt_p.la \
+src/traffic_top/Makefile.inc:   $(top_builddir)/mgmt/libmgmt_p.la \
+*/
 
 #include "InkAPIInternal.h"
 #include "ProcessManager.h"
@@ -40,6 +81,8 @@ ProcessManager *pmgmt = nullptr;
 // read_management_message attempts to read a message from the management
 // socket. Returns -errno on error, otherwise 0. If a message was read the
 // *msg pointer will be filled in with the message that was read.
+//
+// sockfdにはprocesserver.sockが指定されるようです。
 static int
 read_management_message(int sockfd, MgmtMessageHdr **msg)
 {
@@ -49,6 +92,9 @@ read_management_message(int sockfd, MgmtMessageHdr **msg)
   *msg = nullptr;
 
   // We have a message, try to read the message header.
+
+  // ここではメッセージのヘッダ部分(ボディ部を除く)だけ取得していると思われます
+  // processerver.sockが指定される
   ret = mgmt_read_pipe(sockfd, reinterpret_cast<char *>(&hdr), sizeof(MgmtMessageHdr));
   switch (ret) {
   case 0:
@@ -67,6 +113,7 @@ read_management_message(int sockfd, MgmtMessageHdr **msg)
   memcpy(full_msg, &hdr, sizeof(MgmtMessageHdr));
   char *data_raw = reinterpret_cast<char *>(full_msg) + sizeof(MgmtMessageHdr);
 
+  // ここではメッセージのボディ部だけを取得しているものと思われます
   ret = mgmt_read_pipe(sockfd, data_raw, hdr.data_len);
   if (ret == 0) {
     // Received EOF.

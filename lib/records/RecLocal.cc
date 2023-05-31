@@ -21,6 +21,25 @@
   limitations under the License.
  */
 
+/*
+このファイル(RecLocal.cc)に存在する関数は、RecProcess.ccに定義された関数シンボルが同じになるが、librecords_lm.aというダイナミックリンクライブラリで生成される。
+**実際に利用されているのはTrafficManagerでのみ利用されている**
+
+$ git grep -B 4 RecLocal.cc 
+lib/records/Makefile.am-librecords_lm_a_SOURCES = \
+lib/records/Makefile.am-        $(librecords_COMMON) \
+lib/records/Makefile.am-        I_RecLocal.h \
+lib/records/Makefile.am-        P_RecLocal.h \
+lib/records/Makefile.am:        RecLocal.cc
+$ git grep librecords_lm.a
+lib/records/Makefile.am:noinst_LIBRARIES = librecords_lm.a librecords_p.a
+lib/records/Makefile.am:librecords_lm_a_SOURCES = \
+lib/records/RecProcess.cc:lib/records/Makefile.am:noinst_LIBRARIES = librecords_lm.a librecords_p.a
+src/traffic_manager/Makefile.inc:       $(top_builddir)/lib/records/librecords_lm.a \
+
+*/
+
+
 #include "tscore/ink_platform.h"
 #include "ConfigManager.h"
 #include "tscore/ParseRules.h"
@@ -33,13 +52,11 @@
 #include "FileManager.h"
 #include <tscore/TSSystemState.h>
 
-// このクラスはsuffixにLocalが含まれているので(おそらく)TrafficManagerから実行されると思われる
-
 // Marks whether the message handler has been initialized.
 static bool message_initialized_p = false;
 
 //-------------------------------------------------------------------------
-// i_am_the_record_owner, only used for libreclocal.a
+// i_am_the_record_owner, only used for libreclocal.a 
 //-------------------------------------------------------------------------
 bool
 i_am_the_record_owner(RecT rec_type)
@@ -99,6 +116,8 @@ static void *
 config_update_thr(void * /* data */)
 {
   while (!TSSystemState::is_event_system_shut_down()) {
+
+    // 下記RecExecConfigUpdateCbs関数で設定ファイルのスイッチを行う
     switch (RecExecConfigUpdateCbs(REC_LOCAL_UPDATE_REQUIRED)) {
     case RECU_RESTART_TS:
       RecSetRecordInt("proxy.node.config.restart_required.proxy", 1, REC_SOURCE_DEFAULT);

@@ -948,6 +948,7 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
   bool is_cur_mapping_regex;
   const char *type_id_str;
 
+  // remap.configのファイルopen処理
   std::error_code ec;
   std::string content{ts::file::load(ts::file::path{path}, ec)};
   if (ec) {
@@ -1285,6 +1286,7 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
     // check for a 'strategy' and if wire it up if one exists.
     if ((bti->remap_optflg & REMAP_OPTFLG_STRATEGY) != 0 &&
         (maptype == FORWARD_MAP || maptype == FORWARD_MAP_REFERER || maptype == FORWARD_MAP_WITH_RECV_PORT)) {
+
       const char *strategy = strchr(bti->argv[0], static_cast<int>('='));
       if (strategy == nullptr) {
         errStr = "missing 'strategy' name argument, unable to add mapping rule";
@@ -1292,6 +1294,7 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
       } else {
         strategy++;
         new_mapping->strategy = bti->rewrite->strategyFactory->strategyInstance(strategy);
+
         if (!new_mapping->strategy) {
           snprintf(errStrBuf, sizeof(errStrBuf), "no strategy named '%s' is defined in the config", strategy);
           errStr = errStrBuf;
@@ -1299,6 +1302,7 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
         }
         Debug("url_rewrite_regex", "mapped the 'strategy' named %s", strategy);
       }
+
     }
 
     // Check "remap" plugin options and load .so object
@@ -1316,6 +1320,7 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
           errStr = errStrBuf;
           goto MAP_ERROR;
         }
+
         // this loads any subsequent plugins (if present)
         while (plugin_found_at) {
           jump_to_argc += plugin_found_at;
@@ -1327,6 +1332,7 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
             goto MAP_ERROR;
           }
         }
+
       }
     }
 

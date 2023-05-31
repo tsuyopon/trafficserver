@@ -285,6 +285,8 @@ UnixNetProcessor::init()
   // schedule per thread start up logic. Global init is done only here.
   NetHandler::init_for_process();
   NetHandler::active_thread_types[ET_NET] = true;
+
+  // 下記でInactivityCop (以前のTrafficCop)が定期実行指定される
   eventProcessor.schedule_spawn(&initialize_thread_for_net, etype);
 
   RecData d;

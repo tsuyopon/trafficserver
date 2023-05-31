@@ -507,6 +507,8 @@ DiskHandler::mainAIOEvent(int event, Event *e)
 {
   AIOCallback *op = nullptr;
 Lagain:
+  // io_getevents: https://linuxjm.osdn.jp/html/LDP_man-pages/man2/io_getevents.2.html
+  // 完了キューから非同期 I/O イベントを読み出す  
   int ret = io_getevents(ctx, 0, MAX_AIO_EVENTS, events, nullptr);
   for (int i = 0; i < ret; i++) {
     op             = (AIOCallback *)events[i].data;
@@ -537,13 +539,18 @@ Lagain:
   if (num > 0) {
     int ret;
     do {
+      // io_submitシステムコール: https://linuxjm.osdn.jp/html/LDP_man-pages/man2/io_submit.2.html
+      // 戻り値にはio_submit()で登録したiocbの個数を返します。
       ret = io_submit(ctx, num, cbs);
     } while (ret < 0 && ret == -EAGAIN);
 
+    // io_submit()の戻り値と登録を指定した個数が一致しなければ
     if (ret != num) {
       if (ret < 0) {
+        // 負数の場合には-1が返る
         Debug("aio", "io_submit failed: %s (%d)", strerror(-ret), -ret);
       } else {
+        // 指定した値のうちいくつかのみしかio_submitで登録できなかったことを意味する
         Fatal("could not submit IOs, io_submit(%p, %d, %p) returned %d", ctx, num, cbs, ret);
       }
     }

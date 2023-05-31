@@ -78,6 +78,7 @@ net_activity(UnixNetVConnection *vc, EThread *thread)
 static inline int
 read_signal_and_update(int event, UnixNetVConnection *vc)
 {
+
   vc->recursion++;
   if (vc->read.vio.cont && vc->read.vio.mutex == vc->read.vio.cont->mutex) {
     vc->read.vio.cont->handleEvent(event, &vc->read.vio);
@@ -99,6 +100,7 @@ read_signal_and_update(int event, UnixNetVConnection *vc)
       break;
     }
   }
+
   if (!--vc->recursion && vc->closed) {
     /* BZ  31932 */
     ink_assert(vc->thread == this_ethread());
@@ -112,13 +114,17 @@ read_signal_and_update(int event, UnixNetVConnection *vc)
 static inline int
 write_signal_and_update(int event, UnixNetVConnection *vc)
 {
+
   vc->recursion++;
   if (vc->write.vio.cont && vc->write.vio.mutex == vc->write.vio.cont->mutex) {
+    // 実際のメイン処理はこれ
     vc->write.vio.cont->handleEvent(event, &vc->write.vio);
   } else {
+
     if (vc->write.vio.cont) {
       Note("write_signal_and_update: mutexes are different? vc=%p, event=%d", vc, event);
     }
+
     switch (event) {
     case VC_EVENT_EOS:
     case VC_EVENT_ERROR:
@@ -133,6 +139,7 @@ write_signal_and_update(int event, UnixNetVConnection *vc)
       break;
     }
   }
+
   if (!--vc->recursion && vc->closed) {
     /* BZ  31932 */
     ink_assert(vc->thread == this_ethread());
@@ -141,6 +148,7 @@ write_signal_and_update(int event, UnixNetVConnection *vc)
   } else {
     return EVENT_CONT;
   }
+
 }
 
 static inline int
@@ -1018,6 +1026,7 @@ UnixNetVConnection::acceptEvent(int event, Event *e)
   thread = t;
 
   // Send this NetVC to NetHandler and start to polling read & write event.
+  // epollでREAD, WRITEを検知するための設定を行います。
   if (h->startIO(this) < 0) {
     free(t);
     return EVENT_DONE;
@@ -1028,29 +1037,37 @@ UnixNetVConnection::acceptEvent(int event, Event *e)
   SCOPED_MUTEX_LOCK(lock2, mutex, t);
 
   // Setup a timeout callback handler.
+  // 次回実行されるハンドラを設定する
   SET_HANDLER(&UnixNetVConnection::mainEvent);
 
   // Send this netvc to InactivityCop.
+  // open_listにenqueueしておく、これによりタイムアウトになった際にInactivityCopクラスでお掃除してくれる
   nh->startCop(this);
 
+  // inactivity_timeout_inがあれば設定しておく
   if (inactivity_timeout_in) {
     UnixNetVConnection::set_inactivity_timeout(inactivity_timeout_in);
   } else {
     set_inactivity_timeout(0);
   }
 
+  // active_timeout_inがあれば設定しておく
   if (active_timeout_in) {
     UnixNetVConnection::set_active_timeout(active_timeout_in);
   }
+
+  // ロックが設定されていたらMUTEX_TRY_LOCKする
   if (action_.continuation->mutex != nullptr) {
     MUTEX_TRY_LOCK(lock3, action_.continuation->mutex, t);
     if (!lock3.is_locked()) {
       ink_release_assert(0);
     }
+
     action_.continuation->handleEvent(NET_EVENT_ACCEPT, this);
   } else {
     action_.continuation->handleEvent(NET_EVENT_ACCEPT, this);
   }
+
   return EVENT_DONE;
 }
 
@@ -1111,6 +1128,7 @@ UnixNetVConnection::mainEvent(int event, Event *e)
     return EVENT_DONE;
   }
 
+  // READオペレーション
   if (read.vio.op == VIO::READ && !(f.shutdown & NetEvent::SHUTDOWN_READ)) {
     reader_cont = read.vio.cont;
     if (read_signal_and_update(signal_event, this) == EVENT_DONE) {
@@ -1118,6 +1136,7 @@ UnixNetVConnection::mainEvent(int event, Event *e)
     }
   }
 
+  // WRITEオペレーション
   if (!*signal_timeout_at && !closed && write.vio.op == VIO::WRITE && !(f.shutdown & NetEvent::SHUTDOWN_WRITE) &&
       reader_cont != write.vio.cont && writer_cont == write.vio.cont) {
     if (write_signal_and_update(signal_event, this) == EVENT_DONE) {

@@ -21,8 +21,29 @@
   limitations under the License.
  */
 
-// このクラスはTrafficManagerが利用します。
-// TrafficManagerがTrafficServerへのリクエストを行う際に利用します
+/*
+
+このファイルLocalManager.ccはTraffic Managerにより利用されるクラスです。
+
+$ git grep -B 8 LocalManager.cc
+mgmt/Makefile.am-libmgmt_lm_la_SOURCES = \
+mgmt/Makefile.am-       $(libmgmt_COMMON) \
+mgmt/Makefile.am-       Alarms.cc \
+mgmt/Makefile.am-       Alarms.h \
+mgmt/Makefile.am-       DerivativeMetrics.cc \
+mgmt/Makefile.am-       DerivativeMetrics.h \
+mgmt/Makefile.am-       FileManager.cc \
+mgmt/Makefile.am-       FileManager.h \
+mgmt/Makefile.am:       LocalManager.cc \
+$ git grep libmgmt_lm.la
+mgmt/Makefile.am:#      libmgmt_lm.la   libmgmt for Local Manager applications (traffic_manager)
+mgmt/Makefile.am:noinst_LTLIBRARIES = libmgmt_c.la libmgmt_p.la libmgmt_lm.la
+mgmt/Makefile.am:libmgmt_lm_la_SOURCES = \
+mgmt/Makefile.am:libmgmt_lm_la_LIBADD = \
+src/traffic_manager/Makefile.inc:       $(top_builddir)/mgmt/libmgmt_lm.la \
+
+*/
+
 
 #include "tscore/ink_platform.h"
 #include "tscore/ink_sock.h"
@@ -499,7 +520,7 @@ LocalManager::pollMgmtProcessServer()
   }
 }
 
-void
+// TrafficManagerが
 LocalManager::handleMgmtMsgFromProcesses(MgmtMessageHdr *mh)
 {
   char *data_raw = reinterpret_cast<char *>(mh) + sizeof(MgmtMessageHdr);
@@ -557,7 +578,7 @@ LocalManager::handleMgmtMsgFromProcesses(MgmtMessageHdr *mh)
       break;
     }
   } break;
-  case MGMT_SIGNAL_LIBRECORDS:
+  case MGMT_SIGNAL_LIBRECORDS: // TrafficManagerが受信したら実行するロジックです
     if (mh->data_len > 0) {
       executeMgmtCallback(MGMT_SIGNAL_LIBRECORDS, {data_raw, static_cast<size_t>(mh->data_len)});
     } else {
