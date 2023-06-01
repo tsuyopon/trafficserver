@@ -612,8 +612,12 @@ remap_check_option(const char **argv, int argc, unsigned long findmode, int *_re
   if (argptr) {
     *argptr = nullptr;
   }
+
   if (argv && argc > 0) {
     for (int i = 0; i < argc; i++) {
+
+      // remap.configの仕様書を参考のこと
+      //  cf. https://docs.trafficserver.apache.org/ja/9.1.x/admin-guide/files/remap.config.en.html
       if (!strcasecmp(argv[i], "map_with_referer")) {
         if ((findmode & REMAP_OPTFLG_MAP_WITH_REFERER) != 0) {
           idx = i;

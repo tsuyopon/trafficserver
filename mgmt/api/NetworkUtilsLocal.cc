@@ -70,6 +70,7 @@ src/traffic_manager/Makefile.inc:       $(top_builddir)/mgmt/api/libmgmtapilocal
 TSMgmtError
 preprocess_msg(int fd, void **req, size_t *reqlen)
 {
+
   TSMgmtError ret;
   MgmtMarshallData msg;
 
@@ -90,8 +91,11 @@ preprocess_msg(int fd, void **req, size_t *reqlen)
     return TS_ERR_NET_READ;
   }
 
+  // 関数へのポインタとして指定されている*reqや*reqlenに登録します
   *req    = msg.ptr;
   *reqlen = msg.len;
+
   Debug("ts_main", "[preprocess_msg] read message length = %zd", msg.len);
   return TS_ERR_OKAY;
+
 }

@@ -30,6 +30,7 @@ getStatName(std::string &stat_name, const std::string_view name)
   stat_name.append(stat_prefix).append(name);
 }
 
+// この関数はprocesserver.sockレスポンスを受信した際にMGMT_EVENT_HOST_STATUS_UPを受け取った際に実行されるコールバック関数です
 static void
 mgmt_host_status_up_callback(ts::MemSpan<void> span)
 {
@@ -63,6 +64,7 @@ mgmt_host_status_up_callback(ts::MemSpan<void> span)
   }
 }
 
+// この関数はprocesserver.sockレスポンスを受信した際にMGMT_EVENT_HOST_STATUS_DOWNを受け取った際に実行されるコールバック関数です
 static void
 mgmt_host_status_down_callback(ts::MemSpan<void> span)
 {

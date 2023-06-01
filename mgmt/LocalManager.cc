@@ -94,6 +94,7 @@ LocalManager::mgmtCleanup()
 void
 LocalManager::mgmtShutdown()
 {
+
   mgmt_log("[LocalManager::mgmtShutdown] Executing shutdown request.\n");
   processShutdown(true);
   // WCCP TBD: Send a shutdown message to routers.
@@ -343,6 +344,8 @@ LocalManager::initMgmtProcessServer()
  * -  Function checks the mgmt process server for new processes
  *    and any requests sent from processes. It handles processes sent.
  */
+// この関数はtraffic_manager.ccの主要ループの中でポーリングで頻繁に呼ばれます
+// processerver.sockからメッセージを取り出して、そのメッセージ種別に応じた処理を実行します
 void
 LocalManager::pollMgmtProcessServer()
 {
@@ -359,6 +362,8 @@ LocalManager::pollMgmtProcessServer()
 
     FD_ZERO(&fdlist);
 
+    // TBD: process_server_sockfdとwatched_process_fdはどちらもprocesserver.sockのfdを指している気がするが、下記で2つの分岐があるのはなぜ?
+    // -> ソースコードを見る感じだとwatched_process_fdがあれば、process_server_sockfdは特に使われずにそのままsocketを閉じていると思われる。
     if (process_server_sockfd != ts::NO_FD) {
       FD_SET(process_server_sockfd, &fdlist);
     }
@@ -414,6 +419,8 @@ LocalManager::pollMgmtProcessServer()
       }
 #endif
 
+      // process_server_sockfdはLocalManager::initMgmtProcessServerでfdの値が設定される可能性がある
+      // processerver.sockをacceptしてから、watched_process_fdが起動していればprocesserver.sockを閉じるという動作になっている(なぜaccept前にwatched_process_fdがチェックされないのか不明)
       if (process_server_sockfd != ts::NO_FD && FD_ISSET(process_server_sockfd, &fdlist)) { /* New connection */
         struct sockaddr_in clientAddr;
         socklen_t clientLen = sizeof(clientAddr);
@@ -426,8 +433,10 @@ LocalManager::pollMgmtProcessServer()
         if (new_sockfd < 0) {
           mgmt_elog(errno, "[LocalManager::pollMgmtProcessServer] ==> ");
         } else if (!processRunning()) {
+          // processerver.sockが起動していない場合にはwatched_process_fdを直前でmgmt_acceptした戻り値であるnew_sockfdに置き換える
           watched_process_fd = new_sockfd;
         } else {
+          // processerver.sockが起動している場合には、processerver.sockは既にacceptしているので、不要としてclose_socketする
           close_socket(new_sockfd);
         }
         --num;
@@ -435,6 +444,7 @@ LocalManager::pollMgmtProcessServer()
 
       }
 
+      // processerver.sockがacceptしている場合には通常はこちらのコードパスを通りそうである
       if (ts::NO_FD != watched_process_fd && FD_ISSET(watched_process_fd, &fdlist)) {
         int res;
         MgmtMessageHdr mh_hdr;
@@ -442,13 +452,20 @@ LocalManager::pollMgmtProcessServer()
         keep_polling = true;
 
         // read the message
+        // メッセージを読み込む (まずはmgmt_read_pipeでヘッダ部を読み込み、その後にmgmt_read_pipeでデータ部を読み込む)
+        // 下記のmgmt_read_pipeではヘッダ部を読み込む
         if ((res = mgmt_read_pipe(watched_process_fd, reinterpret_cast<char *>(&mh_hdr), sizeof(MgmtMessageHdr))) > 0) {
 
           MgmtMessageHdr *mh_full = static_cast<MgmtMessageHdr *>(malloc(sizeof(MgmtMessageHdr) + mh_hdr.data_len));
           memcpy(mh_full, &mh_hdr, sizeof(MgmtMessageHdr));
           char *data_raw = reinterpret_cast<char *>(mh_full) + sizeof(MgmtMessageHdr);
+
+          // 下記のmgmt_read_pipeではデータ部を読み込む
           if ((res = mgmt_read_pipe(watched_process_fd, data_raw, mh_hdr.data_len)) > 0) {
+
+            // (重要)processerver.sockから受信したデータの処理種別毎に異なった処理を呼び出す
             handleMgmtMsgFromProcesses(mh_full);
+
           } else if (res < 0) {
             mgmt_fatal(0, "[LocalManager::pollMgmtProcessServer] Error in read (errno: %d)\n", -res);
           }
@@ -460,15 +477,18 @@ LocalManager::pollMgmtProcessServer()
         }
 
         // handle EOF
+        // 読み込みが正常終了した場合にはres == 0のコードパスに入る
         if (res == 0) {
           int estatus;
           pid_t tmp_pid = watched_process_pid;
 
           Debug("lm", "[LocalManager::pollMgmtProcessServer] Lost process EOF!");
 
+          // watched_process_fdはここで毎回閉じてそうである
           close_socket(watched_process_fd);
 
           waitpid(watched_process_pid, &estatus, 0); /* Reap child */
+
           if (WIFSIGNALED(estatus)) {
             int sig = WTERMSIG(estatus);
             mgmt_log("[LocalManager::pollMgmtProcessServer] Server Process terminated due to Sig %d: %s\n", sig, strsignal(sig));
@@ -520,7 +540,7 @@ LocalManager::pollMgmtProcessServer()
   }
 }
 
-// TrafficManagerが
+// TrafficManagerがprocesserver.sockから受信したレスポンスのメッセージ種別(ms->msg_id)に応じて処理する内容を分岐する
 LocalManager::handleMgmtMsgFromProcesses(MgmtMessageHdr *mh)
 {
   char *data_raw = reinterpret_cast<char *>(mh) + sizeof(MgmtMessageHdr);
@@ -629,7 +649,9 @@ void
 LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
 {
 
-  // traffic_ctlオプションなどの各種処理に応じて実行する処理を分岐する
+  // mgmtapi.sockからRESTART, SHUTDOWN, BOUNCEなどの命令を取得した際に、mgmt_shutdown_outstandingにフラグが入り、そのフラグが入ると、
+  // traffic_manager.ccのmainで処理され、メッセージがenqueuされます。
+  // このenqueueされたメッセージは traffic_manager.ccのprocessEventQueueでdequeueされ、その後このsendMgmtMsgToProcess経由で処理されることになります。
   switch (mh->msg_id) {
 
   case MGMT_EVENT_SHUTDOWN: {
@@ -666,6 +688,7 @@ LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
     } else {
       mgmt_log("[LocalManager:sendMgmtMsgToProcesses] Unknown file change: '%s'\n", data_raw);
     }
+
     ink_assert(found);
     if (!(fname && configFiles && configFiles->getConfigObj(fname, &rb)) &&
         (strcmp(data_raw, "proxy.config.body_factory.template_sets_dir") != 0) &&
@@ -673,13 +696,16 @@ LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
       mgmt_fatal(0, "[LocalManager::sendMgmtMsgToProcesses] "
                     "Invalid 'data_raw' for MGMT_EVENT_CONFIG_FILE_UPDATE\n");
     }
+
     ats_free(fname);
     break;
+
   }
 
   if (watched_process_fd != -1) {
 
     // mh構造体(MgmtMessageHdr)をpipeを使って書き込みを行う。これによって、trafficmanagerからtrafficserverにデータが伝達されると思われる
+    // *重要* processerver.sockへ書き込む
     if (mgmt_write_pipe(watched_process_fd, reinterpret_cast<char *>(mh), sizeof(MgmtMessageHdr) + mh->data_len) <= 0) {
       // In case of Linux, sometimes when the TS dies, the connection between TS and TM
       // is not closed properly. the socket does not receive an EOF. So, the TM does
@@ -777,6 +803,7 @@ LocalManager::signalEvent(int msg_id, const char *data_raw, int data_len)
   // なお、LocalManager::enqueueに追加されたキューを取得するのはLocalManager::processEventQueue()でdequeueにより取得されている。
   // LocalManager::processEventQueue()自体はtraffic_managerの中で処理されている。
   this->enqueue(mh);
+
   //  ink_assert(enqueue(mgmt_event_queue, mh));
 
 #if HAVE_EVENTFD
@@ -804,32 +831,42 @@ void
 LocalManager::processEventQueue()
 {
 
-  // 追加されたqueueが空になるまで実行する。(ここのqueueにはたとえばtraffic config reloadなどのコマンド情報が含まれたqueueが処理されることになる)
+  // 追加されたqueueが空になるまで実行する。
+  // ここに追加されるのは「LocalManager::signalEvent」が呼ばれた際にenqueueされていると思われる
   while (!this->queue_empty()) {
 
     bool handled_by_mgmt = false;
 
     // LocalManager::signalEventにより追加されたqueueはここで取得される
+    // 上記により追加される契機としては、traffic_ctlなどからmgmtapi.sockにリクエストされてRESTART, STOP, BOUNCEなどのコマンドが実行される際に、mgmt_shutdown_outstanding変数にフラグが格納され、
+    // そのフラグをtraffic_manager.ccのmainでswitch文により処理を分岐している仮定でLocalManager::signalEventが呼ばれenqueされるものと思われる
     MgmtMessageHdr *mh = this->dequeue();
     auto payload       = mh->payload().rebind<char>();
 
     // check if we have a local file update
+    // MGMT_EVENT_CONFIG_FILE_UPDATEだけはここで処理をする。これ以外のタイプは後の分岐で処理される。
     if (mh->msg_id == MGMT_EVENT_CONFIG_FILE_UPDATE) {
 
-      // records.config
+      // 取得したメッセージのペイロードが「records.config」に一致した場合の処理
       if (!(strcmp(payload.begin(), ts::filename::RECORDS))) {
+
+        // 設定ファイルの更新を行います。
         if (RecReadConfigFile() != REC_ERR_OKAY) {
           mgmt_elog(errno, "[fileUpdated] Config update failed for %s\n", ts::filename::RECORDS);
         } else {
+          // ちゃんと登録されているか確認する。登録されていなければ警告を表示する
           RecConfigWarnIfUnregistered();
         }
+
+        // 処理したのでそのフラグをセットします。
         handled_by_mgmt = true;
       }
     }
 
     // msg_idがMGMT_EVENT_CONFIG_FILE_UPDATE以外の場合にはまだ、mgmtによって処理されていないのでifの中を処理する
     if (!handled_by_mgmt) {
-      // trafficserverが起動していない場合には、dequeueにより取得したキューを再度enqueuして戻していると思われる
+
+      // trafficserverが起動していない場合には、処理されていないのでdequeueにより取得したキューを再度enqueuして戻している
       if (processRunning() == false) {
         // Fix INKqa04984
         // If traffic server hasn't completely come up yet,
@@ -839,6 +876,7 @@ LocalManager::processEventQueue()
       }
 
       Debug("lm", "[TrafficManager] ==> Sending signal event '%d' %s payload=%d", mh->msg_id, payload.begin(), int(payload.size()));
+
       // (重要) 下記によりtraffic_ctlなどで送られてきた命令をここで処理する
       lmgmt->sendMgmtMsgToProcesses(mh);
     }

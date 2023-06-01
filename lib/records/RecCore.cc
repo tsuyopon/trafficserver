@@ -946,10 +946,12 @@ RecGetRecord_Xmalloc(const char *name, RecDataT data_type, RecData *data, bool l
     ink_rwlock_rdlock(&g_records_rwlock);
   }
 
+  // g_record_htに指定したnameのレコードが見つかった場合に処理を行う
   if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
     RecRecord *r = it->second;
 
     rec_mutex_acquire(&(r->lock));
+
     if (!r->registered || (r->data_type != data_type)) {
       err = REC_ERR_FAIL;
     } else {

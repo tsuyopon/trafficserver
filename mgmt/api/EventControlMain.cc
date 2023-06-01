@@ -336,7 +336,7 @@ event_callback_main(void *arg)
             void *req;
             size_t reqlen;
 
-            // eventapi.sockあらメッセージ情報とその長さを取得する
+            // eventapi.sockからメッセージ情報とその長さを取得する
             ret = preprocess_msg(client_entry->fd, &req, &reqlen);
             if (ret == TS_ERR_NET_READ || ret == TS_ERR_NET_EOF) { // preprocess_msg FAILED!
               Debug("event", "[event_callback_main] preprocess_msg FAILED; skip!");
@@ -398,7 +398,7 @@ event_callback_main(void *arg)
           MgmtMarshallString name = event->name;
           MgmtMarshallString desc = event->description;
 
-          // mgmtapi.sockのためのリクエスト依頼用のパケットを生成して、送信を行います。
+          // eventapi.sockのためのリクエスト依頼用のパケットを生成して、送信を行います。
           ret = send_mgmt_request(client_entry->fd, OpType::EVENT_NOTIFY, &optype, &name, &desc);
           if (ret != TS_ERR_OKAY) {
             Debug("event", "sending even notification to fd [%d] failed.", client_entry->fd);
@@ -557,7 +557,8 @@ handle_event_message(EventClientT *client, void *req, size_t reqlen)
     goto fail;
   }
 
-  // TBD: この関数の上で定義されている「static const event_message_handler handlers[] 」を見ると eventapi.sock用途としてはEVENT_REG_CALLBACKとEVENT_UNREG_CALLBACKしかない?
+  // TBD: この関数の上で定義されている「static const event_message_handler handlers[] 」を見ると 
+  // eventapi.sock用途としてはEVENT_REG_CALLBACKとEVENT_UNREG_CALLBACKしかないので、この2つしか扱ってなさそう。
   if (handlers[static_cast<unsigned>(optype)] == nullptr) {
     goto fail;
   }

@@ -198,15 +198,27 @@ mgmt_write_pipe(int fd, char *buf, int bytes_to_write)
   char *p           = buf;
   int bytes_written = 0;
 
+  // 書き込みbyte数が0になるまで書き込みを行います
   while (bytes_to_write > 0) {
+
+    // 指定したfdへの書き込みを行います
     int err = write_socket(fd, p, bytes_to_write);
+
     if (err == 0) {
+      // write()により何も書き込みされなかった場合
+
       // Where this volume of IEEE Std 1003.1-2001 requires -1 to be returned and errno set to [EAGAIN],
       // most historical implementations return zero for write(2)
+
+      // 1秒sleepする
       mgmt_sleep_msec(1);
       continue;
+
     } else if (err < 0) {
+      // write()によりエラーがreturnされてきた場合
+
       if (mgmt_transient_error()) {
+        // 1秒sleepする
         mgmt_sleep_msec(1);
         continue;
       }
@@ -219,6 +231,7 @@ mgmt_write_pipe(int fd, char *buf, int bytes_to_write)
     p += err;
   }
 
+  // 書き込んだ合計バイト数をreturnする
   return bytes_written;
 }
 

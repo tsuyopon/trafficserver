@@ -66,6 +66,7 @@ BaseManager::dequeue()
 }
 
 // コールバック情報をcb_listの末尾に登録する
+// このコールバックを呼び出ししている箇所は「git grep registerMgmtCallback」で出てきます
 int
 BaseManager::registerMgmtCallback(int msg_id, MgmtCallback const &cb)
 {

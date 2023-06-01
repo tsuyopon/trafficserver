@@ -24,12 +24,13 @@
 /*
 
 ProcessManager.ccはTrafficServerなど下記から利用されます。
-なお、似たロジックとしてLocalManager.ccがありますが、これはTrafficManagerから利用されます。
+(なお、似たロジックとしてLocalManager.ccがありますが、LocalManager.ccはTrafficManagerから利用されます。
 
 $ git grep -B 2 ProcessManager.cc 
 mgmt/Makefile.am-libmgmt_p_la_SOURCES = \
 mgmt/Makefile.am-       $(libmgmt_COMMON) \
 mgmt/Makefile.am:       ProcessManager.cc \
+
 $ git grep libmgmt_p.la
 iocore/aio/Makefile.am: $(top_builddir)/mgmt/libmgmt_p.la \
 iocore/cache/Makefile.am:       $(top_builddir)/mgmt/libmgmt_p.la \
@@ -83,6 +84,7 @@ ProcessManager *pmgmt = nullptr;
 // *msg pointer will be filled in with the message that was read.
 //
 // sockfdにはprocesserver.sockが指定されるようです。
+// 引数の**msgの値にはメッセージのボディ情報がセットされます。正常に終了したら0を応答します
 static int
 read_management_message(int sockfd, MgmtMessageHdr **msg)
 {
@@ -126,6 +128,7 @@ read_management_message(int sockfd, MgmtMessageHdr **msg)
   } else {
     ink_release_assert(ret == hdr.data_len);
     // Received the message.
+    // ここで引数の**msgポインタにセットしています
     *msg = full_msg;
     return 0;
   }
@@ -220,13 +223,14 @@ ProcessManager::processManagerThread(void *arg)
     int ret;
 
     if (pmgmt->require_lm) {
-      // 下記でTrafficServerからTrafficManagerのprocessserver.sockに定期的にポーリングする
+      // TrafficServerからTrafficManagerのprocesserver.sockからメッセージを取得して、メッセージがあればその処理種別に応じてコールバック関数を実行します
       ret = pmgmt->pollLMConnection();
       if (ret < 0 && pmgmt->running && !TSSystemState::is_event_system_shut_down()) {
         Alert("exiting with read error from process manager: %s", strerror(-ret));
       }
     }
 
+    // processerver.sockへの書き込み処理を行います
     ret = pmgmt->processSignalQueue();
     if (ret < 0 && pmgmt->running && !TSSystemState::is_event_system_shut_down()) {
       Alert("exiting with write error from process manager: %s", strerror(-ret));
@@ -350,12 +354,20 @@ ProcessManager::signalManager(MgmtMessageHdr *mh)
 int
 ProcessManager::processSignalQueue()
 {
+
+  // キューが空になるまで処理を行います
   while (!queue_is_empty(mgmt_signal_queue)) {
+
+    // dequeueしてmh構造体として用意します。
+    // おそらく、pmgmt->pollLMConnection()でメッセージをTrafficManagerから取得して処理した際に、書き込みが必要と判断されたものをqueueに格納していると思われます。
+    // なお、mgmt_signal_queueにenqueueされるのはProcessManager::signalManagerが呼ばれた場合です。
     MgmtMessageHdr *mh = static_cast<MgmtMessageHdr *>(::dequeue(mgmt_signal_queue));
 
     Debug("pmgmt", "signaling local manager with message ID %d", mh->msg_id);
 
+    // require_lm変数はProcessManagerをnewする際の初期化リストで設定されます
     if (require_lm) {
+      // dequeueしたデータの書き込みを行います。
       int ret = mgmt_write_pipe(local_manager_sockfd, reinterpret_cast<char *>(mh), sizeof(MgmtMessageHdr) + mh->data_len);
       ats_free(mh);
 
@@ -398,15 +410,17 @@ ProcessManager::initLMConnection()
   servlen = strlen(serv_addr.sun_path) + sizeof(serv_addr.sun_family);
 #endif
 
+  // socketを作成します
   if ((local_manager_sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
     Fatal("Unable to create socket '%s': %s", sockpath.c_str(), strerror(errno));
   }
 
+  // socketにFD_CLOEXECをセット
   if (fcntl(local_manager_sockfd, F_SETFD, FD_CLOEXEC) < 0) {
     Fatal("unable to set close-on-exec flag: %s", strerror(errno));
   }
 
-  // processerver.sockのunix domain socketへと接続しています
+  // processerver.sockのunix domain socketへと接続しています (server_addr.sun_pathにprocesserver.sockがセットされています)
   if ((connect(local_manager_sockfd, reinterpret_cast<struct sockaddr *>(&serv_addr), servlen)) < 0) {
     Fatal("failed to connect management socket '%s': %s", sockpath.c_str(), strerror(errno));
   }
@@ -418,19 +432,22 @@ ProcessManager::initLMConnection()
   }
 #endif
 
+  // MGMT_SIGNAL_PIDの実行
   data_len          = sizeof(pid_t);
   mh_full           = static_cast<MgmtMessageHdr *>(alloca(sizeof(MgmtMessageHdr) + data_len));
   mh_full->msg_id   = MGMT_SIGNAL_PID;
   mh_full->data_len = data_len;
 
+  // pidを値として詰める。下記のpidの変数は ProcessManagerをnewした際にgetpid()して設定されている。
   memcpy(reinterpret_cast<char *>(mh_full) + sizeof(MgmtMessageHdr), &(pid), data_len);
 
+  // local_manager_sockfdに対してpid情報を通知する
   if (mgmt_write_pipe(local_manager_sockfd, reinterpret_cast<char *>(mh_full), sizeof(MgmtMessageHdr) + data_len) <= 0) {
     Fatal("error writing message: %s", strerror(errno));
   }
 }
 
-// TrafficServerからTrafficManagerのprocessserver.sockに対して定期的にpollingする
+// TrafficServerからTrafficManagerのprocessserver.sockからメッセージを取得して、メッセージがあればその処理種別に応じてコールバック関数を実行します
 int
 ProcessManager::pollLMConnection()
 {
@@ -441,6 +458,8 @@ ProcessManager::pollLMConnection()
 
   // Avoid getting stuck enqueuing too many requests in a row, limit to MAX_MSGS_IN_A_ROW.
   for (count = 0; running && count < max_msgs_in_a_row; ++count) {
+
+    // select時に最大1秒待ちます
     timeout.tv_sec  = 1;
     timeout.tv_usec = 0;
 
@@ -476,16 +495,21 @@ ProcessManager::pollLMConnection()
       // processserver.sockから読み込みます
       int ret = read_management_message(local_manager_sockfd, &msg);
       if (ret < 0) {
+        // 正常終了は0ですが、0以外なのでエラーです
         return ret;
       }
 
       // No message, we are done polling. */
+      // 正常終了(ret=0)でもmsgが空の場合があります。
       if (msg == nullptr) {
         return 0;
       }
 
       Debug("pmgmt", "received message ID %d", msg->msg_id);
+
+      // 受信したメッセージの処理種別に応じて、コールバックを実行します
       handleMgmtMsgFromLM(msg);
+
     }
 #if HAVE_EVENTFD
     else if (wakeup_fd != ts::NO_FD && FD_ISSET(wakeup_fd, &fdlist)) { /* if msg, keep polling for more */
@@ -496,10 +520,13 @@ ProcessManager::pollLMConnection()
     }
 #endif
   }
+
   Debug("pmgmt", "enqueued %d of max %d messages in a row", count, max_msgs_in_a_row);
   return 0;
 }
 
+// TrafficServerで実行される処理です
+// processerver.sockからレスポンスとして取得したメッセージ(mh)の種類(msg_id)に対して、そのmsg_idに紐づくコールバック処理を行います
 void
 ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
 {
@@ -509,30 +536,31 @@ ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
 
   Debug("pmgmt", "processing event id '%d' payload=%d", mh->msg_id, mh->data_len);
 
-  // TrafficManagerの応答で帰ってきたmsg_idを元にTrafficServerの処理を分岐する
+  // TrafficManagerの応答のmsg_idをチェックして処理を行う
+  // executeMgmtCallbackの横に記載しているのは、登録先コールバック関数の情報です(git grep registerMgmtCallback | grep MGMT_EVENT_XXX 出てくる値)
   switch (mh->msg_id) {
   case MGMT_EVENT_SHUTDOWN:
     // executeMgmtCallbackについてはBaseManager::executeMgmtCallbackが実行される
-    executeMgmtCallback(MGMT_EVENT_SHUTDOWN, {});
+    executeMgmtCallback(MGMT_EVENT_SHUTDOWN, {});   // pmgmt->registerMgmtCallback(MGMT_EVENT_SHUTDOWN, &mgmt_restart_shutdown_callback);
     Alert("exiting on shutdown message");
     break;
   case MGMT_EVENT_RESTART:
-    executeMgmtCallback(MGMT_EVENT_RESTART, {});
+    executeMgmtCallback(MGMT_EVENT_RESTART, {});    // pmgmt->registerMgmtCallback(MGMT_EVENT_RESTART, &mgmt_restart_shutdown_callback);
     break;
   case MGMT_EVENT_DRAIN:
-    executeMgmtCallback(MGMT_EVENT_DRAIN, payload);
+    executeMgmtCallback(MGMT_EVENT_DRAIN, payload); // pmgmt->registerMgmtCallback(MGMT_EVENT_DRAIN, &mgmt_drain_callback);
     break;
   case MGMT_EVENT_CLEAR_STATS:
-    executeMgmtCallback(MGMT_EVENT_CLEAR_STATS, {});
+    executeMgmtCallback(MGMT_EVENT_CLEAR_STATS, {}); // コールバック設定が見当たらなかった
     break;
   case MGMT_EVENT_HOST_STATUS_UP:
-    executeMgmtCallback(MGMT_EVENT_HOST_STATUS_UP, payload);
+    executeMgmtCallback(MGMT_EVENT_HOST_STATUS_UP, payload);  // pmgmt->registerMgmtCallback(MGMT_EVENT_HOST_STATUS_UP, &mgmt_host_status_up_callback);
     break;
   case MGMT_EVENT_HOST_STATUS_DOWN:
-    executeMgmtCallback(MGMT_EVENT_HOST_STATUS_DOWN, payload);
+    executeMgmtCallback(MGMT_EVENT_HOST_STATUS_DOWN, payload); // pmgmt->registerMgmtCallback(MGMT_EVENT_HOST_STATUS_DOWN, &mgmt_host_status_down_callback);
     break;
   case MGMT_EVENT_ROLL_LOG_FILES:
-    executeMgmtCallback(MGMT_EVENT_ROLL_LOG_FILES, {});
+    executeMgmtCallback(MGMT_EVENT_ROLL_LOG_FILES, {}); // コールバック設定が見当たらなかった
     break;
   case MGMT_EVENT_PLUGIN_CONFIG_UPDATE: {
     auto msg{payload.rebind<char>()};
@@ -557,13 +585,13 @@ ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
     */
     break;
   case MGMT_EVENT_LIBRECORDS:
-    executeMgmtCallback(MGMT_EVENT_LIBRECORDS, payload);
+    executeMgmtCallback(MGMT_EVENT_LIBRECORDS, payload);   // pmgmt->registerMgmtCallback(MGMT_EVENT_LIBRECORDS, &RecMessageRecvThis);
     break;
   case MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE:
-    executeMgmtCallback(MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE, payload);
+    executeMgmtCallback(MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE, payload); // pmgmt->registerMgmtCallback(MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE, [](ts::MemSpan<void> span) -> void {  (無名関数が指定)
     break;
   case MGMT_EVENT_LIFECYCLE_MESSAGE:
-    executeMgmtCallback(MGMT_EVENT_LIFECYCLE_MESSAGE, payload);
+    executeMgmtCallback(MGMT_EVENT_LIFECYCLE_MESSAGE, payload); // pmgmt->registerMgmtCallback(MGMT_EVENT_LIFECYCLE_MESSAGE, &mgmt_lifecycle_msg_callback);
     break;
   default:
     Warning("received unknown message ID %d\n", mh->msg_id);

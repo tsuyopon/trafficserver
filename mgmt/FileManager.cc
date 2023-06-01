@@ -101,15 +101,18 @@ FileManager::addFile(const char *fileName, const char *configName, bool root_acc
 }
 
 // caller must hold the lock
+// この関数は直前で定義されるFileManager::addFileから呼び出される
 void
 FileManager::addFileHelper(const char *fileName, const char *configName, bool root_access_needed, bool isRequired,
                            ConfigManager *parentConfig)
 {
   ink_assert(fileName != nullptr);
 
+  // ファイルの情報をConfigManagerクラスのインスタンスへと変換する
   ConfigManager *rb = new ConfigManager(fileName, configName, root_access_needed, isRequired, parentConfig);
   rb->configFiles   = this;
 
+  // bindings変数はmgmtapi.sockでRECONFIGUREを受け取ったら対象ファイルのチェックで利用される模様。rbにはConfigManagerクラスに変換されたインスタンスが入る
   bindings.emplace(rb->getFileName(), rb);
 }
 
@@ -141,11 +144,13 @@ FileManager::getConfigObj(const char *fileName, ConfigManager **rbPtr)
 void
 FileManager::fileChanged(const char *fileName, const char *configName)
 {
+
   callbackListable *cb;
   char *filenameCopy, *confignameCopy;
   Debug("lm", "filename changed %s", fileName);
   ink_mutex_acquire(&cbListLock);
 
+  // コールバックのリストでイテレーション操作していると思われる
   for (cb = cblist.head; cb != nullptr; cb = cb->link.next) {
     // Dup the string for each callback to be
     //  defensive in case it's modified when it's not supposed to be
@@ -169,14 +174,20 @@ FileManager::fileChanged(const char *fileName, const char *configName)
 void
 FileManager::rereadConfig()
 {
+
   ConfigManager *rb;
 
   std::vector<ConfigManager *> changedFiles;
   std::vector<ConfigManager *> parentFileNeedChange;
   size_t n;
   ink_mutex_acquire(&accessLock);
+
+  // bidingsはregisterFile関数により登録されたファイルにより生成されたConfigManagerインスタンスが入っている。bindingsに含まれる対象を確認するには「git grep registerFile」で検索してみると良い。
   for (auto &&it : bindings) {
+
+    // rbには、そのファイルで初期化されたConfigManagerクラスが入っています
     rb = it.second;
+
     // ToDo: rb->isVersions() was always true before, because numberBackups was always >= 1. So ROLLBACK_CHECK_ONLY could not
     // happen at all...
     if (rb->checkForUserUpdate(ROLLBACK_CHECK_AND_UPDATE)) {
@@ -219,6 +230,7 @@ FileManager::rereadConfig()
       fileChanged(parentFileNeedChange[i]->getFileName(), parentFileNeedChange[i]->getConfigName());
     }
   }
+
   // INKqa11910
   // need to first check that enable_customizations is enabled
   bool found;
@@ -227,6 +239,7 @@ FileManager::rereadConfig()
   if (found && enabled) {
     fileChanged("proxy.config.body_factory.template_sets_dir", "proxy.config.body_factory.template_sets_dir");
   }
+
   fileChanged("proxy.config.ssl.server.ticket_key.filename", "proxy.config.ssl.server.ticket_key.filename");
 }
 

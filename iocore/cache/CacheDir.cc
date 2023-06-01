@@ -933,6 +933,7 @@ dir_entries_used(Vol *d)
  * operation.
  */
 
+// processerver.sockからMGMT_EVENT_SHUTDOWNやMGMT_EVENT_RESTARTを受信した際に実行されるコールバック関数
 void
 sync_cache_dir_on_shutdown()
 {

@@ -136,9 +136,11 @@ ts_ctrl_main(void *arg)
   struct timeval timeout;
 
   // loops until TM dies; waits for and processes requests from clients
+  // このスレッドのメインループ処理
   while (true) {
 
     // LINUX: to prevent hard-spin of CPU,  reset timeout on each loop
+    // 1秒のタイムアウトを設定する
     timeout.tv_sec  = TIMEOUT_SECS;
     timeout.tv_usec = 0;
 
@@ -162,7 +164,9 @@ ts_ctrl_main(void *arg)
 
     // check if have any connections or requests
     if (fds_ready > 0) {
+
       // first check for connections!
+      // 指定されたsocket fdが存在している場合
       if (con_socket_fd >= 0 && FD_ISSET(con_socket_fd, &selectFDs)) {
         fds_ready--;
 
@@ -172,40 +176,53 @@ ts_ctrl_main(void *arg)
           // return TS_ERR_SYS_CALL; WHAT TO DO? just keep going
           Debug("ts_main", "[ts_ctrl_main] can't allocate new ClientT");
         } else { // accept connection
+
           socklen_t addr_len = (sizeof(struct sockaddr));
+
           // mgmtapi.sockのacceptをする
           new_con_fd         = mgmt_accept(con_socket_fd, new_client_con->adr, &addr_len);
           new_client_con->fd = new_con_fd;
+
+          // 受信したコネクションをaccepted_conのリストの先頭に登録しておきます
           accepted_con.emplace(new_client_con->fd, new_client_con);
           Debug("ts_main", "[ts_ctrl_main] Add new client connection");
+
         }
+
       } // end if(new_con_fd >= 0 && FD_ISSET(new_con_fd, &selectFDs))
 
       // some other file descriptor; for each one, service request
       if (fds_ready > 0) { // RECEIVED A REQUEST from remote API client
         // see if there are more fd to set - iterate through all entries in hash table
 
+        // クライアントコネクション数だけループする
         for (auto it = accepted_con.begin(); it != accepted_con.end();) {
+
           Debug("ts_main", "[ts_ctrl_main] We have a remote client request!");
           client_entry = it->second;
           ++it; // prevent the breaking of remove_client
           // got information; check
+
+          // fdが存在していて、FDに特定のフラグがセットされていること
           if (client_entry->fd && FD_ISSET(client_entry->fd, &selectFDs)) {
             void *req = nullptr;
             size_t reqlen;
 
+            // メッセージを受信して、&reqや&reqlenにメッセージやその長さをセット
             ret = preprocess_msg(client_entry->fd, &req, &reqlen);
             if (ret == TS_ERR_NET_READ || ret == TS_ERR_NET_EOF) {
+              // リモートのクライアント(traffic_ctrl等)が接続を終了した場合にこの遷移に到達します。
               // occurs when remote API client terminates connection
               Debug("ts_main", "[ts_ctrl_main] ERROR: preprocess_msg - remove client %d ", client_entry->fd);
               remove_client(client_entry, accepted_con);
               continue;
             }
 
-            // 主要なコマンドはここで実行される
+            // mgmtapi.sockから取得したメッセージを確認して、コマンド種別に応じた処理が下記で実施される
             ret = handle_control_message(client_entry->fd, req, reqlen);
             ats_free(req);
 
+            // メッセージ送信に失敗した場合
             if (ret != TS_ERR_OKAY) {
               Debug("ts_main", "[ts_ctrl_main] ERROR: sending response for message (%d)", ret);
               // XXX this doesn't actually send a error response ...
@@ -221,6 +238,8 @@ ts_ctrl_main(void *arg)
 
   } // end while (1)
 
+  // ここから先は通常くることはなさそう。。
+
   // if we get here something's wrong, just clean up
   Debug("ts_main", "[ts_ctrl_main] CLOSING AND SHUTTING DOWN OPERATIONS");
   close_socket(con_socket_fd);
@@ -233,6 +252,7 @@ ts_ctrl_main(void *arg)
     accepted_con.erase(client_entry->fd);
     delete_client(client_entry); // free ClientT
   }
+
   // all entries should be removed and freed already
   accepted_con.clear();
 
@@ -588,18 +608,24 @@ handle_restart(int fd, void *req, size_t reqlen)
  * output: TS_ERR_xx
  * note: None
  *************************************************************************/
+// mgmtapi.sockでDRAINを受信した際に実行されるハンドラ
 static TSMgmtError
 handle_stop(int fd, void *req, size_t reqlen)
 {
+
   OpType optype;
   MgmtMarshallInt options;
   MgmtMarshallInt err;
 
+  // メッセージの生成
   err = recv_mgmt_request(req, reqlen, OpType::STOP, &optype, &options);
+
+  // メッセージ生成に成功したらStop処理を行う
   if (err == TS_ERR_OKAY) {
     err = Stop(options);
   }
 
+  // メッセージのレスポンスを応答する
   return send_mgmt_response(fd, OpType::STOP, &err);
 }
 
@@ -1025,7 +1051,7 @@ struct control_message_handler {
 };
 
 // ここで定義された権限とハンドラ関数とのマッピングはhandle_control_message関数で利用される
-// ここがコマンドの定義となります
+// おそらく、ここがmgmtapi.sockで利用可能なコマンドの定義と思われます。(なお、eventapi.sockは「tatic const event_message_handler handlers[]」で定義されている)
 static const control_message_handler handlers[] = {
   /* RECORD_SET                 */ {MGMT_API_PRIVILEGED, handle_record_set},
   /* RECORD_GET                 */ {0, handle_record_get},
@@ -1057,7 +1083,7 @@ static const control_message_handler handlers[] = {
 static_assert((sizeof(handlers) / sizeof(handlers[0])) == static_cast<unsigned>(OpType::UNDEFINED_OP),
               "handlers array is not of correct size");
 
-// ts_ctrl_mainから実行される
+// ts_ctrl_mainから実行される。つまり、mgmtapi.sock関連の操作
 static TSMgmtError
 handle_control_message(int fd, void *req, size_t reqlen)
 {
@@ -1069,6 +1095,7 @@ handle_control_message(int fd, void *req, size_t reqlen)
   }
 
   // 定義されたハンドラがなければfail
+  // つまりこの関数の直前に記述されるhandler定義を見ると、EVENT_REG_CALLBACK、EVENT_UNREG_CALLBACK、EVENT_NOTIFYは指定できないと思われる
   if (handlers[static_cast<unsigned>(optype)].handler == nullptr) {
     goto fail;
   }

@@ -28,6 +28,17 @@
  *
  *
  ***************************************************************************/
+
+/*
+このファイル(CoreAPI.cc)はTrafficManagerのみから利用されています。
+
+mgmt/api/Makefile.am-
+mgmt/api/Makefile.am-libmgmtapilocal_la_SOURCES = \
+mgmt/api/Makefile.am:	CoreAPI.cc \
+
+src/traffic_manager/Makefile.inc:       $(top_builddir)/mgmt/api/libmgmtapilocal.la \
+
+*/
 #include <vector>
 
 #include "tscore/ink_platform.h"
@@ -387,15 +398,15 @@ ServerBacktrace(unsigned /* options */, char **trace)
  *-------------------------------------------------------------------------
  * Rereads configuration files
  */
-// traffic_ctrl config reloadから呼ばれる
+
+// TrafficManagerがmgmtapi.sockにてRECONFIGUREコマンドを受信したら実行される関数です
 TSMgmtError
 Reconfigure()
 {
+
   configFiles->rereadConfig();                              // TM rereads
 
   // ここで指定されたMGMT_EVENT_PLUGIN_CONFIG_UPDATEがキューに格納されて、その後、dequeueされてtraffic_managerで処理されることになる。
-  // その後、traffic_serverのProcessManager::startから起動されるスレッドの中で処理される。
-  // 具体的にはそのスレッドから呼ばれるProcessManager::handleMgmtMsgFromLM関数の中でswitch文によりMGMT_EVENT_PLUGIN_CONFIG_UPDATEのcaseにマッチしたら処理されている。
   lmgmt->signalEvent(MGMT_EVENT_PLUGIN_CONFIG_UPDATE, "*"); // TS rereads
 
   RecSetRecordInt("proxy.node.config.reconfigure_time", time(nullptr), REC_SOURCE_DEFAULT);
@@ -413,6 +424,7 @@ Reconfigure()
 TSMgmtError
 Restart(unsigned options)
 {
+  // mgmt_shutdown_outstandingはtraffic_manager.ccのmain内でswitchケースとしてフラグにより処理を分岐します
   lmgmt->mgmt_shutdown_triggered_at = time(nullptr);
   lmgmt->mgmt_shutdown_outstanding  = (options & TS_RESTART_OPT_DRAIN) ? MGMT_PENDING_IDLE_RESTART : MGMT_PENDING_RESTART;
 
@@ -428,6 +440,7 @@ Restart(unsigned options)
 TSMgmtError
 Bounce(unsigned options)
 {
+  // mgmt_shutdown_outstandingはtraffic_manager.ccのmain内でswitchケースとしてフラグにより処理を分岐します
   lmgmt->mgmt_shutdown_triggered_at = time(nullptr);
   lmgmt->mgmt_shutdown_outstanding  = (options & TS_RESTART_OPT_DRAIN) ? MGMT_PENDING_IDLE_BOUNCE : MGMT_PENDING_BOUNCE;
 
@@ -456,6 +469,7 @@ Stop(unsigned options)
 TSMgmtError
 Drain(unsigned options)
 {
+  // mgmt_shutdown_outstandingはtraffic_manager.ccのmain内でswitchケースとしてフラグにより処理を分岐します
   switch (options) {
   case TS_DRAIN_OPT_NONE:
     lmgmt->mgmt_shutdown_outstanding = MGMT_PENDING_DRAIN;

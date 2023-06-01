@@ -42,10 +42,16 @@
 #define TS_ARCHIVE_STAT_MTIME(t) ((t).st_mtime * 1000000000)
 #endif
 
+//
+// このConfigManagerクラスは設定ファイルに基づくインスタンスを生成し、stat情報やユーザーによる更新があったかなどをチェックする関数を提供します
+//
+
+// FileManager::addFileHelperからnewしてそのファイルオブジェクトに特化したインスタンスが生成されます。
 ConfigManager::ConfigManager(const char *fileName_, const char *configName_, bool root_access_needed_, bool isRequired_,
                              ConfigManager *parentConfig_)
   : root_access_needed(root_access_needed_), isRequired(isRequired_), parentConfig(parentConfig_)
 {
+
   ExpandingArray existVer(25, true); // Existing versions
   struct stat fileInfo;
   ink_assert(fileName_ != nullptr);
@@ -60,8 +66,10 @@ ConfigManager::ConfigManager(const char *fileName_, const char *configName_, boo
   configName = std::string{configName_};
 
   ink_mutex_init(&fileAccessLock);
+
   // Check to make sure that our configuration file exists
   //
+  // ファイルの情報が取得できることを確認します
   if (statFile(&fileInfo) < 0) {
     mgmt_log("[ConfigManager::ConfigManager] %s Unable to load: %s", fileName.c_str(), strerror(errno));
 
@@ -70,8 +78,10 @@ ConfigManager::ConfigManager(const char *fileName_, const char *configName_, boo
                  fileName.c_str(), strerror(errno));
     }
   } else {
+    // このfileLastModified変数はConfigManager::checkForUserUpdateの中でも判定に利用されています
     fileLastModified = TS_ARCHIVE_STAT_MTIME(fileInfo);
   }
+
 }
 
 //
@@ -83,10 +93,14 @@ ConfigManager::ConfigManager(const char *fileName_, const char *configName_, boo
 int
 ConfigManager::statFile(struct stat *buf)
 {
+
   int statResult;
   std::string sysconfdir(RecConfigReadConfigDir());
+
+  // 設定ファイルの絶対パスを取得する
   std::string filePath = Layout::get()->relative_to(sysconfdir, fileName);
 
+  // root権限が必要かどうかで処理を分岐する。
   statResult = root_access_needed ? elevating_stat(filePath.c_str(), buf) : stat(filePath.c_str(), buf);
 
   return statResult;
@@ -96,6 +110,8 @@ ConfigManager::statFile(struct stat *buf)
 //
 //  Called to check if the file has been changed  by the user.
 //  Timestamps are compared to see if a change occurred
+//
+// ファイルがユーザーによって変更されたかどうかをチェックします。
 bool
 ConfigManager::checkForUserUpdate(RollBackCheckType how)
 {
@@ -121,13 +137,21 @@ ConfigManager::checkForUserUpdate(RollBackCheckType how)
 
       // TBD: 不明。ssl_multicert.configの様な場合にtrueとなるっぽい?
       if (!this->isChildManaged()) {
+        // ファイルが更新された場合に、そのファイルが更新された際に呼び出されるコールバックが実行される
         configFiles->fileChanged(fileName.c_str(), configName.c_str());
       }
+
       mgmt_log("User has changed config file %s\n", fileName.c_str());
+
     }
+
     result = true;
+
   } else {
+
+    // 保存しておいたファイルの前回更新時刻が、statから取得した最新の前回更新時刻以上である場合には、何も更新されていないと判断するためにfalse
     result = false;
+
   }
 
   ink_mutex_release(&fileAccessLock);

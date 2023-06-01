@@ -128,6 +128,7 @@ rotateLogs()
   int diags_log_roll_int     = (int)REC_ConfigReadInteger("proxy.config.diags.logfile.rolling_interval_sec");
   int diags_log_roll_size    = (int)REC_ConfigReadInteger("proxy.config.diags.logfile.rolling_size_mb");
   int diags_log_roll_enable  = (int)REC_ConfigReadInteger("proxy.config.diags.logfile.rolling_enabled");
+
   diags->config_roll_diagslog((RollingEnabledValues)diags_log_roll_enable, diags_log_roll_int, diags_log_roll_size);
   diags->config_roll_outputlog((RollingEnabledValues)output_log_roll_enable, output_log_roll_int, output_log_roll_size);
 
@@ -144,6 +145,7 @@ rotateLogs()
     if (tspid <= 0) {
       return;
     }
+
     if (kill(tspid, SIGUSR2) != 0) {
       mgmt_log("Could not send SIGUSR2 to TS: %s", strerror(errno));
     } else {
@@ -182,9 +184,11 @@ is_server_idle_from_new_connection()
   return active <= threshold;
 }
 
+// Drainありを指定した場合には
 static bool
 is_server_draining()
 {
+
   RecInt draining = 0;
   if (RecGetRecordInt("proxy.node.config.draining", &draining) != REC_ERR_OKAY) {
     return false;
@@ -675,7 +679,7 @@ main(int argc, const char **argv)
     HttpProxyPort::loadValue(lmgmt->m_proxy_ports, proxy_port);
   }
 
-  // processserver.sockのunix domai socketをbindします
+  // processerver.sockのunix domai socketをbindします
   lmgmt->initMgmtProcessServer(); /* Setup p-to-p process server */
 
   lmgmt->listenForProxy();
@@ -694,7 +698,7 @@ main(int argc, const char **argv)
   int mgmtapiFD  = -1; // FD for the api interface to issue commands
   int eventapiFD = -1; // FD for the api and clients to handle event callbacks
 
-  // mgmtapi.sockのUnix Domain Socketを生成する
+  // mgmtapi.sockのUnix Domain Socketを生成する(socket生成、bind、listenなどを実施する)
   mgmtapiFD = bind_unix_domain_socket(apisock.c_str(), newmode);
   if (mgmtapiFD == -1) {
     mgmt_log("[WebIntrMain] Unable to set up socket for handling management API calls. API socket path = %s\n", apisock.c_str());
@@ -741,11 +745,14 @@ main(int argc, const char **argv)
   // traffic_managerプロセスの主要なループ処理はここで行われる。
   for (;;) {
 
+    // dequeueして、その内容に応じた処理をprocesserver.sockに書き出します。
+    // なお、queueされるのはmgmt_shutdown_outstandigでフラグを設定されたものに限る。mgmt_shutdown_outstandigのフラグ毎の処理によりqueueされるのはtraffic_manager.ccのmain(つまりこの関数)で処理される。この後のswitch文の処理で行われる。
     lmgmt->processEventQueue();
 
     lmgmt->pollMgmtProcessServer();
 
     // Handle rotation of output log (aka traffic.out) as well as DEFAULT_DIAGS_LOG_FILENAME (aka manager.log)
+    // manager.logのログローテートを実施する
     rotateLogs();
 
     // Check for a SIGHUP
@@ -760,16 +767,18 @@ main(int argc, const char **argv)
     // done more like every config_update_interval_ms (proxy.config.config_update_interval_ms) ?
     derived.Update();
 
+    // MGMT_PENDING_NONEでなければ、何かしらの処理が依頼されたということでログを出力する
     if (lmgmt->mgmt_shutdown_outstanding != MGMT_PENDING_NONE) {
       Debug("lm", "pending shutdown %d", lmgmt->mgmt_shutdown_outstanding);
     }
 
+    // mgmt_shutdown_outstandingのグローバル変数には調査した限り、mgmtapi.sockからのリクエストを処理した際に、RESTART, BOUNCE, STOP, DRAINなどのコマンド実行時に登録される
     switch (lmgmt->mgmt_shutdown_outstanding) {
-    case MGMT_PENDING_RESTART:
+    case MGMT_PENDING_RESTART:       // mgmtapi.sockでRESTARTコマンドを受信した場合(drainなし)
       lmgmt->mgmtShutdown();
       ::exit(0);
       break;
-    case MGMT_PENDING_IDLE_RESTART:
+    case MGMT_PENDING_IDLE_RESTART:  //  mgmtapi.sockでRESTARTコマンドを受信した場合(drainあり)
       if (!is_server_draining()) {
         lmgmt->processDrain();
       }
@@ -778,11 +787,11 @@ main(int argc, const char **argv)
         ::exit(0);
       }
       break;
-    case MGMT_PENDING_BOUNCE:
+    case MGMT_PENDING_BOUNCE:        // mgmtapi.sockでBOUNCEコマンドを受信した場合(drainなし)
       lmgmt->processBounce();
       lmgmt->mgmt_shutdown_outstanding = MGMT_PENDING_NONE;
       break;
-    case MGMT_PENDING_IDLE_BOUNCE:
+    case MGMT_PENDING_IDLE_BOUNCE:   // mgmtapi.sockでBOUNCEコマンドを受信した場合(drainあり)
       if (!is_server_draining()) {
         lmgmt->processDrain();
       }
@@ -791,11 +800,11 @@ main(int argc, const char **argv)
         lmgmt->mgmt_shutdown_outstanding = MGMT_PENDING_NONE;
       }
       break;
-    case MGMT_PENDING_STOP:
+    case MGMT_PENDING_STOP:          // mgmtapi.sockでSTOPコマンドを受信した場合(drainなし)
       lmgmt->processShutdown();
       lmgmt->mgmt_shutdown_outstanding = MGMT_PENDING_NONE;
       break;
-    case MGMT_PENDING_IDLE_STOP:
+    case MGMT_PENDING_IDLE_STOP:     // mgmtapi.sockでSTOPコマンドを受信した場合(drainあり)
       if (!is_server_draining()) {
         lmgmt->processDrain();
       }
@@ -804,19 +813,19 @@ main(int argc, const char **argv)
         lmgmt->mgmt_shutdown_outstanding = MGMT_PENDING_NONE;
       }
       break;
-    case MGMT_PENDING_DRAIN:
+    case MGMT_PENDING_DRAIN:         // mgmtapi.sockでDRAINコマンドを受信した場合
       if (!is_server_draining()) {
         lmgmt->processDrain();
       }
       lmgmt->mgmt_shutdown_outstanding = MGMT_PENDING_NONE;
       break;
-    case MGMT_PENDING_IDLE_DRAIN:
+    case MGMT_PENDING_IDLE_DRAIN:    // mgmtapi.sockでDRAINコマンドを受信した場合
       if (is_server_idle_from_new_connection()) {
         lmgmt->processDrain();
         lmgmt->mgmt_shutdown_outstanding = MGMT_PENDING_NONE;
       }
       break;
-    case MGMT_PENDING_UNDO_DRAIN:
+    case MGMT_PENDING_UNDO_DRAIN:    // mgmtapi.sockでDRAINコマンドを受信した場合
       if (is_server_draining()) {
         lmgmt->processDrain(0);
         lmgmt->mgmt_shutdown_outstanding = MGMT_PENDING_NONE;

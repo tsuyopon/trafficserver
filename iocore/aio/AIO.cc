@@ -285,23 +285,30 @@ aio_insert(AIOCallback *op, AIO_Reqs *req)
 static void
 aio_move(AIO_Reqs *req)
 {
+
   if (req->aio_temp_list.empty()) {
     return;
   }
 
   AIOCallbackInternal *cbi;
+
+  // aio_temp_listから全て取得してapとして取得する
   SList(AIOCallbackInternal, alink) aq(req->aio_temp_list.popall());
 
   // flip the list
+  // apのリストを反転させる
   Queue<AIOCallback> cbq;
   while ((cbi = aq.pop())) {
+    // cbqの先頭に追加する
     cbq.push(cbi);
   }
 
   AIOCallback *cb;
   while ((cb = cbq.pop())) {
+    // aio_todoのqueueにenqueueする
     aio_insert(cb, req);
   }
+
 }
 
 /* queue the new request */
@@ -377,6 +384,7 @@ aio_queue_req(AIOCallbackInternal *op, int fromAPI = 0)
   }
 }
 
+// cache_op = Cache Operation なので、キャッシュの操作(READ. WRITE)を行う関数です
 static inline int
 cache_op(AIOCallbackInternal *op)
 {
@@ -385,24 +393,38 @@ cache_op(AIOCallbackInternal *op)
     ink_aiocb *a = &op->aiocb;
     ssize_t err, res = 0;
 
+    // aio_bytesが0byteになるまで、処理を続ける
     while (a->aio_nbytes - res > 0) {
+
       do {
+
+        // READモードかWRITEモードかを判定する
         if (read) {
           err = pread(a->aio_fildes, (static_cast<char *>(a->aio_buf)) + res, a->aio_nbytes - res, a->aio_offset + res);
         } else {
           err = pwrite(a->aio_fildes, (static_cast<char *>(a->aio_buf)) + res, a->aio_nbytes - res, a->aio_offset + res);
         }
-      } while ((err < 0) && (errno == EINTR || errno == ENOBUFS || errno == ENOMEM));
+
+      } while ((err < 0) && (errno == EINTR || errno == ENOBUFS || errno == ENOMEM));  // エラーの間はループする ( EINTR: システム割り込み、ENOBUFS: 送信バッファいっぱい、ENOMEM: 割り当てメモリがない))
+
+      // err = 0 の場合、または「(err < 0) && (errno == EINTR || errno == ENOBUFS || errno == ENOMEM)」以外の予期せぬエラーコードの場合に下記のコードパスに入る
       if (err <= 0) {
+        // ディスク操作が失敗したとして、ログに書き込み関数を終了する
         Warning("cache disk operation failed %s %zd %d\n", (a->aio_lio_opcode == LIO_READ) ? "READ" : "WRITE", err, errno);
         op->aio_result = -errno;
         return (err);
       }
+
+      // 合計の読み込み または 書き込みバイト数をresに保存する
       res += err;
+
     }
+
     op->aio_result = res;
     ink_assert(op->aio_result == (int64_t)a->aio_nbytes);
+
   }
+
   return 1;
 }
 
@@ -435,6 +457,7 @@ ink_aio_thread_num_set(int thread_num)
   return false;
 }
 
+// ET_AIOのメインスレッドとなります
 void *
 aio_thread_main(void *arg)
 {
@@ -443,23 +466,36 @@ aio_thread_main(void *arg)
   AIO_Reqs *current_req   = nullptr;
   AIOCallback *op         = nullptr;
   ink_mutex_acquire(&my_aio_req->aio_mutex);
+
+  // メインループ処理
   for (;;) {
+
+    // for(;;)の中にdo{ } while(true)の無限ループが存在する
     do {
+
+      // shutdownならば
       if (TSSystemState::is_event_system_shut_down()) {
         ink_mutex_release(&my_aio_req->aio_mutex);
         return nullptr;
       }
+
       current_req = my_aio_req;
+
       /* check if any pending requests on the atomic list */
+      // atomicなリストから取得して、aio_todoのキューにenqueueしている。(このaio_todoは次のロジックで使う)
       aio_move(my_aio_req);
+
+      // 直前のaio_moveでenqueした内容をpop操作できなければ、breakする
       if (!(op = my_aio_req->aio_todo.pop())) {
         break;
       }
+
 #ifdef AIO_STATS
       num_requests--;
       current_req->queued--;
       ink_atomic_increment((int *)&current_req->pending, 1);
 #endif
+
       // update the stats;
       if (op->aiocb.aio_lio_opcode == LIO_WRITE) {
         aio_num_write++;
@@ -468,15 +504,19 @@ aio_thread_main(void *arg)
         aio_num_read++;
         aio_bytes_read += op->aiocb.aio_nbytes;
       }
+
+      // ロックをとって、キャッシュの読み込み、または書き込み操作を行います
       ink_mutex_release(&current_req->aio_mutex);
       cache_op((AIOCallbackInternal *)op);
       ink_atomic_increment(&current_req->requests_queued, -1);
+
 #ifdef AIO_STATS
       ink_atomic_increment((int *)&current_req->pending, -1);
 #endif
       op->link.prev = nullptr;
       op->link.next = nullptr;
       op->mutex     = op->action.mutex;
+
       if (op->thread == AIO_CALLBACK_THREAD_AIO) {
         SCOPED_MUTEX_LOCK(lock, op->mutex, thr_info->mutex->thread_holding);
         op->handleEvent(EVENT_NONE, nullptr);
@@ -486,10 +526,14 @@ aio_thread_main(void *arg)
         op->thread->schedule_imm(op);
       }
       ink_mutex_acquire(&my_aio_req->aio_mutex);
+
     } while (true);
+
+    // 上記でbreakしている箇所のコードパスに到達した場合に下記コードが実行される
     timespec timedwait_msec = ink_hrtime_to_timespec(Thread::get_hrtime_updated() + HRTIME_MSECONDS(net_config_poll_timeout));
     ink_cond_timedwait(&my_aio_req->aio_cond, &my_aio_req->aio_mutex, &timedwait_msec);
   }
+
   return nullptr;
 }
 #else

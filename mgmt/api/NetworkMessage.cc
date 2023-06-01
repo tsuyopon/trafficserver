@@ -241,7 +241,7 @@ send_mgmt_request(int fd, OpType optype, ...)
   GETCMD(requests, optype, cmd);
 
   // Figure out the payload length.
-  // cmdに応じてリクエストする際のデータ構造が決まっていてその長さをmgmt_message_length_vで取得して、その値をreq.lenに設定してから、mgmt_message_marshall_vを呼び出す
+  // cmdに応じてリクエストする際のデータ構造が決まっていてその長さをmgmt_message_length_vで取得しています。その値はreq.lenに設定してから、mgmt_message_marshall_vを呼び出すために使われています。
   va_start(ap, optype);
   msglen = mgmt_message_length_v(cmd->fields, cmd->nfields, ap);
   va_end(ap);
@@ -267,11 +267,13 @@ send_mgmt_request(int fd, OpType optype, ...)
   int down_time;
   static const MgmtMarshallType fieldso[] = {MGMT_MARSHALL_INT, MGMT_MARSHALL_STRING, MGMT_MARSHALL_INT};
 
+  // 上記でfieldsoには固定フィールドが指定されています。countof(fieldso)の値は3になります。
   if (mgmt_message_parse(static_cast<void *>(req.ptr), msglen, fieldso, countof(fieldso), &op, &name, &down_time) == -1) {
     printf("Plugin message - RPC parsing error - message discarded.\n");
   }
 
   // Send the response as the payload of a data object.
+  // メッセージの書き込みを行います
   if (mgmt_message_write(fd, fields, countof(fields), &req) == -1) {
     ats_free(req.ptr);
     return TS_ERR_NET_WRITE;
@@ -354,6 +356,7 @@ send_mgmt_error(int fd, OpType optype, TSMgmtError error)
 TSMgmtError
 send_mgmt_response(int fd, OpType optype, ...)
 {
+
   va_list ap;
   MgmtMarshallInt msglen;
   MgmtMarshallData reply          = {nullptr, 0};
@@ -362,6 +365,7 @@ send_mgmt_response(int fd, OpType optype, ...)
 
   GETCMD(responses, optype, cmd);
 
+  // メッセージのためのサイズを求める
   va_start(ap, optype);
   msglen = mgmt_message_length_v(cmd->fields, cmd->nfields, ap);
   va_end(ap);
@@ -372,6 +376,7 @@ send_mgmt_response(int fd, OpType optype, ...)
   reply.len = msglen;
 
   // Marshall the message itself.
+  // メッセージを生成する
   va_start(ap, optype);
   if (mgmt_message_marshall_v(reply.ptr, reply.len, cmd->fields, cmd->nfields, ap) == -1) {
     ats_free(reply.ptr);
@@ -382,6 +387,7 @@ send_mgmt_response(int fd, OpType optype, ...)
   va_end(ap);
 
   // Send the response as the payload of a data object.
+  // メッセージを送信する
   if (mgmt_message_write(fd, fields, countof(fields), &reply) == -1) {
     ats_free(reply.ptr);
     return TS_ERR_NET_WRITE;

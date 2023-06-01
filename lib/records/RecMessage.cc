@@ -246,6 +246,7 @@ RecMessageRegisterRecvCb(RecMessageRecvCb recv_cb, void *cookie)
 // RecMessageRecvThis
 //-------------------------------------------------------------------------
 
+// processerver.sockからメッセージを受信してMGMT_EVENT_LIBRECORDSだった場合のコールバック関数となっている
 void
 RecMessageRecvThis(ts::MemSpan<void> span)
 {

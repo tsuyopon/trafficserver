@@ -245,6 +245,9 @@ static inline int
 ink_cond_timedwait(ink_cond *cp, ink_mutex *mp, ink_timestruc *t)
 {
   int err;
+
+  // 一気にmutexのunlockとcpへの待機を行う。tのタイムアウトは最大待ち時間
+  // cf. https://linuxjm.osdn.jp/html/glibc-linuxthreads/man3/pthread_cond_wait.3.html
   while (EINTR == (err = pthread_cond_timedwait(cp, mp, t)))
     ;
 #if defined(freebsd) || defined(openbsd)

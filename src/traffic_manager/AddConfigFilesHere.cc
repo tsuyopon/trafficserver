@@ -44,6 +44,7 @@ testcall(char *foo, char * /*configName */)
   Debug("lm", "Received Callback that %s has changed", foo);
 }
 
+// 再読み込み可能なファイルが登録されていると思われる
 void
 registerFile(const char *configName, const char *defaultName, bool isRequired, bool isElevateNeeded = false)
 {
@@ -52,6 +53,8 @@ registerFile(const char *configName, const char *defaultName, bool isRequired, b
   if (!found) {
     fname = ats_strdup(defaultName);
   }
+
+  // ここが主要処理で指定されたファイルを登録します
   configFiles->addFile(fname, configName, isElevateNeeded, isRequired);
   ats_free(fname);
 }

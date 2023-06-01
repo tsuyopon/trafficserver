@@ -87,6 +87,7 @@ SocketManager::pread(int fd, void *buf, int size, off_t offset, char * /* tag AT
 {
   int64_t r;
   do {
+    // preadは指定したオフセットでfdを読むシステムコール: https://linuxjm.osdn.jp/html/LDP_man-pages/man2/pread.2.html
     r = ::pread(fd, buf, size, offset);
     if (r < 0) {
       r = -errno;
@@ -213,6 +214,7 @@ SocketManager::pwrite(int fd, void *buf, int size, off_t offset, char * /* tag A
 {
   int64_t r;
   do {
+    // pwriteは指定したオフセットでfdを書き込むシステムコール: https://linuxjm.osdn.jp/html/LDP_man-pages/man2/pread.2.html
     if (unlikely((r = ::pwrite(fd, buf, size, offset)) < 0)) {
       r = -errno;
     }

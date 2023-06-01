@@ -1023,6 +1023,7 @@ Vol::agg_wrap()
 int
 Vol::aggWrite(int event, void * /* e ATS_UNUSED */)
 {
+
   ink_assert(!is_io_in_progress());
 
   Que(CacheVC, link) tocall;
@@ -1031,6 +1032,7 @@ Vol::aggWrite(int event, void * /* e ATS_UNUSED */)
   cancel_trigger();
 
 Lagain:
+
   // calculate length of aggregated write
   for (c = static_cast<CacheVC *>(agg.head); c;) {
     int writelen = c->agg_len;
@@ -1039,19 +1041,23 @@ Lagain:
     if (agg_buf_pos + writelen > AGG_SIZE || header->write_pos + agg_buf_pos + writelen > (skip + len)) {
       break;
     }
+
     DDebug("agg_read", "copying: %d, %" PRIu64 ", key: %d", agg_buf_pos, header->write_pos + agg_buf_pos, c->first_key.slice32(0));
     int wrotelen = agg_copy(agg_buffer + agg_buf_pos, c);
     ink_assert(writelen == wrotelen);
     agg_todo_size -= writelen;
     agg_buf_pos += writelen;
     CacheVC *n = (CacheVC *)c->link.next;
+
     agg.dequeue();
     if (c->f.sync && c->f.use_first_key) {
       CacheVC *last = sync.tail;
+
       while (last && UINT_WRAP_LT(c->write_serial, last->write_serial)) {
         last = (CacheVC *)last->link.prev;
       }
       sync.insert(c, last);
+
     } else if (c->f.evacuator) {
       c->handleEvent(AIO_EVENT_DONE, nullptr);
     } else {
@@ -1121,6 +1127,7 @@ Lagain:
   io.aiocb.aio_buf    = agg_buffer;
   io.aiocb.aio_nbytes = agg_buf_pos;
   io.action           = this;
+
   /*
     Callback on AIO thread so that we can issue a new write ASAP
     as all writes are serialized in the volume.  This is not necessary

@@ -2297,6 +2297,7 @@ static void mgmt_restart_shutdown_callback(ts::MemSpan<void>)
   sync_cache_dir_on_shutdown();
 }
 
+// processerver.sockからMGMT_EVENT_DRAINを受け取った際に実行されるコールバック関数
 static void
 mgmt_drain_callback(ts::MemSpan<void> span)
 {
@@ -2321,6 +2322,7 @@ mgmt_storage_device_cmd_callback(int cmd, std::string_view const &arg)
   }
 }
 
+// processerver.sockからMGMT_EVENT_LIFECYCLE_MESSAGEを受け取った際に実行されるコールバック関数
 static void
 mgmt_lifecycle_msg_callback(ts::MemSpan<void> span)
 {

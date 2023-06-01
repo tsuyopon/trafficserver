@@ -263,6 +263,8 @@ Alarms::signalAlarm(alarm_t a, const char *desc, const char *ip)
   for (auto &&it : cblist) {
     AlarmCallbackFunc func = it.second;
     Debug("alarm", "[Alarms::signalAlarm] invoke callback for %d", a);
+
+    // ここのコールバックが主要処理?
     (*(func))(a, ip, desc);
   }
 

@@ -862,14 +862,19 @@ RecSetSyncRequired(char *name, bool lock)
   if (lock) {
     ink_rwlock_wrlock(&g_records_rwlock);
   }
+
   if (auto it = g_records_ht.find(name); it != g_records_ht.end()) {
     r1 = it->second;
+
     if (i_am_the_record_owner(r1->rec_type)) {
+
       rec_mutex_acquire(&(r1->lock));
       r1->sync_required = REC_PEER_SYNC_REQUIRED;
+
       if (REC_TYPE_IS_CONFIG(r1->rec_type)) {
         r1->config_meta.update_required = REC_UPDATE_REQUIRED;
       }
+
       rec_mutex_release(&(r1->lock));
       err = REC_ERR_OKAY;
     } else {
