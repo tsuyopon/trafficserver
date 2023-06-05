@@ -31,14 +31,34 @@ GeoDBHandle Acl::_geoip6;
 
 // Maxmind v1 APIs
 #if HAVE_GEOIP_H
+
+// GeoIPライブラリは情報が非常に少ないがこの辺が実際のソースコードだと思われる
+//   https://github.com/maxmind/geoip-api-c/tree/b539712b6bfba458c52948a99f2f612976897a41/libGeoIP
+
 bool
 Acl::init()
 {
+
   TSDebug(PLUGIN_NAME, "initialized IPv4 GeoIP DB");
+
+  // GeoIP_new
+  //   see https://github.com/maxmind/geoip-api-c/blob/b539712b6bfba458c52948a99f2f612976897a41/libGeoIP/GeoIP.c#L1614-L1619
   _geoip = GeoIP_new(GEOIP_MMAP_CACHE); // GEOIP_STANDARD seems to break threaded apps...
 
   // Setup IPv6 if possible
+  // GeoIP_db_avail 
+  //   see: https://github.com/maxmind/geoip-api-c/blob/b539712b6bfba458c52948a99f2f612976897a41/libGeoIP/GeoIP.c#L1026-L1037
+  // 下記のコードを読む限りだと、「GeoIPv6.dat」というデータファイルを読み込んでいると思われる
+  // https://github.com/maxmind/geoip-api-c/blob/b539712b6bfba458c52948a99f2f612976897a41/libGeoIP/GeoIP.c#L926-L927
+  // 元々はこの辺で取得できたと思われる
+  //    http://geolite.maxmind.com/download/geoip/database/GeoIPv6.dat.gz
   if (GeoIP_db_avail(GEOIP_COUNTRY_EDITION_V6)) {
+
+    // memo
+    //    GEOIP_MMAP_CACHE - Load database into mmap shared memory. MMAP is not available for 32bit Windows.
+    //    GEOIP_MEMORY_CACHE - Load database into memory. Provides faster performance but uses more memory.
+    //
+    // see: https://github.com/maxmind/geoip-api-c/tree/b539712b6bfba458c52948a99f2f612976897a41#memory-caching-and-other-options
     _geoip6 = GeoIP_open_type(GEOIP_COUNTRY_EDITION_V6, GEOIP_MMAP_CACHE | GEOIP_MEMORY_CACHE);
     TSDebug(PLUGIN_NAME, "initialized IPv6 GeoIP DB");
   }
@@ -138,9 +158,12 @@ RegexAcl::parse_line(const char *filename, const std::string &line, int lineno, 
   if (pos2 != std::string::npos) {
     regex = line.substr(pos1, pos2 - pos1);
     pos1  = line.find_first_not_of(_SEPARATOR, pos2);
+
     if (pos1 != std::string::npos) {
       pos2 = line.find_first_of(_SEPARATOR, pos1);
+
       if (pos2 != std::string::npos) {
+
         tmp = line.substr(pos1, pos2 - pos1);
         if (tmp == "allow") {
           _acl->set_allow(true);
@@ -150,6 +173,7 @@ RegexAcl::parse_line(const char *filename, const std::string &line, int lineno, 
           TSError("[%s] Bad action on in %s:line %d: %s", PLUGIN_NAME, filename, lineno, tmp.c_str());
           return false;
         }
+
         // The rest are "tokens"
         while ((pos1 = line.find_first_not_of(_SEPARATOR, pos2)) != std::string::npos) {
           pos2 = line.find_first_of(_SEPARATOR, pos1);
@@ -157,6 +181,7 @@ RegexAcl::parse_line(const char *filename, const std::string &line, int lineno, 
           _acl->add_token(tmp);
           ++tokens;
         }
+
         compile(regex, filename, lineno);
         TSDebug(PLUGIN_NAME, "Added regex rule for /%s/", regex.c_str());
         return true;
@@ -227,16 +252,23 @@ CountryAcl::read_regex(const char *fn, int &tokens)
   std::ifstream f;
   int lineno = 0;
 
+  // 指定されたファイルを開く
   f.open(fn, std::ios::in);
   if (f.is_open()) {
     std::string line;
     RegexAcl *acl = nullptr;
 
+    // ファイルがEOFになるまで
     while (!f.eof()) {
+
+      // 1行ずつチェックする
       getline(f, line);
       ++lineno;
+
+      // 
       acl = new RegexAcl(new CountryAcl());
       if (acl->parse_line(fn, line, lineno, tokens)) {
+        
         if (nullptr == _regexes) {
           _regexes = acl;
         } else {
@@ -263,7 +295,11 @@ CountryAcl::eval(TSRemapRequestInfo *rri, TSHttpTxn txnp) const
   // If there are regex rules, they take priority first. If a regex matches, we will
   // honor it's eval() rule. If no regexes matches, fall back on the default (which is
   // "allow" if nothing else is specified).
+
+  // _regexes自体CはountryAcl::read_regexの中で登録される
   if (nullptr != _regexes) {
+
+    
     RegexAcl *acl = _regexes;
     int path_len;
     const char *path = TSUrlPathGet(rri->requestBufp, rri->requestUrl, &path_len);
@@ -294,14 +330,25 @@ CountryAcl::process_args(int argc, char *argv[])
 {
   int tokens = 0;
 
+  // 仕様については下記を参照のこと
+  // cf. https://docs.trafficserver.apache.org/ja/latest/admin-guide/plugins/geoip_acl.en.html
   for (int i = 3; i < argc; ++i) {
     if (!strncmp(argv[i], "allow", 5)) {
+      // 「@pparam=allow」のように指定された場合には許可する
       set_allow(true);
     } else if (!strncmp(argv[i], "deny", 4)) {
+      // 「@pparam=deny」のように指定された場合には拒否する
       set_allow(false);
     } else if (!strncmp(argv[i], "regex::", 7)) {
+      // 「@pparam=regex::/etc/music.regex」とすることで、そのパスを持った特定のフィルタを作成する
+      //  「使い方の例: map http://example.com http://music.example.com @plugin=geoip_acl.so @pparam=country @pparam=regex::/etc/music.regex」
+      //
+      // $ cat /etc/music.regex
+      //  .*\.mp3  allow  US
+      //  .*\.ogg  deny   US
       read_regex(argv[i] + 7, tokens);
     } else if (!strncmp(argv[i], "html::", 6)) {
+      // 「html::」の場合にはデフォルトレスポンスのボディを上書きします
       read_html(argv[i] + 6);
     } else { // ISO codes assumed for the rest
       add_token(argv[i]);

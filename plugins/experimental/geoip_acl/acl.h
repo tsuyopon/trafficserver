@@ -36,6 +36,8 @@
 #include <string>
 #include "lulu.h"
 
+// GeoIP.hは下記
+// https://github.com/maxmind/geoip-api-c/blob/b539712b6bfba458c52948a99f2f612976897a41/libGeoIP/GeoIP.h#L327
 #if HAVE_GEOIP_H
 #include <GeoIP.h>
 typedef GeoIP *GeoDBHandle;
@@ -68,7 +70,9 @@ public:
   void
   send_html(TSHttpTxn txnp) const
   {
+    // _htmlに設定されていれば
     if (_html.size() > 0) {
+      // _htmlの値をmsgに詰めて、エラーメッセージのボディとしてセットする
       char *msg = TSstrdup(_html.c_str());
 
       TSHttpTxnErrorBodySet(txnp, msg, _html.size(), nullptr); // Defaults to text/html

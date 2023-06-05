@@ -74,6 +74,8 @@ public:
   send_html(TSHttpTxn txnp) const
   {
     if (_html.size() > 0) {
+
+      // _htmlに指定された値をmsgにセットして、TSHttpTxnErrorBodySetによりエラー時のボディとしてセットする
       char *msg = TSstrdup(_html.c_str());
 
       TSHttpTxnErrorBodySet(txnp, msg, _html.size(), nullptr); // Defaults to text/html

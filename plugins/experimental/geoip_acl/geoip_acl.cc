@@ -16,6 +16,12 @@
   limitations under the License.
 */
 
+
+//  このプラグインremapプラグインとして提供されています。
+// 仕様: https://docs.trafficserver.apache.org/ja/latest/admin-guide/plugins/geoip_acl.en.html
+
+
+
 //////////////////////////////////////////////////////////////////////////////////////////////
 //
 // Main entry points for the plugin hooks etc.
@@ -39,6 +45,7 @@ TSRemapInit(TSRemapInterface *api_info, char *errbuf, int errbuf_size)
     return TS_ERROR;
   }
 
+  // 3.0以上のバージョンであること
   if (api_info->tsremap_version < TSREMAP_VERSION) {
     snprintf(errbuf, errbuf_size, "[tsremap_init] - Incorrect API version %ld.%ld", api_info->tsremap_version >> 16,
              (api_info->tsremap_version & 0xffff));
@@ -64,12 +71,19 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char * /* errbuf */, int /
 
     // ToDo: Should do better processing here, to make it easier to deal with
     // rules other then country codes.
+
+    // TSRemapDoRemapを見ると、aがnullptrだとこのプラグインが作動しない。つまり、下記のコードパスを満たす必要がある。
+    // 
+    // 次のように
+    // map http://example.com/music http://music.example.com @plugin=geoip_acl.so @pparam=country @pparam=allow @pparam=US
     if (!strncmp(argv[2], "country", 11)) {
       TSDebug(PLUGIN_NAME, "creating an ACL rule with ISO country codes");
       a = new CountryAcl();
     }
 
+    // CountryAclクラスのインスタンスが設定されている場合
     if (a) {
+      // CountryAcl::process_args
       if (a->process_args(argc, argv) > 0) {
         *ih = static_cast<void *>(a);
       } else {
@@ -99,6 +113,8 @@ TSRemapDeleteInstance(void *ih)
 TSRemapStatus
 TSRemapDoRemap(void *ih, TSHttpTxn rh, TSRemapRequestInfo *rri)
 {
+
+  // 
   if (nullptr == ih) {
     TSDebug(PLUGIN_NAME, "No ACLs configured, this is probably a plugin bug");
   } else {
@@ -106,7 +122,11 @@ TSRemapDoRemap(void *ih, TSHttpTxn rh, TSRemapRequestInfo *rri)
 
     if (!a->eval(rri, rh)) {
       TSDebug(PLUGIN_NAME, "denying request");
+
+      // 403 Forbiddenが返されます。
       TSHttpTxnStatusSet(rh, static_cast<TSHttpStatus>(403));
+
+      // エラーメッセージを送付します
       a->send_html(rh);
     }
   }
