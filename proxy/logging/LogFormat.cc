@@ -129,6 +129,8 @@ LogFormat::id_from_name(const char *name)
 void
 LogFormat::init_variables(const char *name, const char *fieldlist_str, const char *printf_str, unsigned interval_sec)
 {
+
+  // m_aggregate = trueを設定するのは下記の箇所です
   m_field_count = parse_symbol_string(fieldlist_str, &m_field_list, &m_aggregate);
 
   if (m_field_count == 0) {
@@ -424,17 +426,25 @@ LogFormat::parse_symbol_string(const char *symbol_string, LogFieldList *field_li
   // strtok_r will mangle the input string; we'll make a copy for that.
   //
   sym_str = ats_strdup(symbol_string);
+
+  // https://docs.trafficserver.apache.org/admin-guide/logging/understanding.en.html#summary-logs
+  // 上記の「format: '%<operator(field)> , %<operator(field)>'」として指定された最初のカンマまでを取り出します。左記の例だとsymbolは「%<operator(field)> 」となります。
   symbol  = strtok_r(sym_str, ",", &saveptr);
 
   while (symbol != nullptr) {
     //
     // See if there is an aggregate operator, which will contain "()"
     //
+
+    // https://docs.trafficserver.apache.org/admin-guide/logging/understanding.en.html#summary-logs
+    // 上記の「format: '%<operator(field)> , %<operator(field)>'」などで指定された()内の値を取得します
     char *begin_paren = strchr(symbol, '(');
     if (begin_paren) {
       char *end_paren = strchr(symbol, ')');
       if (end_paren) {
         Debug("log-agg", "Aggregate symbol: %s", symbol);
+
+        // 「%<operator(field)>」ならば「(」の位置に文字終端「\0」を入れ、「)」にも文字終端「\0」を入れる。nameについては開始ポインタ位置として「(」の次の文字なのでbegin_paren + 1としている
         *begin_paren = '\0';
         *end_paren   = '\0';
         name         = begin_paren + 1;
@@ -444,11 +454,13 @@ LogFormat::parse_symbol_string(const char *symbol_string, LogFieldList *field_li
         if (aggregate == LogField::NO_AGGREGATE) {
           Note("Invalid aggregate specification: %s", sym);
         } else {
+
           if (aggregate == LogField::eCOUNT && strcmp(name, "*") == 0) {
             f = Log::global_field_list.find_by_symbol("psql");
           } else {
             f = Log::global_field_list.find_by_symbol(name);
           }
+
           if (!f) {
             Note("Invalid field symbol %s used in aggregate "
                  "operation",

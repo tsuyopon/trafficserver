@@ -1087,6 +1087,7 @@ static_assert((sizeof(handlers) / sizeof(handlers[0])) == static_cast<unsigned>(
 static TSMgmtError
 handle_control_message(int fd, void *req, size_t reqlen)
 {
+  // 指定されたメッセージからoptypeを抽出する
   OpType optype = extract_mgmt_request_optype(req, reqlen);
   TSMgmtError error;
 
@@ -1100,6 +1101,7 @@ handle_control_message(int fd, void *req, size_t reqlen)
     goto fail;
   }
 
+  // TBD: これは何?
   if (mgmt_has_peereid()) {
     uid_t euid = -1;
     gid_t egid = -1;

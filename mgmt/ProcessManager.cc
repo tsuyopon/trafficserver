@@ -367,7 +367,7 @@ ProcessManager::processSignalQueue()
 
     // require_lm変数はProcessManagerをnewする際の初期化リストで設定されます
     if (require_lm) {
-      // dequeueしたデータの書き込みを行います。
+      // processerver.sockに対してdequeueしたデータの書き込みを行います。
       int ret = mgmt_write_pipe(local_manager_sockfd, reinterpret_cast<char *>(mh), sizeof(MgmtMessageHdr) + mh->data_len);
       ats_free(mh);
 

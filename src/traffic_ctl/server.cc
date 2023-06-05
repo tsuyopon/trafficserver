@@ -23,22 +23,27 @@
 
 #include "traffic_ctl.h"
 
+// traffic_ctl.ccから呼ばれる
 void
 CtrlEngine::server_restart()
 {
   TSMgmtError error;
   unsigned flags = TS_RESTART_OPT_NONE;
 
+  // drainオプションが指定された場合にTS_RESTART_OPT_DRAINが合わせてメッセージに指定されます。
+  // これはtraffic_ctl -> TrafficManager -> Trafficserverへと伝達されますが、Rmgmt/api/CoreAPI.ccのRestart関数やBounce関数にて下記オプションが判定に使われています
   if (arguments.get("drain")) {
     flags |= TS_RESTART_OPT_DRAIN;
   }
 
+  // managerオプションがあるかどうかで処理が分岐する
   if (arguments.get("manager")) {
     error = TSRestart(flags);
   } else {
     error = TSBounce(flags);
   }
 
+  // 手前の処理にエラーがあるかを判定する
   if (error != TS_ERR_OKAY) {
     CtrlMgmtError(error, "server restart failed");
     status_code = CTRL_EX_ERROR;

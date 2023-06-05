@@ -227,6 +227,7 @@ EThread::schedule_spawn(Continuation *c, int ev, void *cookie)
 TS_INLINE EThread *
 this_ethread()
 {
+  // EThreadクラスが継承しているThreadクラスのThread::this_ethread_ptrを指していると思われる
   return EThread::this_ethread_ptr;
 }
 

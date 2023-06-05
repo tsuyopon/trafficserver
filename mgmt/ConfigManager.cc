@@ -137,8 +137,10 @@ ConfigManager::checkForUserUpdate(RollBackCheckType how)
 
       // TBD: 不明。ssl_multicert.configの様な場合にtrueとなるっぽい?
       if (!this->isChildManaged()) {
+
         // ファイルが更新された場合に、そのファイルが更新された際に呼び出されるコールバックが実行される
         configFiles->fileChanged(fileName.c_str(), configName.c_str());
+
       }
 
       mgmt_log("User has changed config file %s\n", fileName.c_str());

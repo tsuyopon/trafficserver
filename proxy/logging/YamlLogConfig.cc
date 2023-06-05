@@ -19,6 +19,10 @@
   limitations under the License.
  */
 
+
+// logging.yamlの処理を行うクラスです
+// cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/logging.yaml.en.html
+
 #include "YamlLogConfig.h"
 #include "YamlLogConfigDecoders.h"
 
@@ -31,6 +35,7 @@
 #include <algorithm>
 #include <memory>
 
+// この関数はLogConfig::evaluate_config()から呼び出されます
 bool
 YamlLogConfig::parse(const char *cfgFilename)
 {
@@ -44,6 +49,8 @@ YamlLogConfig::parse(const char *cfgFilename)
   return result;
 }
 
+
+// logging.yamlの仕様: https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/logging.yaml.en.html#logs
 bool
 YamlLogConfig::loadLogConfig(const char *cfgFilename)
 {
@@ -96,8 +103,12 @@ YamlLogConfig::loadLogConfig(const char *cfgFilename)
   }
 
   auto logs = config["logs"];
+
   for (auto const &node : logs) {
+    // decodeLogObjectによりLogObjectオブジェクトを生成する
     auto obj = decodeLogObject(node);
+
+    // LogObjectが生成できたらLogObjectManager::manage_objectに生成したLogObjectを管理対象として登録しておきます。
     if (obj) {
       cfg->log_object_manager.manage_object(obj);
     }
@@ -123,6 +134,7 @@ std::set<std::string> valid_log_object_keys = {"filename",
                                                "rolling_allow_empty",
                                                "pipe_buffer_size"};
 
+// logging.yamlをデコードして、LogObjectManagerインスタンスを生成する
 LogObject *
 YamlLogConfig::decodeLogObject(const YAML::Node &node)
 {
@@ -184,30 +196,41 @@ YamlLogConfig::decodeLogObject(const YAML::Node &node)
       }
     }
   }
+
+  // ログのローリング間隔(秒)
   if (node["rolling_interval_sec"]) {
     obj_rolling_interval_sec = node["rolling_interval_sec"].as<int>();
   }
+
   if (node["rolling_offset_hr"]) {
     obj_rolling_offset_hr = node["rolling_offset_hr"].as<int>();
   }
+
   if (node["rolling_size_mb"]) {
     obj_rolling_size_mb = node["rolling_size_mb"].as<int>();
   }
+
   if (node["rolling_min_count"]) {
     obj_rolling_min_count = node["rolling_min_count"].as<int>();
   }
+
   if (node["rolling_max_count"]) {
     obj_rolling_max_count = node["rolling_max_count"].as<int>();
   }
+
   if (node["rolling_allow_empty"]) {
     obj_rolling_allow_empty = node["rolling_allow_empty"].as<int>();
   }
+
   if (!LogRollingEnabledIsValid(obj_rolling_enabled)) {
     Warning("Invalid log rolling value '%d' in log object", obj_rolling_enabled);
   }
 
   // get buffer for pipe
   int pipe_buffer_size = 0;
+
+  // pipe_buffer_sizeについてはlogging.yamlの下記仕様書を参考のこと
+  // see: https://docs.trafficserver.apache.org/admin-guide/logging/examples.en.html#configuring-ascii-pipe-buffer-size
   if (node["pipe_buffer_size"]) {
     if (file_type != LOG_FILE_PIPE) {
       Warning("Pipe buffer size field should only be set for log.pipe object.");
@@ -216,6 +239,7 @@ YamlLogConfig::decodeLogObject(const YAML::Node &node)
     }
   }
 
+  // LogObjectインスタンスを生成します。この関数ではこのインスタンスをreturnします。
   auto logObject = new LogObject(cfg, fmt, cfg->logfile_dir, filename.c_str(), file_type, header.c_str(),
                                  static_cast<Log::RollingEnabledValues>(obj_rolling_enabled), cfg->preproc_threads,
                                  obj_rolling_interval_sec, obj_rolling_offset_hr, obj_rolling_size_mb, /* auto_created */ false,
@@ -239,6 +263,9 @@ YamlLogConfig::decodeLogObject(const YAML::Node &node)
   }
 
   // filters
+
+  // filterについては下記の仕様を参考のこと
+  // see: https://docs.trafficserver.apache.org/admin-guide/logging/examples.en.html#filtering-events-to-ascii-pipe-for-alerting
   auto filters = node["filters"];
   if (!filters) {
     return logObject;

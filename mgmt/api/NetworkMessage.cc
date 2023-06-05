@@ -363,6 +363,7 @@ send_mgmt_response(int fd, OpType optype, ...)
   const MgmtMarshallType fields[] = {MGMT_MARSHALL_DATA};
   const NetCmdOperation *cmd;
 
+  // レスポンスに必要なメッセージの構造も決まっているので取得します
   GETCMD(responses, optype, cmd);
 
   // メッセージのためのサイズを求める

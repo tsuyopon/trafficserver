@@ -250,16 +250,28 @@ Log::periodic_tasks(long time_now)
     // Check if we received a request to roll, and roll if so, otherwise
     // give objects a chance to roll if they need to
     //
+    // 下記の変数はTrafficManagerのコールバック関数が呼ばれた際にtrueにセットされます
     if (Log::config->roll_log_files_now) {
+
       if (error_log) {
+        // 下記でログのローリング処理が行われます
         error_log->roll_files(time_now);
       }
+
+      // LogObjectManager::roll_filesが呼ばれる
       Log::config->log_object_manager.roll_files(time_now);
+
+      // フラグの使用が終わったので、リセットして元に戻しておきます。
       Log::config->roll_log_files_now = false;
+
     } else {
+
       if (error_log) {
+        // 下記でログのローリング処理が行われます
         error_log->roll_files(time_now);
       }
+
+      // ogObjectManager::roll_filesが呼ばれる
       Log::config->log_object_manager.roll_files(time_now);
     }
 
@@ -275,6 +287,7 @@ Log::periodic_tasks(long time_now)
   -------------------------------------------------------------------------*/
 // LOG_PREPROCスレッドのためのクラス
 struct LoggingPreprocContinuation : public Continuation {
+
   int m_idx;
 
   int
@@ -334,6 +347,7 @@ Log::init_fields()
 
   // client -> proxy fields
   field = new LogField("client_host_ip", "chi", LogField::IP, &LogAccess::marshal_client_host_ip, &LogAccess::unmarshal_ip_to_str);
+  // LogFieldList::addが呼ばれる
   global_field_list.add(field, false);
   field_symbol_hash.emplace("chi", field);
 
@@ -1249,6 +1263,9 @@ int
 Log::va_error(const char *format, va_list ap)
 {
   int ret_val       = Log::SKIP;
+
+  // this_ethread()はThreadクラスを表していると思われる。よって、this_ethread()->mutexはThreadクラスのmutexクラス変数を表している。
+  // つまり、このmutexの範囲はThread自体のロックとなっている
   ProxyMutex *mutex = this_ethread()->mutex.get();
 
   if (error_log) {

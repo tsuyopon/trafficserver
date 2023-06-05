@@ -16,6 +16,9 @@
   limitations under the License.
 */
 
+// 仕様書は下記を参考のこと
+//   cf. https://docs.trafficserver.apache.org/admin-guide/plugins/maxmind_acl.en.html
+
 #include "mmdb.h"
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -77,6 +80,8 @@ TSRemapDoRemap(void *ih, TSHttpTxn rh, TSRemapRequestInfo *rri)
     TSDebug(PLUGIN_NAME, "No ACLs configured");
   } else {
     Acl *a = static_cast<Acl *>(ih);
+
+    // Acl::evalを呼び出す。下記eval関数が主要処理となる
     if (!a->eval(rri, rh)) {
       TSDebug(PLUGIN_NAME, "denying request");
       TSHttpTxnStatusSet(rh, TS_HTTP_STATUS_FORBIDDEN);

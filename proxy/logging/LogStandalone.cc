@@ -93,6 +93,7 @@ init_system(bool notify_syslog)
   initialize_process_manager
   -------------------------------------------------------------------------*/
 
+// traffic_server.ccから呼ばれてそう
 static void
 initialize_process_manager()
 {
@@ -186,6 +187,7 @@ check_lockfile()
   program.
   -------------------------------------------------------------------------*/
 
+// どこからも呼ばれてなさそう?
 void
 init_log_standalone(const char *pgm_name, bool one_copy)
 {

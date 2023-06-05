@@ -8079,6 +8079,7 @@ HttpTransact::build_error_response(State *s, HTTPStatus status_code, const char 
 {
   char body_language[256], body_type[256];
 
+  // error_body_typeが指定されない場合には
   if (nullptr == error_body_type) {
     error_body_type = "default";
   }
@@ -8169,16 +8170,22 @@ HttpTransact::build_error_response(State *s, HTTPStatus status_code, const char 
 
   // set the source to internal so that chunking is handled correctly
   s->source = SOURCE_INTERNAL;
+
+
   build_response(s, &s->hdr_info.client_response, s->client_info.http_version, status_code, reason_phrase);
 
+  // status_codeがHTTP_STATUS_SERVICE_UNAVAILABLEとHTTP_STATUS_BAD_REQUESTの場合だけは、設定を行います
   if (status_code == HTTP_STATUS_SERVICE_UNAVAILABLE) {
+
     int ret_tmp;
     int retry_after = 0;
 
     if (s->hdr_info.client_response.value_get(MIME_FIELD_RETRY_AFTER, MIME_LEN_RETRY_AFTER, &ret_tmp) != nullptr) {
       retry_after = ret_tmp;
     }
+
     s->congestion_control_crat = retry_after;
+
   } else if (status_code == HTTP_STATUS_BAD_REQUEST) {
     // Close the client connection after a malformed request
     s->client_info.keep_alive = HTTP_NO_KEEPALIVE;
@@ -8188,7 +8195,9 @@ HttpTransact::build_error_response(State *s, HTTPStatus status_code, const char 
   // the Traffic Server and the client do not cache the error
   // page.
   s->hdr_info.client_response.value_set(MIME_FIELD_CACHE_CONTROL, MIME_LEN_CACHE_CONTROL, "no-store", 8);
+
   // Make sure there are no Expires and Last-Modified headers.
+  // この関数はエラーメッセージを返す関数なので、ExpiresやLast-Modifiedヘッダがクライアントレスポンスにあれば除去しておきます
   s->hdr_info.client_response.field_delete(MIME_FIELD_EXPIRES, MIME_LEN_EXPIRES);
   s->hdr_info.client_response.field_delete(MIME_FIELD_LAST_MODIFIED, MIME_LEN_LAST_MODIFIED);
 
@@ -8224,10 +8233,12 @@ HttpTransact::build_error_response(State *s, HTTPStatus status_code, const char 
   s->internal_msg_buffer_fast_allocator_size = -1;
 
   if (len > 0) {
+    // 長さが0以上の場合にはContent-Type、Content-Languageヘッダを、クライアントのレスポンスにセットする
     s->hdr_info.client_response.value_set(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE, body_type, strlen(body_type));
     s->hdr_info.client_response.value_set(MIME_FIELD_CONTENT_LANGUAGE, MIME_LEN_CONTENT_LANGUAGE, body_language,
                                           strlen(body_language));
   } else {
+    // 長さが0の場合にはContent-Type、Content-Languageヘッダを、クライアントのレスポンスから除去する
     s->hdr_info.client_response.field_delete(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE);
     s->hdr_info.client_response.field_delete(MIME_FIELD_CONTENT_LANGUAGE, MIME_LEN_CONTENT_LANGUAGE);
   }

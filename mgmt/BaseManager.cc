@@ -39,7 +39,7 @@ void
 BaseManager::enqueue(MgmtMessageHdr *mh)
 {
   std::lock_guard lock(q_mutex);
-  // キューに要素を追加する
+  // キューに先頭から要素を追加する
   queue.emplace(mh);
   ink_sem_post(&q_sem);
 }

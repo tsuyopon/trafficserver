@@ -508,6 +508,7 @@ LogField::updateField(LogAccess *lad, char *buf, int len)
 unsigned
 LogField::marshal(LogAccess *lad, char *buf)
 {
+
   if (m_container == NO_CONTAINER) {
     // LogFieldクラスのコピーコンストラクタが生成される際に関数ポインタが指定される。もしくはLogFieldクラスをnew時に第５引数を指定する場合にも設定される
     // 「new LogField」でgrepをかけると設定されているm_marshal_funcがわかります。
@@ -552,12 +553,16 @@ LogField::marshal(LogAccess *lad, char *buf)
 /*-------------------------------------------------------------------------
   LogField::marshal_agg
   -------------------------------------------------------------------------*/
+// 「Summary Logs」の機能として呼ばれる
+// cf. https://docs.trafficserver.apache.org/admin-guide/logging/understanding.en.html#summary-logs
 unsigned
 LogField::marshal_agg(char *buf)
 {
   ink_assert(buf != nullptr);
   int64_t avg = 0;
 
+  // AVG, COUNT, FIRST, LAST, SUMについては下記ドキュメントに記載されている
+  // cf. https://docs.trafficserver.apache.org/admin-guide/logging/understanding.en.html#summary-logs
   switch (m_agg_op) {
   case eCOUNT:
     LogAccess::marshal_int(buf, m_agg_cnt);
@@ -763,11 +768,13 @@ LogFieldList::clear()
   _badSymbols.clear();
 }
 
+// デフォルト値はcopy=trueとなっています。
 void
 LogFieldList::add(LogField *field, bool copy)
 {
   ink_assert(field != nullptr);
 
+  // copyフラグがtrueの場合には、「new LogField」によりコピーした値をenqueueします。
   if (copy) {
     m_field_list.enqueue(new LogField(*field));
   } else {

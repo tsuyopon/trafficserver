@@ -46,7 +46,32 @@ union Alias64 {
  */
 
 #define INK_MIN_ALIGN 8
+
 /* INK_ALIGN() is only to be used to align on a power of 2 boundary */
+// 与えられたサイズを指定されたバウンダリ（境界）に合わせるための演算を行います。具体的には、サイズをバウンダリで割り、切り上げた後に再びバウンダリで乗算します。
+
+// (例1) INK_ALIGNを求める際に(ptrdiff_t)pointerの値は0x1007, alignmentの値は8として計算すると
+// 0x1007 + 7 = 0x100E
+// ~(7) = 0xFFFFFFF8
+// 0x100E & 0xFFFFFFF8 = 0x1008
+
+// (例2) INK_ALIGNを求める際に(ptrdiff_t)pointerの値は0x1008, alignmentの値は8として計算すると
+// 0x1008 + 7 = 0x100F
+// ~(7) = 0xFFFFFFF8
+// 0x100F & 0xFFFFFFF8 = 0x1008
+
+// (例3) INK_ALIGNを求める際に(ptrdiff_t)pointerの値は0x1009, alignmentの値は8として計算すると
+// 0x1009 + 7 = 0x1010
+// ~(7) = 0xFFFFFFF8
+// 0x1010 & 0xFFFFFFF8 = 0x1010
+
+// (例4) INK_ALIGNを求める際に(ptrdiff_t)pointerの値は0x1018, alignmentの値は8として計算すると
+// 0x1011 + 7 = 0x1018
+// ~(7) = 0xFFFFFFF8
+// 0x1018 & 0xFFFFFFF8 = 0x1018
+
+// つまり例1〜例4をみると 0x1008(=4104), 0x1010(=4112), 0x1018(=4120) と10進数にすると8byteおきの値になっていることがわかります。
+
 #define INK_ALIGN(size, boundary) (((size) + ((boundary)-1)) & ~((boundary)-1))
 
 /** Default alignment */
@@ -55,6 +80,7 @@ union Alias64 {
 //
 // Move a pointer forward until it meets the alignment width.
 //
+// align_pointer_forward関数を使用してアライメントを合わせます。
 static inline void *
 align_pointer_forward(const void *pointer_, size_t alignment)
 {

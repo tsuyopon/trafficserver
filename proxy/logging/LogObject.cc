@@ -255,13 +255,17 @@ LogObject::rename(char *new_name)
   m_logFile->change_name(new_name);
 }
 
+// 第２引数の「bool copy」はデフォルトtrueです。
 void
 LogObject::add_filter(LogFilter *filter, bool copy)
 {
+
   if (!filter) {
     return;
   }
+
   m_filter_list.add(filter, copy);
+
 }
 
 // we compute the object signature from the fieldlist_str and the printf_str
@@ -336,6 +340,7 @@ write_pointer_version(head_p *dst, head_p old_h, void *ptr, head_p::version_type
 LogBuffer *
 LogObject::_checkout_write(size_t *write_offset, size_t bytes_needed)
 {
+
   LogBuffer::LB_ResultCode result_code;
   LogBuffer *buffer;
   LogBuffer *new_buffer = nullptr;
@@ -450,6 +455,7 @@ LogObject::_checkout_write(size_t *write_offset, size_t bytes_needed)
 int
 LogObject::va_log(LogAccess *lad, const char *fmt, va_list ap)
 {
+
   static const unsigned MAX_ENTRY = 16 * LOG_KILOBYTE; // 16K? Really?
   char entry[MAX_ENTRY];
   unsigned len = 0;
@@ -475,7 +481,9 @@ LogObject::va_log(LogAccess *lad, const char *fmt, va_list ap)
 
   // Now that we have an entry and it's length (len), we can place it
   // into the associated logbuffer.
+  // この関数は、この関数定義の直後に定義されている関数を呼び出している
   return this->log(lad, entry);
+
 }
 
 // LogObject::va_logから呼ばれる
@@ -491,6 +499,7 @@ LogObject::log(LogAccess *lad, const char *text_entry)
 int
 LogObject::log(LogAccess *lad, std::string_view text_entry)
 {
+
   LogBuffer *buffer;
   size_t offset       = 0; // prevent warning
   size_t bytes_needed = 0, bytes_used = 0;
@@ -502,6 +511,7 @@ LogObject::log(LogAccess *lad, std::string_view text_entry)
     Debug("log", "logging space exhausted, can't write to:%s, drop this entry", m_logFile->get_name());
     return Log::FULL;
   }
+
   // this verification must be done here in order to avoid 'dead' LogBuffers
   // with none zero 'in usage' counters (see _checkout_write for more details)
   if (!lad && text_entry.empty()) {
@@ -519,6 +529,7 @@ LogObject::log(LogAccess *lad, std::string_view text_entry)
   }
 
   if (lad && m_format->is_aggregate()) {
+
     // marshal the field data into the temp space provided by the
     // LogFormat object for aggregate formats
     if (m_format->m_agg_marshal_space == nullptr) {
@@ -535,6 +546,8 @@ LogObject::log(LogAccess *lad, std::string_view text_entry)
     char *data_ptr   = m_format->m_agg_marshal_space;
     LogField *f;
     int64_t val;
+
+    // m_field_listはここでイテレーションで処理される
     for (f = fl->first(); f; f = fl->next(f)) {
       // convert to host order to do computations
       val = (f->is_time_field()) ? time_now : *(reinterpret_cast<int64_t *>(data_ptr));
@@ -847,6 +860,8 @@ LogObjectManager::~LogObjectManager()
 int
 LogObjectManager::_manage_object(LogObject *log_object, bool is_api_object, int maxConflicts)
 {
+
+  // TSTextLogObjectCreate, TSTextLogObjectCreate等のAPIから呼ばれた際にtrueになると思われる
   if (is_api_object) {
     ACQUIRE_API_MUTEX("A LogObjectManager::_manage_object");
   }
@@ -861,6 +876,8 @@ LogObjectManager::_manage_object(LogObject *log_object, bool is_api_object, int 
         // no conflicts, add object to the list of managed objects
         //
         log_object->refcount_inc();
+
+        // 引数で引き渡されてきたLogObjectインスタンスの登録を行います。ここがメイン処理です。
         if (is_api_object) {
           _APIobjects.push_back(log_object);
         } else {
@@ -900,7 +917,10 @@ LogObjectManager::_solve_filename_conflicts(LogObject *log_object, int maxConfli
 
   const char *filename = log_object->get_full_filename();
 
+  // ユーザーがそのファイルにアクセスできるかどうかをチェックします
+  // cf. https://linuxjm.osdn.jp/html/LDP_man-pages/man2/access.2.html
   if (access(filename, F_OK)) {
+
     if (errno != ENOENT) {
       const char *msg = "Cannot access log file %s: %s";
       const char *se  = strerror(errno);
@@ -909,7 +929,9 @@ LogObjectManager::_solve_filename_conflicts(LogObject *log_object, int maxConfli
       LogUtils::manager_alarm(LogUtils::LOG_ALARM_ERROR, msg, filename, se);
       retVal = ERROR_ACCESSING_LOG_FILE;
     }
+
   } else {
+
     // file exists, try to read metafile to get object signature
     //
     uint64_t signature = 0;
@@ -923,6 +945,7 @@ LogObjectManager::_solve_filename_conflicts(LogObject *log_object, int maxConfli
       if (got_sig && signature == obj_sig) {
         conflicts = false;
       }
+
       Debug("log",
             "LogObjectManager::_solve_filename_conflicts\n"
             "\tfilename = %s\n"
@@ -933,6 +956,7 @@ LogObjectManager::_solve_filename_conflicts(LogObject *log_object, int maxConfli
     }
 
     if (conflicts) {
+
       if (maxConflicts == 0) {
         // do not take any action, and return an error status
         //
@@ -969,12 +993,15 @@ LogObjectManager::_solve_filename_conflicts(LogObject *log_object, int maxConfli
             }
           }
         }
+
         if (roll_file) {
+
           Warning("File %s will be rolled because a LogObject with "
                   "different format is requesting the same "
                   "filename",
                   filename);
           LogFile logfile(filename, nullptr, LOG_FILE_ASCII, 0);
+
           if (logfile.open_file() == LogFile::LOG_FILE_NO_ERROR) {
             long time_now = LogUtils::timestamp();
 
@@ -984,6 +1011,7 @@ LogObjectManager::_solve_filename_conflicts(LogObject *log_object, int maxConfli
               _filename_resolution_abort(filename);
               retVal = CANNOT_SOLVE_FILENAME_CONFLICTS;
             }
+
           } else {
             _filename_resolution_abort(filename);
             retVal = CANNOT_SOLVE_FILENAME_CONFLICTS;
@@ -1005,21 +1033,30 @@ LogObjectManager::_filename_resolution_abort(const char *filename)
   LogUtils::manager_alarm(LogUtils::LOG_ALARM_ERROR, msg, filename, err);
 }
 
+// 登録しようとしているLogObjectの対象ファイル名が、既に登録済みのLogObjectのリストLogObjectListに登録済みかどうかを確認する関数
 bool
 LogObjectManager::_has_internal_filename_conflict(std::string_view filename, LogObjectList &objects)
 {
+
+  // 指定されたfilenameが「stdout」や「stderr」の場合にはconflictすることがないのでfalse
   if (filename == "stdout" || filename == "stderr") {
     return false;
   }
+
+  // objectsはLogObjectListとLogObjectインスタンスのリストなのでリストに対してイテレーション操作を行う
   for (auto &object : objects) {
     // an internal conflict exists if two objects request the
     // same filename, regardless of the object signatures, since
     // two objects writing to the same file would produce a
     // log with duplicate entries and non monotonic timestamps
+
+    // オブジェクト中のファイル名とfilenameが一致していたらtrueを返す
     if (filename == object->get_full_filename()) {
       return true;
     }
   }
+
+  // オブジェクト中のファイル名とfilenameが一致していない場合にはfalseを返す
   return false;
 }
 
@@ -1029,14 +1066,26 @@ LogObjectManager::_solve_internal_filename_conflicts(LogObject *log_object, int 
   int retVal           = NO_FILENAME_CONFLICTS;
   const char *filename = log_object->get_full_filename();
 
+  // 登録しようとしているLogObjectイン寸タンスが既に登録されているかどうかをチェックする。チェック方法としてはファイル名称で登録済みかどうかを判断する
   if (_has_internal_filename_conflict(filename, _objects) || _has_internal_filename_conflict(filename, _APIobjects)) {
+
+    // 最大でのログ個数を超過していないかどうかを判定します。
     if (fileNum < maxConflicts) {
       char new_name[MAXPATHLEN];
 
+      // ファイル名を作ります。「<オリジナルファイル名>_<fileNum>」となります。
       snprintf(new_name, sizeof(new_name), "%s%s%d", log_object->get_original_filename(), LOGFILE_SEPARATOR_STRING, ++fileNum);
+
+      // LogObject中に設定されているファイル名を指定した値に変更します
       log_object->rename(new_name);
+
+      // 同一の関数を呼び出しているので再帰処理となっています。
       retVal = _solve_internal_filename_conflicts(log_object, maxConflicts, fileNum);
+
     } else {
+
+      // ログ個数を超過しているので、エラーとなる場合
+
       const char *msg = "Cannot solve filename conflicts for log file %s";
 
       Error(msg, filename);
@@ -1044,6 +1093,7 @@ LogObjectManager::_solve_internal_filename_conflicts(LogObject *log_object, int 
       retVal = CANNOT_SOLVE_FILENAME_CONFLICTS;
     }
   }
+
   return retVal;
 }
 
@@ -1198,12 +1248,15 @@ LogObjectManager::transfer_objects(LogObjectManager &old_mgr)
   }
 }
 
+// ログのオブジェクトは_objectとAPI用の_APIobjectと2つに登録がわかれます。
+// ここでは2つが
 unsigned
 LogObjectManager::roll_files(long time_now)
 {
   int num_rolled = 0;
 
   for (auto &_object : this->_objects) {
+    // LogObject::roll_filesが呼ばれます
     num_rolled += _object->roll_files(time_now);
   }
 

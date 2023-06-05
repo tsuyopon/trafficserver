@@ -98,6 +98,8 @@ LogConfig::setup_default_values()
   logbuffer_max_iobuf_index = BUFFER_SIZE_INDEX_32K;
 }
 
+
+// TrafficManagerのコールバックとしてRecRegisterManagerCbから登録されます
 void LogConfig::reconfigure_mgmt_variables(ts::MemSpan<void>)
 {
   Note("received log reconfiguration event, rolling now");
@@ -425,11 +427,13 @@ LogConfig::setup_log_objects()
   filter_list.clear();
 
   // Evaluate logging.yaml to construct the custom log objects.
+  // logging.yamlのparse処理を行い、LogObjectインスタンスを生成しLogObjectManager::manage_objectへと登録を行います
   evaluate_config();
 
   // Open local pipes so readers can see them.
   log_object_manager.open_local_pipes();
 
+  // 「log」タグがあればデバッグ情報を付与する
   if (is_debug_tag_set("log")) {
     log_object_manager.display();
   }
@@ -754,9 +758,12 @@ LogConfig::update_space_used()
   // proxy.config.log.max_space_mb_headroomの値がMBサイズ指定される
   int64_t headroom  = static_cast<int64_t>(max_space_mb_headroom) * LOG_MEGABYTE;
 
+  // 書き込むために十分なスペースがあるかどうかをチェックします
   if (!space_to_write(headroom)) {
 
     Debug("logspace", "headroom reached, trying to clear space ...");
+
+    // ログ削除するファイルの候補が存在し愛知たらhas_candidates()はtrueになります
     if (!rolledLogDeleter.has_candidates()) {
       Note("Cannot clear space because there are no recognized Traffic Server rolled logs for auto deletion.");
     } else {
@@ -894,11 +901,16 @@ LogConfig::update_space_used()
   }
 }
 
+// logging.yaml
 bool
 LogConfig::evaluate_config()
 {
+
+  // proxy.config.log.config.filenameからログ設定用のファイルを取得する(デフォルトはlogging.yaml)
   ats_scoped_str path(RecConfigReadConfigPath("proxy.config.log.config.filename", ts::filename::LOGGING));
   struct stat sbuf;
+
+  // logging.yamlを読み込めない
   if (stat(path.get(), &sbuf) == -1 && errno == ENOENT) {
     Warning("logging configuration '%s' doesn't exist", path.get());
     return false;
@@ -907,6 +919,7 @@ LogConfig::evaluate_config()
   Note("%s loading ...", path.get());
   YamlLogConfig y(this);
 
+  // logging.yamlのパースを行ない、LogObjectインスタンスを生成し、管理用クラスへとLogObnectインスタンスを登録する
   bool zret = y.parse(path.get());
   if (zret) {
     Note("%s finished loading", path.get());

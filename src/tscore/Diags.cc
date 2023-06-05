@@ -509,19 +509,30 @@ Diags::setup_diagslog(BaseLogFile *blf)
   return true;
 }
 
+// diags.logを有効にするかどうかやログローテートの設定(サイズ、時刻)を行う
 void
 Diags::config_roll_diagslog(RollingEnabledValues re, int ri, int rs)
 {
+  // proxy.config.diags.logfile.rolling_enabled: diags.logを有効にするかどうか
   diagslog_rolling_enabled  = re;
+
+  // proxy.config.diags.logfile.rolling_interval_sec: ローリング間隔を指定する
   diagslog_rolling_interval = ri;
+
+  // proxy.config.diags.logfile.rolling_size_mb: ローリングサイズを指定する
   diagslog_rolling_size     = rs;
 }
 
 void
 Diags::config_roll_outputlog(RollingEnabledValues re, int ri, int rs)
 {
+  // proxy.config.output.logfile.rolling_enabled
   outputlog_rolling_enabled  = re;
+
+  // proxy.config.diags.logfile.rolling_interval_sec
   outputlog_rolling_interval = ri;
+
+  // proxy.config.output.logfile.rolling_size_mb
   outputlog_rolling_size     = rs;
 }
 
@@ -572,6 +583,7 @@ Diags::reseat_diagslog()
  *
  * Returns true if any logs rolled, false otherwise
  */
+// ログサイズかログの時刻に基づいてdiags.logのローテート処理を判断して、必要あればログローテートを実施します。
 bool
 Diags::should_roll_diagslog()
 {
@@ -586,18 +598,26 @@ Diags::should_roll_diagslog()
   // Roll diags_log if necessary
   if (diags_log && diags_log->is_init()) {
 
+    // 設定したログサイズに基づいたローリングが有効になっている場合
     if (diagslog_rolling_enabled == RollingEnabledValues::ROLL_ON_SIZE ||
         diagslog_rolling_enabled == RollingEnabledValues::ROLL_ON_TIME_OR_SIZE) {
+
       // if we can't even check the file, we can forget about rotating
       struct stat buf;
 
+      // diags.logのstat情報を取得して、bufに格納する
       if (fstat(fileno(diags_log->m_fp), &buf) != 0) {
         return false;
       }
 
       off_t size = buf.st_size;
+
+      // diagslog_rolling_size(proxy.config.diags.logfile.rolling_size_m)が-1ではなく、設定で指定したサイズ(MB)よりも大きかったら、diags.logをローリング対象とする
       if (diagslog_rolling_size != -1 && size >= (static_cast<off_t>(diagslog_rolling_size) * BYTES_IN_MB)) {
+
         fflush(diags_log->m_fp);
+
+        // ここでdiags.logのログローリングを実施する
         if (diags_log->roll()) {
           char *oldname = ats_strdup(diags_log->get_name());
           log_log_trace("in %s for diags.log, oldname=%s\n", __func__, oldname);
@@ -616,6 +636,7 @@ Diags::should_roll_diagslog()
 
     }
 
+    // 設定した時刻に基づいたローリングが有効になっている場合
     if (diagslog_rolling_enabled == RollingEnabledValues::ROLL_ON_TIME ||
         diagslog_rolling_enabled == RollingEnabledValues::ROLL_ON_TIME_OR_SIZE) {
       time_t now = time(nullptr);

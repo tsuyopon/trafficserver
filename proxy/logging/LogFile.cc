@@ -709,6 +709,7 @@ LogFile::exists(const char *pathname)
   output file (m_fd) with a trailing newline.
   -------------------------------------------------------------------------*/
 
+// 同じLogFileクラス内から呼ばれるクラス関数です
 int
 LogFile::writeln(char *data, int len, int fd, const char *path)
 {

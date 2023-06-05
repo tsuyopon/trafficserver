@@ -105,6 +105,7 @@ LogBufferHeader::log_filename()
 LogBuffer::LogBuffer(const LogConfig *cfg, LogObject *owner, size_t size, size_t buf_align, size_t write_align)
   : m_size(size), m_buf_align(buf_align), m_write_align(write_align), m_owner(owner), m_references(0)
 {
+
   size_t hdr_size;
 
   // create the buffer
@@ -118,6 +119,7 @@ LogBuffer::LogBuffer(const LogConfig *cfg, LogObject *owner, size_t size, size_t
     m_buffer_fast_allocator_size = -1;
     m_unaligned_buffer           = static_cast<char *>(ats_malloc(alloc_size));
   }
+
   m_buffer = static_cast<char *>(align_pointer_forward(m_unaligned_buffer, buf_align));
 
   // add the header
@@ -384,18 +386,22 @@ LogBuffer::_add_buffer_header(const LogConfig *cfg)
     m_header->fmt_name_offset = header_len;
     header_len += add_header_str(fmt->name(), &m_buffer[header_len], m_size - header_len);
   }
+
   if (fmt->fieldlist()) {
     m_header->fmt_fieldlist_offset = header_len;
     header_len += add_header_str(fmt->fieldlist(), &m_buffer[header_len], m_size - header_len);
   }
+
   if (fmt->printf_str()) {
     m_header->fmt_printf_offset = header_len;
     header_len += add_header_str(fmt->printf_str(), &m_buffer[header_len], m_size - header_len);
   }
+
   if (cfg->hostname) {
     m_header->src_hostname_offset = header_len;
     header_len += add_header_str(cfg->hostname, &m_buffer[header_len], m_size - header_len);
   }
+
   if (m_owner->get_base_filename()) {
     m_header->log_filename_offset = header_len;
     header_len += add_header_str(m_owner->get_base_filename(), &m_buffer[header_len], m_size - header_len);

@@ -47,19 +47,28 @@ Acl::init(char const *filename)
   }
 
   try {
+
+    // remap.configに@pparamで指定するmaxmind.yamlの読み込みを行います。
+    // cf. https://docs.trafficserver.apache.org/admin-guide/plugins/maxmind_acl.en.html
     _config = YAML::LoadFile(configloc.c_str());
 
+    // 設定ファイルがyamlとしてパースできない(null)だったら
     if (_config.IsNull()) {
       TSDebug(PLUGIN_NAME, "Config file not found or unreadable");
       return status;
     }
+
+    // yamlの構造として $.maxmind が第１階層となる。これがないと合致していないとしている。
     if (!_config["maxmind"]) {
       TSDebug(PLUGIN_NAME, "Config file not in maxmind namespace");
       return status;
     }
 
     // Get our root maxmind node
+    // $.maxmind 配下のノードを取得する
     maxmind = _config["maxmind"];
+
+// テスト用途
 #if 0
       // Test junk
       for (YAML::const_iterator it = maxmind.begin(); it != maxmind.end(); ++it) {
@@ -97,6 +106,7 @@ Acl::init(char const *filename)
   _html.clear();
   default_allow = false;
 
+  // 指定されたmaxmind.yamlから $.maxmind.allow を取得する
   if (loadallow(maxmind["allow"])) {
     TSDebug(PLUGIN_NAME, "Loaded Allow ruleset");
     status = true;
@@ -106,11 +116,13 @@ Acl::init(char const *filename)
     default_allow = true;
   }
 
+  // 指定されたmaxmind.yamlから $.maxmind.denyを取得する
   if (loaddeny(maxmind["deny"])) {
     TSDebug(PLUGIN_NAME, "Loaded Deny ruleset");
     status = true;
   }
 
+  // 指定されたmaxmind.yamlから $.maxmind.htmlを取得して、それを引数としてloadhtml()を呼び出す
   loadhtml(maxmind["html"]);
 
   if (!status) {
@@ -206,10 +218,13 @@ Acl::loaddeny(const YAML::Node &denyNode)
 bool
 Acl::loadallow(const YAML::Node &allowNode)
 {
+
+  // 
   if (!allowNode) {
     TSDebug(PLUGIN_NAME, "No Allow rules set");
     return false;
   }
+
   if (allowNode.IsNull()) {
     TSDebug(PLUGIN_NAME, "Allow rules are NULL");
     return false;
@@ -401,6 +416,7 @@ Acl::loaddb(const YAML::Node &dbNode)
   return true;
 }
 
+// maxmind_aclのDoRemapからリクエスト毎に呼び出される
 bool
 Acl::eval(TSRemapRequestInfo *rri, TSHttpTxn txnp)
 {
@@ -558,6 +574,9 @@ Acl::eval_country(MMDB_entry_data_s *entry_data, const char *path, int path_len)
 ipstate
 Acl::eval_ip(const sockaddr *sock) const
 {
+
+
+// デバッグ用途などで使われる。下記の0を1に変更するだけでデバッグとして出力されるようになる
 #if 0
   for (auto &spot : allow_ip_map) {
     char text[INET6_ADDRSTRLEN];
@@ -568,11 +587,13 @@ Acl::eval_ip(const sockaddr *sock) const
   }
 #endif
 
+  // 許可リストに含まれている場合
   if (allow_ip_map.contains(sock, nullptr)) {
     // Allow map has this ip, we know we want to allow it
     return ALLOW_IP;
   }
 
+  // 拒否リストに含まれている場合
   if (deny_ip_map.contains(sock, nullptr)) {
     // Deny map has this ip, explicitly deny
     return DENY_IP;

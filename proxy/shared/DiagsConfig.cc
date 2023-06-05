@@ -37,7 +37,7 @@
 //      records.config, and rebuilds the Diags data structures.
 //
 //////////////////////////////////////////////////////////////////////////////
-
+// records.configからdiags設定に関して抽出して、Diagsデータ構造を再構築します
 void
 DiagsConfig::reconfigure_diags()
 {
@@ -50,6 +50,7 @@ DiagsConfig::reconfigure_diags()
     const char *config_name;
     DiagsLevel level;
   } output_records[] = {
+    // 構造体を配列定義するが、下記で構造体を初期化しておく
     {"proxy.config.diags.output.diag", DL_Diag},           {"proxy.config.diags.output.debug", DL_Debug},
     {"proxy.config.diags.output.status", DL_Status},       {"proxy.config.diags.output.note", DL_Note},
     {"proxy.config.diags.output.warning", DL_Warning},     {"proxy.config.diags.output.error", DL_Error},
@@ -72,18 +73,21 @@ DiagsConfig::reconfigure_diags()
 
   // enabled if records.config set
 
+  // diagsのdebugが有効化どうか (proxy.config.diags.debug.enabled)
   e = static_cast<int>(REC_readInteger("proxy.config.diags.debug.enabled", &found));
   if (e && found) {
     c.enabled[DiagsTagType_Debug] = e; // implement OR logic
   }
   all_found = all_found && found;
 
+  // diagsのactionが有効化どうか (proxy.config.diags.action.enabled)
   e = static_cast<int>(REC_readInteger("proxy.config.diags.action.enabled", &found));
   if (e && found) {
     c.enabled[DiagsTagType_Action] = true; // implement OR logic
   }
   all_found = all_found && found;
 
+  // ソースコードの位置もログに出力するか (https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/files/records.config.en.html#proxy-config-diags-show-location)
   e                     = static_cast<int>(REC_readInteger("proxy.config.diags.show_location", &found));
   _diags->show_location = ((e == 1 && found) ? SHOW_LOCATION_DEBUG : ((e == 2 && found) ? SHOW_LOCATION_ALL : SHOW_LOCATION_NONE));
   all_found             = all_found && found;
@@ -109,10 +113,13 @@ DiagsConfig::reconfigure_diags()
   }
 
   p         = REC_readString("proxy.config.diags.debug.tags", &found);
+
+  // dt = debug tag
   dt        = (found ? p : nullptr); // NOTE: needs to be freed
   all_found = all_found && found;
 
   p         = REC_readString("proxy.config.diags.action.tags", &found);
+  // at = action tag
   at        = (found ? p : nullptr); // NOTE: needs to be freed
   all_found = all_found && found;
 
@@ -245,6 +252,9 @@ DiagsConfig::config_diags_norecords()
 #endif
 }
 
+// この関数はtraffic_server.ccやtraffic_manager.ccから呼び出される可能性がありますが、下記のfilenameが変わってきます。
+// traffic_server.ccの場合にはfilename=diags.logとなります。trafic_manager.ccにはmanager.logとなります。
+// traffic_managerのdiags.log相当はmanager.logとなることに注意してください。
 DiagsConfig::DiagsConfig(std::string_view prefix_string, const char *filename, const char *tags, const char *actions,
                          bool use_records)
   : callbacks_established(false), diags_log(nullptr), _diags(nullptr)
@@ -308,11 +318,11 @@ DiagsConfig::DiagsConfig(std::string_view prefix_string, const char *filename, c
   _diags    = new Diags(prefix_string, tags, actions, diags_log, diags_perm_parsed, output_perm_parsed);
   ::diags   = _diags;
   _diags->config_roll_diagslog(static_cast<RollingEnabledValues>(diags_log_roll_enable), diags_log_roll_int, diags_log_roll_size);
-  _diags->config_roll_outputlog(static_cast<RollingEnabledValues>(output_log_roll_enable), output_log_roll_int,
-                                output_log_roll_size);
+  _diags->config_roll_outputlog(static_cast<RollingEnabledValues>(output_log_roll_enable), output_log_roll_int, output_log_roll_size);
 
   Status("opened %s", diags_logpath.c_str());
 
+  // diagsの設定に対するコールバックをセットする
   register_diags_callbacks();
 
   reconfigure_diags();
@@ -332,6 +342,8 @@ DiagsConfig::DiagsConfig(std::string_view prefix_string, const char *filename, c
 void
 DiagsConfig::register_diags_callbacks()
 {
+
+  // config_record_namesは14個ものタグが指定されている
   static const char *config_record_names[] = {
     "proxy.config.diags.debug.enabled",  "proxy.config.diags.debug.tags",       "proxy.config.diags.action.enabled",
     "proxy.config.diags.action.tags",    "proxy.config.diags.show_location",    "proxy.config.diags.output.diag",
@@ -346,14 +358,19 @@ DiagsConfig::register_diags_callbacks()
   void *o = (void *)this;
 
   // set triggers to call same callback for any diag config change
+  // 上で定義された14個のタグすべてにdiags_config_callback関数のコールバックを登録します。diags_config_callback関数はこのファイル(DiagsConfig.cc)に定義されています。
   for (i = 0; config_record_names[i] != nullptr; i++) {
+    // タグ1つずつに対してコールバック関数を登録していきます。
     status = (REC_RegisterConfigUpdateFunc(config_record_names[i], diags_config_callback, o) == REC_ERR_OKAY);
     if (!status) {
       Warning("couldn't register variable '%s', is %s up to date?", config_record_names[i], ts::filename::RECORDS);
     }
+
+    // forのイテレーションが全て完了した際に、すべてのコールバック関数登録が正常ならばtotal_status=trueとなる。一度でも失敗するとtotal_status=falseとなる。
     total_status = total_status && status;
   }
 
+  // ログに関するタグのコールバックの登録が完了しているかどうかをフラグでセットしておきます。
   if (total_status == false) {
     Error("couldn't setup all diags callbacks, diagnostics may misbehave");
     callbacks_established = false;

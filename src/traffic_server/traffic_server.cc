@@ -307,6 +307,7 @@ public:
       } else {
         Note("Could not reseat %s", diags_log_filename);
       }
+
       // Reload any of the other moved log files (such as the ones in logging.yaml).
       Log::handle_log_rotation_request();
     }
@@ -401,6 +402,7 @@ public:
 
 // This continuation is used to periodically check on diags.log, and rotate
 // the logs if necessary
+// diags.logのローテートを行う関数
 class DiagsLogContinuation : public Continuation
 {
 public:
@@ -419,11 +421,15 @@ public:
     // to send a notification from TS to TM, informing TM that outputlog has
     // been rolled. It is much easier sending a notification (in the form
     // of SIGUSR2) from TM -> TS.
+    // diags.logの設定を取得する
     int diags_log_roll_int    = (int)REC_ConfigReadInteger("proxy.config.diags.logfile.rolling_interval_sec");
     int diags_log_roll_size   = (int)REC_ConfigReadInteger("proxy.config.diags.logfile.rolling_size_mb");
     int diags_log_roll_enable = (int)REC_ConfigReadInteger("proxy.config.diags.logfile.rolling_enabled");
+
+    // Diagsクラスに対して上記で取得したdiagsの設定をセットする
     diags->config_roll_diagslog((RollingEnabledValues)diags_log_roll_enable, diags_log_roll_int, diags_log_roll_size);
 
+    // diags.logのローリングをするかどうかを判断する
     if (diags->should_roll_diagslog()) {
       Note("Rolled %s", diags_log_filename);
     }
@@ -1830,6 +1836,8 @@ main(int /* argc ATS_UNUSED */, const char **argv)
   // re-start it again, TS will crash.
   // This is also needed for log rotation - setting up the file can cause privilege
   // related errors and if diagsConfig isn't get up yet that will crash on a NULL pointer.
+
+  // diags.logのセットアップを行います。
   diagsConfig = new DiagsConfig("Server", DEFAULT_DIAGS_LOG_FILENAME, error_tags, action_tags, false);
   diags->set_std_output(StdStream::STDOUT, bind_stdout);
   diags->set_std_output(StdStream::STDERR, bind_stderr);
