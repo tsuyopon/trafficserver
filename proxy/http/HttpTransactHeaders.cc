@@ -1135,7 +1135,9 @@ HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTP
 
 } // end HttpTransact::add_forwarded_field_to_outgoing_request()
 
-// Serverヘッダの追加を行います。
+// Serverヘッダの変更や新規追加を行います。
+//   既にServerヘッダがレスポンスにあれば、上書きする設定値になっていたら上書きします。設定値になっていなければ、そのままレスポンスから受け取ったServerヘッダを通過させます(何も処理しません)
+//   Serverヘッダの設定値が有効であれば、Serverヘッダがレスポンスに存在しない場合には新規追加を行います。
 void
 HttpTransactHeaders::add_server_header_to_response(const OverridableHttpConfigParams *http_txn_conf, HTTPHdr *header)
 {
@@ -1149,19 +1151,33 @@ HttpTransactHeaders::add_server_header_to_response(const OverridableHttpConfigPa
     MIMEField *ua_field;
     bool do_add = true;
 
-    // 
+    // Serverヘッダが見つからなかった場合(nullptr)
     if ((ua_field = header->field_find(MIME_FIELD_SERVER, MIME_LEN_SERVER)) == nullptr) {
+
+      // Serverヘッダを作成し、ヘッダ情報としてセットしておく(field_attach)。ua_fieldの値はこの後の処理で追加される
       if (likely((ua_field = header->field_create(MIME_FIELD_SERVER, MIME_LEN_SERVER)) != nullptr)) {
         header->field_attach(ua_field);
       }
+
     } else {
+
+      // Serverヘッダが見つかった場合
+
       // There was an existing header from Origin, so only add if setting allows to overwrite.
+      // proxy_response_server_enabledにはproxy.config.http.response_server_enabledの設定値となります。
+      // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-response-server-enabled
+      //
+      // proxy_response_server_enabledの値が1ならばdo_addはtrue、0や2ならばdo_addはfalseとなります。
       do_add = (1 == http_txn_conf->proxy_response_server_enabled);
+
     }
 
     // This will remove any old string (free it), and set our Server header.
+    // Serverヘッダがレスポンスにあれば、
     if (do_add && likely(ua_field)) {
       Debug("http_trans", "Adding Server: %s", http_txn_conf->proxy_response_server_string);
+
+      // Serverヘッダに値をセットする (サーバヘッダの値がレスポンスヘッダに存在する場合にはServerヘッダの値を上書きすることになる)
       header->field_value_set(ua_field, http_txn_conf->proxy_response_server_string,
                               http_txn_conf->proxy_response_server_string_len);
     }
