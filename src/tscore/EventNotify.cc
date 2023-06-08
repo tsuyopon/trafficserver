@@ -43,6 +43,7 @@ EventNotify::EventNotify()
   int ret;
   struct epoll_event ev;
 
+  // epollとしてカーネル呼び出しのセットアップ(EPOLLIN)
   m_event_fd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
   ink_release_assert(m_event_fd != -1);
 

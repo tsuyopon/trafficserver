@@ -64,6 +64,7 @@ LogBufferManager::preproc_buffers(LogBufferSink *sink)
   while ((b = q.pop())) {
     if (b->m_references || b->m_state.s.num_writers) {
       // Still has outstanding references.
+      // 参照や書き出しがあるバッファに対しては処理せずにwrite_listに戻しておく
       write_list.push(b);
     } else if (_num_flush_buffers > FLUSH_ARRAY_SIZE) {  // FLUSH_ARRAY_SIZE = 512 * 4 なので 2048を超過したらskipするのでpopした値をdeleteする
       ink_atomic_increment(&_num_flush_buffers, -1);
@@ -130,8 +131,7 @@ LogObject::LogObject(LogConfig *cfg, const LogFormat *format, const char *log_di
   // compute_signature is a static function
   m_signature = compute_signature(m_format, m_basename, m_flags);
 
-  m_logFile = new LogFile(m_filename, header, file_format, m_signature, cfg->ascii_buffer_size, cfg->max_line_size,
-                          m_pipe_buffer_size, format->escape_type());
+  m_logFile = new LogFile(m_filename, header, file_format, m_signature, cfg->ascii_buffer_size, cfg->max_line_size, m_pipe_buffer_size, format->escape_type());
 
   if (m_reopen_after_rolling) {
     m_logFile->open_file();
@@ -275,6 +275,7 @@ LogObject::add_filter(LogFilter *filter, bool copy)
 uint64_t
 LogObject::compute_signature(LogFormat *format, char *filename, unsigned int flags)
 {
+
   std::string_view filename_sv{filename};
   if (filename_sv == "stdout" || filename_sv == "stderr") {
     return 0;
@@ -296,6 +297,7 @@ LogObject::compute_signature(LogFormat *format, char *filename, unsigned int fla
 
     ats_free(buffer);
   }
+
   return signature;
 }
 
@@ -591,6 +593,8 @@ LogObject::log(LogAccess *lad, std::string_view text_entry)
   // and the commit (checkin) the changes.
   //
 
+  // aggregateというのは下記の「format: '%<LAST(cqts)>:%<COUNT(*)>:%<SUM(psql)>'」のようなログ集約統計の仕組みのことです
+  // https://docs.trafficserver.apache.org/en/latest/admin-guide/files/logging.yaml.en.html#examples
   if (lad && m_format->is_aggregate()) {
     // the "real" entry data is contained in the LogField objects
     // themselves, not in this lad.
@@ -602,7 +606,12 @@ LogObject::log(LogAccess *lad, std::string_view text_entry)
     bytes_used = m_format->m_field_list.marshal(lad, &(*buffer)[offset]);
     ink_assert(bytes_needed >= bytes_used);
   } else if (!text_entry.empty()) {
+    // アプリケーションから指定されたログの文字列が空でなければ、
+
+    // 指定したbufferのoffsetを指定した部分を先頭アドレスとしてdstに保存します
     char *dst = &(*buffer)[offset];
+
+    // text_entryにデータを保存します
     memcpy(dst, text_entry.data(), text_entry.size());
     memset(dst + text_entry.size(), 0, bytes_needed - text_entry.size());
   }

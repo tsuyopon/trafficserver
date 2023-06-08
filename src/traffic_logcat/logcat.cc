@@ -114,6 +114,7 @@ follow_rotate(const char *input_file, ino_t old_inode_num)
   }
 }
 
+// 呼び出し元を見ると、この関数はlogcatやlogstatsコマンドから利用されてそうである
 static int
 process_file(int in_fd, int out_fd)
 {

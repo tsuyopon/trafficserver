@@ -28,11 +28,13 @@
 ///////////////////////////////////////////////////////////////////////////////
 // "Factory" functions, processing the parsed lines
 //
+// 追加可能なOperatorの判定を行い、オペレータに応じた処理クラスのインスタンスをレスポンスとして応答する
 Operator *
 operator_factory(const std::string &op)
 {
   Operator *o = nullptr;
 
+  // 仕様: https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/plugins/header_rewrite.en.html#operators
   if (op == "rm-header") {
     o = new OperatorRMHeader();
   } else if (op == "set-header") {
@@ -84,6 +86,7 @@ operator_factory(const std::string &op)
   return o;
 }
 
+// 追加可能なConditionsの判定を行い、指定されたConditionに応じたクラスのインスタンスを応答する
 Condition *
 condition_factory(const std::string &cond)
 {
@@ -99,6 +102,7 @@ condition_factory(const std::string &cond)
     c_qual = "";
   }
 
+  // 仕様: https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/plugins/header_rewrite.en.html#configuration
   if (c_name == "TRUE") {
     c = new ConditionTrue();
   } else if (c_name == "FALSE") {

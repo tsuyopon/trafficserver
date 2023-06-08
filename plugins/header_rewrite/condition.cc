@@ -28,6 +28,9 @@
 static MatcherOps
 parse_matcher_op(std::string &arg)
 {
+
+  // 以下はConditions Operandsの処理
+  // see: https://docs.trafficserver.apache.org/en/7.1.x/admin-guide/plugins/header_rewrite.en.html#condition-operands
   switch (arg[0]) {
   case '=':
     arg.erase(0, 1);
@@ -60,6 +63,9 @@ void
 Condition::initialize(Parser &p)
 {
   Statement::initialize(p);
+
+  // 以下はCondition Flagsに応じた処理
+  // see: https://docs.trafficserver.apache.org/en/7.1.x/admin-guide/plugins/header_rewrite.en.html#condition-flags
 
   if (p.mod_exist("OR")) {
     if (p.mod_exist("AND")) {

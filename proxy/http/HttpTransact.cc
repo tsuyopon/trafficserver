@@ -668,16 +668,24 @@ find_server_and_update_current_info(HttpTransact::State *s)
   }
 }
 
+// 関数に指定されたcookies_confフラグやリクエスト・レスポンス・キャッシュレスポンスの状態に基づき、キャッシュ可能かどうかを判断します。
+// 戻り値が間違えやすいです。戻り値はfalseの場合にはキャッシュ可能、trueの場合にはキャッシュ不可を表します
 inline static bool
 do_cookies_prevent_caching(int cookies_conf, HTTPHdr *request, HTTPHdr *response, HTTPHdr *cached_request = nullptr)
 {
+
+  // 以下の種別を表すフラグがこの関数の第１引数cookies_confに指定されます。
+  // 引数に指定されたcookies_confの値に応じて処理が変化します。
+  //
+  // このcookies_confの値はproxy.config.http.cache.cache_responses_to_cookiesの設定値が指定されてくることになります
+  //   cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-cache-cache-responses-to-cookies
   enum CookiesConfig {
-    COOKIES_CACHE_NONE             = 0, // do not cache any responses to cookies
-    COOKIES_CACHE_ALL              = 1, // cache for any content-type (ignore cookies)
-    COOKIES_CACHE_IMAGES           = 2, // cache only for image types
-    COOKIES_CACHE_ALL_BUT_TEXT     = 3, // cache for all but text content-types
-    COOKIES_CACHE_ALL_BUT_TEXT_EXT = 4  // cache for all but text content-types except with OS response
-                                        // without "Set-Cookie" or with "Cache-Control: public"
+    COOKIES_CACHE_NONE             = 0, // do not cache any responses to cookies                            (cookieに対していかなるレスポンスもキャッシュしない)
+    COOKIES_CACHE_ALL              = 1, // cache for any content-type (ignore cookies)                      (いずれかのContent-Typeであればcookieを無視してキャッシュする)
+    COOKIES_CACHE_IMAGES           = 2, // cache only for image types                                       (Content-Typeが"image"の場合にだけ、キャッシュする)
+    COOKIES_CACHE_ALL_BUT_TEXT     = 3, // cache for all but text content-types                             (Content-Typeが"text"の場合を除いて、全てキャッシュする)
+    COOKIES_CACHE_ALL_BUT_TEXT_EXT = 4  // cache for all but text content-types except with OS response     
+                                        // without "Set-Cookie" or with "Cache-Control: public"             (OriginServerレスポンスにSet-Cookieが付与されない、または"Cache-Control: public" を付与した場合を除いてはContent-Typeがtextであれば全てキャッシュする)
   };
 
   const char *content_type = nullptr;
@@ -692,7 +700,9 @@ do_cookies_prevent_caching(int cookies_conf, HTTPHdr *request, HTTPHdr *response
 #endif
 
   // Can cache all regardless of cookie header - just ignore all cookie headers
+  // COOKIES_CACHE_ALLが指定されたら常にキャッシュ可能を応答する
   if (static_cast<CookiesConfig>(cookies_conf) == COOKIES_CACHE_ALL) {
+    // キャッシュ可能
     return false;
   }
 
@@ -708,42 +718,73 @@ do_cookies_prevent_caching(int cookies_conf, HTTPHdr *request, HTTPHdr *response
   // the response does not have a Cookie header and
   // the object is not cached or the request does not have a Cookie header
   // then cookies do not prevent caching.
+
+  // レスポンスで下記の3条件を全て満たした場合にはキャッシュ可能と判断する
+  //   1. レスポンスにSet-Cookieヘッダが指定された場合
+  //   2. リクエストにCookieヘッダが存在する場合
+  //   3. 以下のいずれかを満たす場合
+  //   3.1 キャッシュしたリクエストが存在しない場合
+  //   3.2 キャッシュしたリクエストにCookieヘッダが存在していない場合
   if (!response->presence(MIME_PRESENCE_SET_COOKIE) && !request->presence(MIME_PRESENCE_COOKIE) &&
       (cached_request == nullptr || !cached_request->presence(MIME_PRESENCE_COOKIE))) {
+    // キャッシュ可能
     return false;
   }
 
   // Do not cache if cookies option is COOKIES_CACHE_NONE
   // and a Cookie is detected
+  // COOKIES_CACHE_NONEが指定されたらキャッシュ不可を応答する (ただし、この行の直前の条件分岐ではキャッシュ可能として通すケースはあることに注意!!)
   if (static_cast<CookiesConfig>(cookies_conf) == COOKIES_CACHE_NONE) {
+    // キャッシュ不可
     return true;
   }
+
   // All other options depend on the Content-Type
+  // Content-Typeヘッダの値を取得します
   content_type = response->value_get(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE, &str_len);
 
+  // 関数に指定されたcookies_confがCOOKIES_CACHE_IMAGESの場合
   if (static_cast<CookiesConfig>(cookies_conf) == COOKIES_CACHE_IMAGES) {
+
+    // Content-Typeが「image」の場合にはキャッシュ可能としてfalseを応答する
     if (content_type && str_len >= 5 && memcmp(content_type, "image", 5) == 0) {
       // Images can be cached
+      // キャッシュ可能
       return false;
     }
+
+    // キャッシュ不可
     return true; // do not cache if  COOKIES_CACHE_IMAGES && content_type != "image"
   }
+
   // COOKIES_CACHE_ALL_BUT_TEXT || COOKIES_CACHE_ALL_BUT_TEXT_EXT
   // Note: if the configuration is bad, we consider
   // COOKIES_CACHE_ALL_BUT_TEXT to be the default
 
+  // Content-Typeが「text」に一致する場合
   if (content_type && str_len >= 4 && memcmp(content_type, "text", 4) == 0) { // content type  - "text"
+
     // Text objects cannot be cached unless the option is
     // COOKIES_CACHE_ALL_BUT_TEXT_EXT.
     // Furthermore, if there is a Set-Cookie header, then
     // Cache-Control must be set.
+
+    // COOKIES_CACHE_ALL_BUT_TEXT_EXT フラグが指定されていて、かつ、以下のいずれか片方を満たす場合にはキャッシュ可能とする
+    //  1. レスポンス予定のヘッダ情報にSet-Cookieが存在しない
+    //  2. レスポンス予定のヘッダ情報に"public"の値が指定されている
     if (static_cast<CookiesConfig>(cookies_conf) == COOKIES_CACHE_ALL_BUT_TEXT_EXT &&
         ((!response->presence(MIME_PRESENCE_SET_COOKIE)) || response->is_cache_control_set(HTTP_VALUE_PUBLIC))) {
+      // キャッシュ可能
       return false;
     }
+
+    // キャッシュ不可
     return true;
   }
+
+  // キャッシュ可能
   return false; // Non text objects can be cached
+
 }
 
 inline static bool
@@ -1927,6 +1968,7 @@ HttpTransact::ReDNSRoundRobin(State *s)
 // - HttpTransact::ORIGIN_SERVER_OPEN;
 //
 ///////////////////////////////////////////////////////////////////////////////
+// OriginServer DNS Lookup
 void
 HttpTransact::OSDNSLookup(State *s)
 {
@@ -2092,7 +2134,11 @@ HttpTransact::OSDNSLookup(State *s)
         TRANSACT_RETURN(SM_ACTION_API_OS_DNS, HandleCacheOpenReadMiss);
         // DNS lookup is done if the lookup failed and need to call Handle Cache Open Read Miss
       } else if (s->cache_info.action == CACHE_PREPARE_TO_WRITE && s->http_config_param->cache_post_method == 1 &&
-                 s->method == HTTP_WKSIDX_POST) {
+                 s->method == HTTP_WKSIDX_POST) {  // CACHE_PREPARE_TO_WRITEの処理種別 かつ POSTでのキャッシュ有効 かつ POSTメソッドの場合
+
+        // cache_post_methodはproxy.config.http.cache.post_methodのPOSTメソッドでのキャッシュが有効かどうかの設定値を表します。1なので、POSTでのキャッシュが有効となります。
+        //  cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-cache-post-method
+
         // By virtue of being here, we are intending to forward the request on
         // to the server. If we marked this as CACHE_PREPARE_TO_WRITE and this
         // is a POST request whose response we intend to write, then we have to
@@ -3091,8 +3137,18 @@ HttpTransact::build_response_from_cache(State *s, HTTPWarningCode warning_code)
   // fall through
   default:
     SET_VIA_STRING(VIA_DETAIL_CACHE_LOOKUP, VIA_DETAIL_HIT_SERVED);
+
+    // cache_post_methodはproxy.config.http.cache.post_methodのPOSTメソッドでのキャッシュが有効かどうかの設定値を表します。下記は1なので、POSTでのキャッシュが有効となります。
+    //  cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-cache-post-method
     if (s->method == HTTP_WKSIDX_GET || (s->http_config_param->cache_post_method == 1 && s->method == HTTP_WKSIDX_POST) ||
         s->api_resp_cacheable == true) {
+
+      // 以下のいずれかの場合にこのコードパスに入ります
+      //   1. リクエストメソッドがGETの場合
+      //   2. POSTでのキャッシュ設定が有効となっている場合 かつ リクエストメソッドがPOSTの場合
+      //   3. TSHttpTxnRespCacheableSetやTSHttpTxnCntlSetのプラグイン用APIにより明示的にキャッシュ可能と指定された場合 (s->api_resp_cacheable == true)
+
+
       // send back the full document to the client.
       TxnDebug("http_trans", "Match! Serving full document.");
       s->cache_info.action = CACHE_DO_SERVE;
@@ -3133,12 +3189,18 @@ HttpTransact::build_response_from_cache(State *s, HTTPWarningCode warning_code)
     }
     // If the client request is a HEAD, then serve the header from cache.
     else if (s->method == HTTP_WKSIDX_HEAD) {
+
+      // リクエストメソッドがHEADの場合にはこのコードパスに入ります
+
       TxnDebug("http_trans", "Match! Serving header only.");
 
       build_response(s, cached_response, &s->hdr_info.client_response, s->client_info.http_version);
       s->cache_info.action = CACHE_DO_NO_ACTION;
       s->next_action       = SM_ACTION_INTERNAL_CACHE_NOOP;
     } else {
+
+      // それ以外 (通常はGET, HEAD以外のPUT、POST、DELETE、PATCHなど。特殊設定やPOSTでのキャッシュ有効時はここに入らない例外あり)
+
       // We handled the request but it's not GET or HEAD (eg. DELETE),
       // and server is not reachable: 502
       //
@@ -4069,6 +4131,7 @@ HttpTransact::handle_server_connection_not_open(State *s)
 void
 HttpTransact::handle_forward_server_connection_open(State *s)
 {
+
   TxnDebug("http_trans", "(hfsco)");
   TxnDebug("http_seq", "Entering HttpTransact::handle_server_connection_open");
   ink_release_assert(s->current.state == CONNECTION_ALIVE);
@@ -4124,6 +4187,7 @@ HttpTransact::handle_forward_server_connection_open(State *s)
     }
   }
 
+  // 
   switch (s->cache_info.action) {
   case CACHE_DO_WRITE:
   /* fall through */
@@ -6169,11 +6233,15 @@ HttpTransact::is_request_cache_lookupable(State *s)
   if (s->cache_info.lookup_count > 0) {
     return true;
   }
+
   // is cache turned on?
+  // proxy.config.http.cache.httpの設定値が0の場合
+  //  cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-cache-http
   if (!s->txn_conf->cache_http) {
     SET_VIA_STRING(VIA_DETAIL_TUNNEL, VIA_DETAIL_TUNNEL_CACHE_OFF);
     return false;
   }
+
   // GET, HEAD, POST, DELETE, and PUT are all cache lookupable
   if (!HttpTransactHeaders::is_method_cache_lookupable(s->method) && s->api_req_cacheable == false) {
     SET_VIA_STRING(VIA_DETAIL_TUNNEL, VIA_DETAIL_TUNNEL_METHOD);
@@ -6963,6 +7031,7 @@ HttpTransact::handle_request_keep_alive_headers(State *s, HTTPVersion ver, HTTPH
 void
 HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTPHdr *heads)
 {
+
   enum KA_Action_t {
     KA_UNKNOWN,
     KA_DISABLED,
@@ -6975,6 +7044,9 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
 
   // Since connection headers are hop-to-hop, strip the
   //  the ones we received from upstream
+
+  // ConnectionヘッダとProxy-Connectionヘッダを除去する
+  //   Proxy-Connectionは歴史的経緯で現在は使われていないらしい -> https://qiita.com/msakamoto_sf/items/86a61b1fdd383edc28ed#proxy-connection-http%E3%83%98%E3%83%83%E3%83%80%E3%83%BC%E3%81%AB%E3%81%A4%E3%81%84%E3%81%A6%E3%83%A1%E3%83%A2
   heads->field_delete(MIME_FIELD_CONNECTION, MIME_LEN_CONNECTION);
   heads->field_delete(MIME_FIELD_PROXY_CONNECTION, MIME_LEN_PROXY_CONNECTION);
 
@@ -7006,6 +7078,7 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
 
   // Check pre-conditions for keep-alive
   if (ver.get_major() == 0) { /* No K-A for 0.9 apps */
+    // HTTP/0.9のKeep-Aliveバージョンに対応していない場合の分岐。Keep-Alive自体はHTTP/1.1から対応しているはず
     ka_action = KA_DISABLED;
   } else if (heads->status_get() == HTTP_STATUS_NO_CONTENT &&
              ((s->source == SOURCE_HTTP_ORIGIN_SERVER && s->current.server->transfer_encoding != NO_TRANSFER_ENCODING) ||
@@ -7073,6 +7146,7 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
   ink_assert(ka_action != KA_UNKNOWN);
 
   // Insert K-A headers as necessary
+  // Keep-Aliveヘッダに関連する処理ka_actionはこの前の処理で状態に分岐してフラグが設定されることになります。
   switch (ka_action) {
   case KA_CONNECTION:
     ink_assert(s->client_info.keep_alive != HTTP_NO_KEEPALIVE);
@@ -7733,14 +7807,26 @@ HttpTransact::handle_server_died(State *s)
 // return true if the response to the given request is likely cacheable
 // This function is called by build_request() to determine if the conditional
 // headers should be removed from server request.
+//
+// 与えられたリクエストに対するレスポンスがキャッシュ可能かどうかを判定します。
 bool
 HttpTransact::is_request_likely_cacheable(State *s, HTTPHdr *request)
 {
+  // メソッドが以下の条件全てに該当する場合にキャッシュ可能と判断します
+  //   1. メソッドがGET、または、TSHttpTxnCntlSet API関数でキャッシュ可能(s->api_req_cacheable=true)としている場合
+  //   2. TSHttpTxnCntlSet API関数でTS_HTTP_CNTL_SERVER_NO_STOREがfalse(つまり、Proxyサーバではno-storeとして設定された場合)として指定された場合 (s->api_server_response_no_store=false)
+  //   3. リクエストヘッダにAuthorizationヘッダが存在しない場合
+  //   4. Rangeヘッダが存在しない、または、proxy.config.http.cache.range.writeの設定値が1以上の場合
+  //      cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-cache-range-write
+  //
   if ((s->method == HTTP_WKSIDX_GET || s->api_req_cacheable) && !s->api_server_response_no_store &&
       !request->presence(MIME_PRESENCE_AUTHORIZATION) &&
       (!request->presence(MIME_PRESENCE_RANGE) || s->txn_conf->cache_range_write)) {
+    // キャッシュできる場合にはtrueを返します
     return true;
   }
+
+  // キャッシュできない場合にはfalseを返します
   return false;
 }
 
@@ -7907,6 +7993,8 @@ HttpTransact::build_response(State *s, HTTPHdr *outgoing_response, HTTPVersion o
   return;
 }
 
+// レスポンスメッセージを構築します
+// 共通的なヘッダの変更・生成などがここで行われます。(例: HSTS、Via、Server、HTTPバージョン等)
 void
 HttpTransact::build_response(State *s, HTTPHdr *base_response, HTTPHdr *outgoing_response, HTTPVersion outgoing_version,
                              HTTPStatus status_code, const char *reason_phrase)
@@ -8011,15 +8099,23 @@ HttpTransact::build_response(State *s, HTTPHdr *base_response, HTTPHdr *outgoing
 
   // Add HSTS header (Strict-Transport-Security) if max-age is set and the request was https
   // and the incoming request was remapped correctly
+
+  // オリジナルリクエストのURLスキームがHTTPS、かつ、HSTSのmax-ageが設定されている(proxy.config.ssl.hsts_max_ageが0以上)、かつ、url_remap_success=true(RemapProcessor::finish_remapがtrue) の場合にのみHSTS処理を実行する
+  // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-ssl-hsts-max-age
   if (s->orig_scheme == URL_WKSIDX_HTTPS && s->txn_conf->proxy_response_hsts_max_age >= 0 && s->url_remap_success == true) {
     TxnDebug("http_hdrs", "hsts max-age=%" PRId64, s->txn_conf->proxy_response_hsts_max_age);
+
+    // HSTSヘッダををクライアントへのレスポンスに追加します
     HttpTransactHeaders::insert_hsts_header_in_response(s, outgoing_response);
   }
 
+  // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-insert-response-via-str
   if (s->txn_conf->insert_response_via_string) {
+    // Viaヘッダををクライアントへのレスポンスに追加します
     HttpTransactHeaders::insert_via_header_in_response(s, outgoing_response);
   }
 
+  // HTTPバージョンに基づいてヘッダ情報の変換処理を行います
   HttpTransactHeaders::convert_response(outgoing_version, outgoing_response);
 
   // process reverse mappings on the location header
@@ -8030,12 +8126,14 @@ HttpTransact::build_response(State *s, HTTPHdr *base_response, HTTPHdr *outgoing
     HttpTransactHeaders::generate_and_set_squid_codes(outgoing_response, s->via_string, &s->squid_codes);
   }
 
+  // Serverヘッダをクライアントへのレスポンスに追加します
   HttpTransactHeaders::add_server_header_to_response(s->txn_conf, outgoing_response);
 
   if (s->state_machine->ua_txn && s->state_machine->ua_txn->get_proxy_ssn()->is_draining()) {
     HttpTransactHeaders::add_connection_close(outgoing_response);
   }
 
+  // 「http_hdrs」タグがセットされていた場合には、デバッグ情報を出力する
   if (is_debug_tag_set("http_hdrs")) {
     if (base_response) {
       DUMP_HEADER("http_hdrs", base_response, s->state_machine_id, "Base Header for Building Response");

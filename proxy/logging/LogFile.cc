@@ -521,6 +521,7 @@ done:
   return value is the number of bytes written.
   -------------------------------------------------------------------------*/
 
+// この関数の呼び出し元はlogcatやlogstatsだと思われる
 int
 LogFile::write_ascii_logbuffer(LogBufferHeader *buffer_header, int fd, const char *path, const char *alt_format)
 {
@@ -587,6 +588,7 @@ LogFile::write_ascii_logbuffer(LogBufferHeader *buffer_header, int fd, const cha
 
 // ログフォーマットがbinary以外(ascii, ascii_pipeの場合)にこの関数が呼ばれます
 // この関数ではバイナリからASCIIへ変換して、LOG_FLUSHスレッドで必要なオブジェクトをflush_data_listにプッシュして、LOG_FLUSHにシグナルを送付しています
+// TBD: なぜ関数名に3が入っているのか?
 int
 LogFile::write_ascii_logbuffer3(LogBufferHeader *buffer_header, const char *alt_format)
 {
@@ -682,6 +684,7 @@ LogFile::write_ascii_logbuffer3(LogBufferHeader *buffer_header, const char *alt_
     ink_atomiclist_push(Log::flush_data_list, flush_data);
 
     // LOG_FLUSHスレッドにシグナルを送って、上記で登録したLog::flush_data_listの内容のログ書き出しを依頼します
+    // 下記はEventNotify::signal()が呼ばれます
     Log::flush_notify->signal();
 
     total_bytes += fmt_buf_bytes;

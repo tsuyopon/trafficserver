@@ -133,11 +133,13 @@ RulesConfig::parse_config(const std::string &fname, TSHttpHookID default_hook)
   std::ifstream f;
   int lineno = 0;
 
+  // 指定したファイル名の文字列が空だったらエラー
   if (0 == fname.size()) {
     TSError("[%s] no config filename provided", PLUGIN_NAME);
     return false;
   }
 
+  // 先頭が「/」で始まっているかどうかで相対パスか絶対パスかを判定する
   if (fname[0] != '/') {
     filename = TSConfigDirGet();
     filename += "/" + fname;
@@ -145,27 +147,33 @@ RulesConfig::parse_config(const std::string &fname, TSHttpHookID default_hook)
     filename = fname;
   }
 
+  // 指定されたファイルをopenする
   f.open(filename.c_str(), std::ios::in);
   if (!f.is_open()) {
     TSError("[%s] unable to open %s", PLUGIN_NAME, filename.c_str());
     return false;
   }
 
+  // ファイルがEOFまで
   while (!f.eof()) {
     std::string line;
 
+    // 次の行を取得する
     getline(f, line);
     ++lineno; // ToDo: we should probably use this for error messages ...
     TSDebug(PLUGIN_NAME_DBG, "Reading line: %d: %s", lineno, line.c_str());
 
+    // 行の先頭部分がスペースであれば除去する
     while (std::isspace(line[0])) {
       line.erase(0, 1);
     }
 
+    // 行の末尾部分がスペースであれば除去する
     while (line.length() > 0 && std::isspace(line[line.length() - 1])) {
       line.erase(line.length() - 1, 1);
     }
 
+    // 行が空行か、先頭が#で始まる場合にはその行に対する処理をskipする
     if (line.empty() || (line[0] == '#')) {
       continue;
     }
@@ -199,6 +207,7 @@ RulesConfig::parse_config(const std::string &fname, TSHttpHookID default_hook)
         }
         continue;
       }
+
     } else {
       if (is_hook) {
         TSError("[%s] cond %%{%s} at %s:%d should be the first hook condition in the rule set and each rule set should contain "
@@ -210,16 +219,28 @@ RulesConfig::parse_config(const std::string &fname, TSHttpHookID default_hook)
 
     // This is pretty ugly, but it turns out, some conditions / operators can fail (regexes), which didn't use to be the case.
     // Long term, maybe we need to percolate all this up through add_condition() / add_operator() rather than this big ugly try.
+    // header_rewriteの重要な概念として次の2つを押さえておく必要があります。
+    //  条件を判定するCondtions
+    //     https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/plugins/header_rewrite.en.html#conditions
+    //  処理を実施するOperators
+    //     https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/plugins/header_rewrite.en.html#operators
     try {
+
+      // conditionsかoperatorsかの判定を行う
       if (p.is_cond()) {
+
+        // conditionの追加を行う
         if (!rule->add_condition(p, filename.c_str(), lineno)) {
           throw std::runtime_error("add_condition() failed");
         }
+
       } else {
+        // operatorsの追加を行う
         if (!rule->add_operator(p, filename.c_str(), lineno)) {
           throw std::runtime_error("add_operator() failed");
         }
       }
+
     } catch (std::runtime_error &e) {
       TSError("[%s] header_rewrite configuration exception: %s in file: %s", PLUGIN_NAME, e.what(), fname.c_str());
       delete rule;
@@ -341,6 +362,7 @@ TSPluginInit(int argc, const char *argv[])
 
   TSDebug(PLUGIN_NAME, "Global geo db %s", geoDBpath.c_str());
 
+  // TSPluginInitとTSRemapNewInstanceでフラグ(initGeoLibs)が同じ下記std::call_onceが定義されており、どちらか片方で実行されるだけとなる
   std::call_once(initGeoLibs, [&geoDBpath]() { initGeoLib(geoDBpath); });
 
   // Parse the global config file(s). All rules are just appended
@@ -434,12 +456,14 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char * /* errbuf ATS_UNUSE
   }
 
   if (!geoDBpath.empty()) {
+
     if (geoDBpath.find('/') != 0) {
       geoDBpath = std::string(TSConfigDirGet()) + '/' + geoDBpath;
     }
 
     TSDebug(PLUGIN_NAME, "Remap geo db %s", geoDBpath.c_str());
 
+    // TSPluginInitとTSRemapNewInstanceでフラグ(initGeoLibs)が同じ下記std::call_onceが定義されており、どちらか片方で実行されるだけとなる
     std::call_once(initGeoLibs, [&geoDBpath]() { initGeoLib(geoDBpath); });
   }
 
@@ -492,8 +516,12 @@ TSRemapDoRemap(void *ih, TSHttpTxn rh, TSRemapRequestInfo *rri)
   RulesConfig *conf  = static_cast<RulesConfig *>(ih);
 
   // Go through all hooks we support, and setup the txn hook(s) as necessary
+  // hookの開始ID(TS_HTTP_READ_REQUEST_HDR_HOOK)から終了ID(TS_HTTP_LAST_HOOK)までをイテレーション操作する
   for (int i = TS_HTTP_READ_REQUEST_HDR_HOOK; i < TS_HTTP_LAST_HOOK; ++i) {
+
+    // サポートしているフックかどうかの判定を行う
     if (conf->rule(i)) {
+      // フックの追加を行います
       TSHttpTxnHookAdd(rh, static_cast<TSHttpHookID>(i), conf->continuation());
       TSDebug(PLUGIN_NAME, "Added remapped TXN hook=%s", TSHttpHookNameLookup(static_cast<TSHttpHookID>(i)));
     }

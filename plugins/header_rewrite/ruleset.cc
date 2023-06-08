@@ -40,20 +40,28 @@ RuleSet::append(RuleSet *rule)
   tmp->next = rule;
 }
 
+// Conditionsの追加を行う
+// Conditions参考: https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/plugins/header_rewrite.en.html#configuration
 bool
 RuleSet::add_condition(Parser &p, const char *filename, int lineno)
 {
+
+  // conditionに応じたインスタンスを取得します
   Condition *c = condition_factory(p.get_op());
 
+  // conditionに応じたインスタンスが取得できた場合にはtrueを応答します
   if (nullptr != c) {
+
     TSDebug(PLUGIN_NAME, "    Adding condition: %%{%s} with arg: %s", p.get_op().c_str(), p.get_arg().c_str());
     c->initialize(p);
+
     if (!c->set_hook(_hook)) {
       delete c;
       TSError("[%s] in %s:%d: can't use this condition in hook=%s: %%{%s} with arg: %s", PLUGIN_NAME, filename, lineno,
               TSHttpHookNameLookup(_hook), p.get_op().c_str(), p.get_arg().c_str());
       return false;
     }
+
     if (nullptr == _cond) {
       _cond = c;
     } else {
@@ -67,12 +75,16 @@ RuleSet::add_condition(Parser &p, const char *filename, int lineno)
     return true;
   }
 
+  // conditionに応じたインスタンスが取得できなかった場合にはfalseを応答します
   return false;
 }
 
+// Operatorsの追加を行う
+// Operators参考: https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/plugins/header_rewrite.en.html#operators
 bool
 RuleSet::add_operator(Parser &p, const char *filename, int lineno)
 {
+
   Operator *o = operator_factory(p.get_op());
 
   if (nullptr != o) {

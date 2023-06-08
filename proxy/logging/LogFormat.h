@@ -105,6 +105,7 @@ public:
   {
     return m_printf_str;
   }
+  // is_aggreggate()の戻り値はparse_symbol_stringの第３引数の戻り値で決定されます
   bool
   is_aggregate() const
   {

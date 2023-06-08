@@ -108,13 +108,23 @@ inline bool
 ink_atomic_cas<int64_t>(int64_t *mem, int64_t old, int64_t new_value)
 {
   int64_t curr;
+
   ink_mutex_acquire(&__global_death);
+
+  // *memはアドレスに指定された値がcurrにそのまま入ります。
   curr = *mem;
+
+  // oldとcurrが一致していたら、一致していると判断して、new_valueの値をmemアドレスに存在する値として更新します
   if (old == curr)
     *mem = new_value;
   ink_mutex_release(&__global_death);
+
+  // oldとcurrが同じだったら1を応答する
+  // TBD: currにはメモリではなくメモリが示す値が入っているので、常にoldとcurrは一致する気がするがなぜこれが必要なのか? そもそも直前でも同様の判定をしているのにこれには何の意味があるのか?
   if (old == curr)
     return 1;
+
+  // oldとcurrが一致しない場合には上記2つのif文の分岐に入らずにここに来ると思われる
   return 0;
 }
 

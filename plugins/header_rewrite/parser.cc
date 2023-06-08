@@ -41,6 +41,7 @@ Parser::parse_line(const std::string &original_line)
 
   for (size_t i = 0; i < line.size(); ++i) {
     if ((state == PARSER_DEFAULT) && (std::isspace(line[i]) || ((line[i] == '=')))) {
+
       if (extracting_token) {
         cur_token_length = i - cur_token_start;
         if (cur_token_length > 0) {
@@ -52,7 +53,9 @@ Parser::parse_line(const std::string &original_line)
         // we got a standalone =, > or <
         _tokens.push_back(std::string(1, line[i]));
       }
+
     } else if ((state != PARSER_IN_QUOTE) && (line[i] == '/')) {
+
       // Deal with regexes, nothing gets escaped / quoted in here
       if ((state != PARSER_IN_REGEX) && !extracting_token) {
         state            = PARSER_IN_REGEX;
@@ -64,14 +67,18 @@ Parser::parse_line(const std::string &original_line)
         state            = PARSER_DEFAULT;
         extracting_token = false;
       }
+
     } else if ((state != PARSER_IN_REGEX) && (line[i] == '\\')) {
+
       // Escaping
       if (!extracting_token) {
         extracting_token = true;
         cur_token_start  = i;
       }
       line.erase(i, 1);
+
     } else if ((state != PARSER_IN_REGEX) && (line[i] == '"')) {
+
       if ((state != PARSER_IN_QUOTE) && !extracting_token) {
         state            = PARSER_IN_QUOTE;
         extracting_token = true;
@@ -88,7 +95,9 @@ Parser::parse_line(const std::string &original_line)
         _empty = true;
         return false;
       }
+
     } else if (!extracting_token) {
+
       if (_tokens.empty() && line[i] == '#') {
         // this is a comment line (it may have had leading whitespace before the #)
         _empty = true;
@@ -104,9 +113,11 @@ Parser::parse_line(const std::string &original_line)
       extracting_token = true;
       cur_token_start  = i;
     }
+
   }
 
   if (extracting_token) {
+
     if (state != PARSER_IN_QUOTE) {
       /* we hit the end of the line while parsing a token, let's add it */
       _tokens.push_back(line.substr(cur_token_start));
@@ -117,11 +128,13 @@ Parser::parse_line(const std::string &original_line)
       _empty = true;
       return false;
     }
+
   }
 
   if (_tokens.empty()) {
     _empty = true;
   } else {
+    // この関数の直後に定義されている関数を呼び出す
     return preprocess(_tokens);
   }
 
@@ -159,6 +172,8 @@ Parser::preprocess(std::vector<std::string> tokens)
   }
 
   // Special case for "conditional" values
+  // Conditionsは「cond %{XXXX:<field>}」といった書式で表されます。
+  // cf. https://docs.trafficserver.apache.org/en/7.1.x/admin-guide/plugins/header_rewrite.en.html#conditions
   if (tokens[0].substr(0, 2) == "%{") {
     _cond = true;
   } else if (tokens[0] == "cond") {
@@ -167,8 +182,15 @@ Parser::preprocess(std::vector<std::string> tokens)
   }
 
   // Is it a condition or operator?
+
   if (_cond) {
+    // conditionの処理の場合
+
+    // Conditionsは「cond %{XXXX:<field>}」といった書式で表されます。
+    // 下記では先頭2文字で「%{」が含まれ、その後token中の最後の1文字に「}」が含まれている場合に行われる処理です
     if ((tokens[0].substr(0, 2) == "%{") && (tokens[0][tokens[0].size() - 1] == '}')) {
+
+ 
       std::string s = tokens[0].substr(2, tokens[0].size() - 3);
 
       _op = s;
@@ -187,6 +209,9 @@ Parser::preprocess(std::vector<std::string> tokens)
       return false;
     }
   } else {
+
+    // operatorの処理の場合
+
     // Operator has no qualifiers, but could take an optional second argument
     _op = tokens[0];
     if (tokens.size() > 1) {

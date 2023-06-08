@@ -147,6 +147,9 @@ public:
   switch_state(LB_State &old_state, LB_State &new_state)
   {
     INK_WRITE_MEMORY_BARRIER;
+
+    // AtomicなCompare And Swap処理
+    // m_stateはLB_Stateのunionを表す
     return (ink_atomic_cas(&m_state.ival, old_state.ival, new_state.ival));
   }
 

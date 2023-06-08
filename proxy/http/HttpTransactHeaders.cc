@@ -268,14 +268,18 @@ HttpTransactHeaders::convert_request(HTTPVersion outgoing_ver, HTTPHdr *outgoing
 
 ////////////////////////////////////////////////////////////////////////
 // Just convert the outgoing response to the appropriate version
+// HTTPバージョンが1.0か1.1かにに基づいて、ヘッダの変換処理を行う
 void
 HttpTransactHeaders::convert_response(HTTPVersion outgoing_ver, HTTPHdr *outgoing_response)
 {
   if (outgoing_ver == HTTPVersion(1, 0)) {
+    // HTTP/1.0
     convert_to_1_0_response_header(outgoing_response);
   } else if (outgoing_ver == HTTPVersion(1, 1)) {
+    // HTTP/1.1
     convert_to_1_1_response_header(outgoing_response);
   } else {
+    // HTTP/0.9はこの遷移となるが、未サポートとなっている
     Debug("http_trans", "[HttpTransactHeaders::convert_response]"
                         "Unsupported Version - passing through");
   }
@@ -1131,13 +1135,21 @@ HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTP
 
 } // end HttpTransact::add_forwarded_field_to_outgoing_request()
 
+// Serverヘッダの追加を行います。
 void
 HttpTransactHeaders::add_server_header_to_response(const OverridableHttpConfigParams *http_txn_conf, HTTPHdr *header)
 {
+
+  // proxy.config.http.response_server_enabledが0より大きく、かつ、proxy.config.http.response_server_strがセットされている場合
+  //  cf. 
+  //     https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-response-server-enabled
+  //     https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-response-server-str
   if (http_txn_conf->proxy_response_server_enabled && http_txn_conf->proxy_response_server_string) {
+
     MIMEField *ua_field;
     bool do_add = true;
 
+    // 
     if ((ua_field = header->field_find(MIME_FIELD_SERVER, MIME_LEN_SERVER)) == nullptr) {
       if (likely((ua_field = header->field_create(MIME_FIELD_SERVER, MIME_LEN_SERVER)) != nullptr)) {
         header->field_attach(ua_field);
@@ -1185,7 +1197,7 @@ HttpTransactHeaders::remove_privacy_headers_from_request(HttpConfigParams *http_
   }
 
   // Cookie
-  // ���L�ݒ肪�L���Ȃ��Cookie�w�b�_�̍폜���s��
+  // 下記設定が有効ならばCookieヘッダの削除を行う
   // https://docs.trafficserver.apache.org/en/7.1.x/admin-guide/files/records.config.en.html#proxy-config-http-anonymize-remove-cookie
   if (http_txn_conf->anonymize_remove_cookie) {
     Debug("anon", "removing 'Cookie' headers");
@@ -1204,7 +1216,7 @@ HttpTransactHeaders::remove_privacy_headers_from_request(HttpConfigParams *http_
   // FIXME: we shouldn't parse this list every time, only when the
   // FIXME: config file changes.
 
-  // ���L�I�v�V�����ɂ��C�ӂ̃w�b�_�𑗕t�ł��Ȃ��悤�ɂł���B���X�g�`���ŕ����w�肷�邱�Ƃ��\�ł��B
+  // 下記オプションにより任意のヘッダを送付できないようにできる。リスト形式で複数指定することが可能です。
   //  cf. https://docs.trafficserver.apache.org/en/7.1.x/admin-guide/files/records.config.en.html#proxy-config-http-anonymize-other-header-list
   if (http_config_param->anonymize_other_header_list) {
 
@@ -1216,7 +1228,7 @@ HttpTransactHeaders::remove_privacy_headers_from_request(HttpConfigParams *http_
     Debug("anon", "removing other headers (%s)", anon_string);
     HttpCompat::parse_comma_list(&anon_list, anon_string);
 
-    // �폜�������w�b�_���̓��X�g�`���Ŏw��ł���̂ŁA1���̃w�b�_�폜�̃C�e���[�V�������s��
+    // 削除したいヘッダ情報はリスト形式で指定できるので、1つずつのヘッダ削除のイテレーションを行う
     for (field = anon_list.head; field != nullptr; field = field->next) {
       Debug("anon", "removing '%s' headers", field->str);
       header->field_delete(field->str, field->len);

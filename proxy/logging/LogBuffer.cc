@@ -210,7 +210,10 @@ LogBuffer::checkout_write(size_t *write_offset, size_t write_size)
   size_t actual_write_size = INK_ALIGN(write_size + sizeof(LogEntryHeader), m_write_align);
 
   uint64_t retries = static_cast<uint64_t>(-1);
+
+  // ループ処理を行います
   do {
+
     // we want sequence points between these two statements
     old_s = m_state;
     new_s = old_s;
@@ -314,17 +317,23 @@ LogBuffer::checkin_write(size_t write_offset)
   LB_ResultCode ret_val = LB_OK;
   LB_State old_s, new_s;
 
+  // switch_stateに成功するまではループを行う
   do {
     new_s = old_s = m_state;
 
     ink_assert(write_offset < old_s.s.offset);
     ink_assert(old_s.s.num_writers > 0);
 
+    // デクリメントして書き込みが完了したかどうかをチェックします。書き込みが完了していたらretをセットします
     if (--new_s.s.num_writers == 0) {
+      // LB_ALL_WRITERS_DONEは満杯で受け付けられなかった場合に返す
+      // LBは正常に受付した場合に返す
       ret_val = (old_s.s.full ? LB_ALL_WRITERS_DONE : LB_OK);
     }
 
+  // switch_stateではold_sの状態フラグとnew_sの状態フラグで切り替え可能であるかを見ています。
   } while (!switch_state(old_s, new_s));
+
 
   //    Debug("log-logbuffer","[%p] checkin_write for buffer %u (%s) "
   //        "returning %d (%u writers left)", this_ethread(),
@@ -553,6 +562,7 @@ LogBuffer::resolve_custom_entry(LogFieldList *fieldlist, char *printf_str, char 
   space provided, and returns the length of the new string (not including
   trailing null, like strlen).
   -------------------------------------------------------------------------*/
+// ログエントリをASCII文字列へと変換する
 int
 LogBuffer::to_ascii(LogEntryHeader *entry, LogFormatType type, char *buf, int buf_len, const char *symbol_str, char *printf_str,
                     unsigned buffer_version, const char *alt_format, LogEscapeType escape_type)
@@ -589,6 +599,8 @@ LogBuffer::to_ascii(LogEntryHeader *entry, LogFormatType type, char *buf, int bu
   LogFieldList *fieldlist = nullptr;
   bool delete_fieldlist_p = false; // need to free the fieldlist?
 
+  // fieldlist_cache_entriesはデフォルト0となっている。
+  // この変数は直後のforのさらに後のif文内の処理でfieldlist_cache_entries++としてインクリメント処理として値が設定される
   for (i = 0; i < fieldlist_cache_entries; i++) {
     if (strcmp(symbol_str, fieldlist_cache[i].symbol_str) == 0) {
       Debug("log-fieldlist", "Fieldlist for %s found in cache, #%d", symbol_str, i);

@@ -1413,10 +1413,14 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
     if (TSSystemState::is_event_system_shut_down()) {
       return nullptr;
     }
+
+    // LOG_PREPROCで書き込み準備されたバッファデータはflush_data_listから取得します。
     fdata = static_cast<LogFlushData *>(ink_atomiclist_popall(flush_data_list));
 
     // invert the list
     //
+    // リストを逆順にするようです
+    // TBD: なぜリストを逆順にする必要があるのか?
     link.head = fdata;
     while ((fdata = link.pop())) {
       invert_link.push(fdata);
@@ -1430,6 +1434,7 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
       LogFile *logfile  = fdata->m_logfile.get();
 
       if (logfile->m_file_format == LOG_FILE_BINARY) {
+        // logging.yamlのmodeが「binary」の場合
         logbuffer                      = static_cast<LogBuffer *>(fdata->m_data);
         LogBufferHeader *buffer_header = logbuffer->header();
 
@@ -1437,6 +1442,7 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
         total_bytes = buffer_header->byte_count;
 
       } else if (logfile->m_file_format == LOG_FILE_ASCII || logfile->m_file_format == LOG_FILE_PIPE) {
+        // logging.yamlのmodeが「ascii」か「ascii_pipe」の場合
         buf         = static_cast<char *>(fdata->m_data);
         total_bytes = fdata->m_len;
 
@@ -1472,7 +1478,7 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
           break;
         }
 
-        // ログの書き込みをここで行う
+        // (重要) ログの書き込みをここで行う
         len = ::write(logfilefd, &buf[bytes_written], total_bytes - bytes_written);
 
         // ログの書き込みがエラーならば
