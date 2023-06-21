@@ -155,8 +155,10 @@ SSL_CTX_add_extra_chain_cert_bio(SSL_CTX *ctx, BIO *bio)
 
 // This transfers ownership of the cert (X509) to the SSL context, if successful.
 #ifdef SSL_CTX_add0_chain_cert
+    // https://www.openssl.org/docs/man1.1.1/man3/SSL_CTX_add0_chain_cert.html
     if (!SSL_CTX_add0_chain_cert(ctx, cert)) {
 #else
+    // https://www.openssl.org/docs/man1.1.1/man3/SSL_CTX_add_extra_chain_cert.html
     if (!SSL_CTX_add_extra_chain_cert(ctx, cert)) {
 #endif
       X509_free(cert);
@@ -1902,66 +1904,92 @@ SSLMultiCertConfigLoader::_store_single_ssl_ctx(SSLCertLookup *lookup, const sha
   return ctx.get();
 }
 
+// この関数は行毎に対して呼ばれます
+// ssl_multicert.configのファイルに含まれる行数分だけこの関数が呼ばれます
 static bool
 ssl_extract_certificate(const matcher_line *line_info, SSLMultiCertConfigParams *sslMultCertSettings)
 {
+
+  // ssl_multicert.configのファイルに含まれる行の解析処理を行う
+  // https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/ssl_multicert.config.en.html
+
+  // ssl_multicert.configに含まれる1行内の「label=val」のペアは最大40個までと制限があります。
   for (int i = 0; i < MATCHER_MAX_TOKENS; ++i) {
+
     const char *label;
     const char *value;
 
+    // line[0][i] には labelが入り、label[1][i]にはvalが入る。
+    // 「dest_ip=111.11.11.1 ssl_cert_name=server.pem ssl_ticket_enabled=1 ticket_key_name=ticket.key」ならば、line_infoには次のような値が設定されていることになります。
+    //
+    // line[0][0] = "dest_ip"
+    // line[0][1] = "ssl_cert_name"
+    // line[0][2] = "ssl_ticket_enabled"
+    // line[0][3] = "ticket_key_name"
+    //
+    // line[1][0] = "111.11.11.1"
+    // line[1][1] = "server.pem"
+    // line[1][2] = "1"
+    // line[1][3] = "ticket.key"
+    //
     label = line_info->line[0][i];
     value = line_info->line[1][i];
 
+    // labelが空なら何もしない
     if (label == nullptr) {
       continue;
     }
+
     Debug("ssl_load", "Extracting certificate label: %s, value: %s", label, value);
 
-    if (strcasecmp(label, SSL_IP_TAG) == 0) {
+    // 下記ではsslMultCertSettingsに設定された値を格納していっています。
+    if (strcasecmp(label, SSL_IP_TAG) == 0) {                      // dest_ip
       sslMultCertSettings->addr = ats_strdup(value);
     }
 
-    if (strcasecmp(label, SSL_CERT_TAG) == 0) {
+    if (strcasecmp(label, SSL_CERT_TAG) == 0) {                    // ssl_cert_name
       sslMultCertSettings->cert = ats_strdup(value);
     }
 
-    if (strcasecmp(label, SSL_CA_TAG) == 0) {
+    if (strcasecmp(label, SSL_CA_TAG) == 0) {                      // ssl_ca_name
       sslMultCertSettings->ca = ats_strdup(value);
     }
 
-    if (strcasecmp(label, SSL_PRIVATE_KEY_TAG) == 0) {
+    if (strcasecmp(label, SSL_PRIVATE_KEY_TAG) == 0) {             // ssl_key_name
       sslMultCertSettings->key = ats_strdup(value);
     }
 
-    if (strcasecmp(label, SSL_OCSP_RESPONSE_TAG) == 0) {
+    if (strcasecmp(label, SSL_OCSP_RESPONSE_TAG) == 0) {           // ssl_ocsp_name
       sslMultCertSettings->ocsp_response = ats_strdup(value);
     }
 
-    if (strcasecmp(label, SSL_SESSION_TICKET_ENABLED) == 0) {
+    if (strcasecmp(label, SSL_SESSION_TICKET_ENABLED) == 0) {      // ssl_ticket_enabled
       sslMultCertSettings->session_ticket_enabled = atoi(value);
     }
 
-    if (strcasecmp(label, SSL_SESSION_TICKET_NUMBER) == 0) {
+    if (strcasecmp(label, SSL_SESSION_TICKET_NUMBER) == 0) {       // ssl_ticket_number
       sslMultCertSettings->session_ticket_number = atoi(value);
     }
 
-    if (strcasecmp(label, SSL_KEY_DIALOG) == 0) {
+    if (strcasecmp(label, SSL_KEY_DIALOG) == 0) {                  // ssl_key_dialog
       sslMultCertSettings->dialog = ats_strdup(value);
     }
 
-    if (strcasecmp(label, SSL_SERVERNAME) == 0) {
+    if (strcasecmp(label, SSL_SERVERNAME) == 0) {                  // dest_fqdn
       sslMultCertSettings->servername = ats_strdup(value);
     }
 
-    if (strcasecmp(label, SSL_ACTION_TAG) == 0) {
-      if (strcasecmp(SSL_ACTION_TUNNEL_TAG, value) == 0) {
+    if (strcasecmp(label, SSL_ACTION_TAG) == 0) {                  // action
+      if (strcasecmp(SSL_ACTION_TUNNEL_TAG, value) == 0) {         // tunnel
         sslMultCertSettings->opt = SSLCertContextOption::OPT_TUNNEL;
       } else {
+        // actionが指定されたのに、tunnelが指定されない場合にはエラーとする
         Error("Unrecognized action for %s", SSL_ACTION_TAG.data());
         return false;
       }
     }
   }
+
   // TS-4679:  It is ok to be missing the cert.  At least if the action is set to tunnel
   if (sslMultCertSettings->cert) {
     SimpleTokenizer cert_tok(sslMultCertSettings->cert, SSL_CERT_SEPARATE_DELIM);
@@ -1977,6 +2005,7 @@ ssl_extract_certificate(const matcher_line *line_info, SSLMultiCertConfigParams 
 bool
 SSLMultiCertConfigLoader::load(SSLCertLookup *lookup)
 {
+
   const SSLConfigParams *params = this->_params;
 
   char *tok_state   = nullptr;
@@ -1989,7 +2018,11 @@ SSLMultiCertConfigLoader::load(SSLCertLookup *lookup)
   Note("%s loading ...", ts::filename::SSL_MULTICERT);
 
   std::error_code ec;
+
+  // ssl_multicert.config
   std::string content{ts::file::load(ts::file::path{params->configFilePath}, ec)};
+
+  // ssl_multicert.configファイルのloadの結果をチェックする
   if (ec) {
     switch (ec.value()) {
     case ENOENT:
@@ -2008,25 +2041,39 @@ SSLMultiCertConfigLoader::load(SSLCertLookup *lookup)
   REC_ReadConfigInteger(elevate_setting, "proxy.config.ssl.cert.load_elevated");
   ElevateAccess elevate_access(elevate_setting ? ElevateAccess::FILE_PRIVILEGE : 0);
 
+  // 行のパース処理を行う
   line = tokLine(content.data(), &tok_state);
+
+  // 行毎に処理をすすめる
   while (line != nullptr) {
+
+    // 行番号を進める
     line_num++;
 
     // Skip all blank spaces at beginning of line.
+    // 先頭行でスペースがあれば、先頭ポインタをスペース分進める
     while (*line && isspace(*line)) {
       line++;
     }
 
+    // 空行やコメント行でなければ
     if (*line != '\0' && *line != '#') {
+
       shared_SSLMultiCertConfigParams sslMultiCertSettings = std::make_shared<SSLMultiCertConfigParams>();
       const char *errPtr;
 
+      // 各種行を「label=val」でparseしてline_infoに設定します。
       errPtr = parseConfigLine(line, &line_info, &sslCertTags);
+
+      // 現在ssl_multicert.configの何行目をparseしているかのデバッグ情報を表示する
       Debug("ssl_load", "currently parsing %s at line %d from config file: %s", line, line_num, params->configFilePath);
+
       if (errPtr != nullptr) {
-        RecSignalWarning(REC_SIGNAL_CONFIG_ERROR, "%s: discarding %s entry at line %d: %s", __func__, params->configFilePath,
-                         line_num, errPtr);
+        // errPtrがnullptrでなかったら、何かしらのエラーがあるとみなす
+        RecSignalWarning(REC_SIGNAL_CONFIG_ERROR, "%s: discarding %s entry at line %d: %s", __func__, params->configFilePath, line_num, errPtr);
       } else {
+        // errPtrがnullptrでなかったら、正常に行のparseが完了したとみなす
+
         if (ssl_extract_certificate(&line_info, sslMultiCertSettings.get())) {
           // There must be a certificate specified unless the tunnel action is set
           if (sslMultiCertSettings->cert || sslMultiCertSettings->opt != SSLCertContextOption::OPT_TUNNEL) {
@@ -2377,6 +2424,7 @@ SSLMultiCertConfigLoader::load_certs(SSL_CTX *ctx, const std::vector<std::string
                                      const std::vector<std::string> &key_list, CertLoadData const &data,
                                      const SSLConfigParams *params, const SSLMultiCertConfigParams *sslMultCertSettings)
 {
+
 #if TS_USE_TLS_OCSP
   if (SSLConfigParams::ssl_ocsp_enabled) {
     Debug("ssl_load", "SSL OCSP Stapling is enabled");
@@ -2393,6 +2441,7 @@ SSLMultiCertConfigLoader::load_certs(SSL_CTX *ctx, const std::vector<std::string
   ink_assert(!cert_names_list.empty());
 
   for (size_t i = 0; i < cert_names_list.size(); i++) {
+
     std::string keyPath = (i < key_list.size()) ? key_list[i] : "";
     std::string_view secret_data;
     std::string_view secret_key_data;
@@ -2402,6 +2451,7 @@ SSLMultiCertConfigLoader::load_certs(SSL_CTX *ctx, const std::vector<std::string
                keyPath.empty() ? "[empty key path]" : keyPath.c_str());
       return false;
     }
+
     scoped_BIO bio(BIO_new_mem_buf(secret_data.data(), secret_data.size()));
     X509 *cert = nullptr;
     if (bio) {
@@ -2433,6 +2483,7 @@ SSLMultiCertConfigLoader::load_certs(SSL_CTX *ctx, const std::vector<std::string
     if (secret_key_data.empty()) {
       secret_key_data = secret_data;
     }
+
     if (!SSLPrivateKeyHandler(ctx, params, keyPath.c_str(), secret_key_data.data(), secret_key_data.size())) {
       SSLError("failed to load certificate: %s of length %ld with key path: %s", cert_names_list[i].c_str(), secret_key_data.size(),
                keyPath.empty() ? "[empty key path]" : keyPath.c_str());
@@ -2443,15 +2494,27 @@ SSLMultiCertConfigLoader::load_certs(SSL_CTX *ctx, const std::vector<std::string
     // First, load any CA chains from the global chain file.  This should probably
     // eventually be a comma separated list too.  For now we will load it in all chains even
     // though it only makes sense in one chain
+
+    // proxy.config.ssl.server.cert_chain.filename
+    // サーバ証明書に対応する中間証明書のパス。このファイルはssl_multicert.config中に定義されている場合に対する処理のみ有効となる
+    // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-ssl-server-cert-chain-filename
     if (params->serverCertChainFilename) {
+
+      // 
       std::string completeServerCertChainPath(Layout::relative_to(params->serverCertPathOnly, params->serverCertChainFilename));
+
+      // 中間証明書の登録を行なっている。実際に内部で呼び出しているのはSSL_CTX_add0_chain_certとなる
+      // これによってサーバが応答で返す際にサーバ証明書と共に、中間証明書も併せてレスポンスに含めるようになります。
       if (!SSL_CTX_add_extra_chain_cert_file(ctx, completeServerCertChainPath.c_str())) {
         SSLError("failed to load global certificate chain from %s", completeServerCertChainPath.c_str());
         return false;
       }
+
+      // 下記のコールバックはmainでセットされる。実際はload_ssl_file_callback関数がよばれる
       if (SSLConfigParams::load_ssl_file_cb) {
         SSLConfigParams::load_ssl_file_cb(completeServerCertChainPath.c_str());
       }
+
     }
 
     // Now, load any additional certificate chains specified in this entry.
@@ -2463,12 +2526,18 @@ SSLMultiCertConfigLoader::load_certs(SSL_CTX *ctx, const std::vector<std::string
           SSLError("failed to load certificate chain from %s", completeServerCertChainPath.c_str());
           return false;
         }
+
+        // 下記のコールバックはmainでセットされる。実際はload_ssl_file_callback関数がよばれる
         if (SSLConfigParams::load_ssl_file_cb) {
           SSLConfigParams::load_ssl_file_cb(completeServerCertChainPath.c_str());
         }
+
       }
+
     }
 #if TS_USE_TLS_OCSP
+    // OCSP Staplingの設定が有効ならば
+    // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-ssl-ocsp-enabled
     if (SSLConfigParams::ssl_ocsp_enabled) {
       if (sslMultCertSettings->ocsp_response) {
         const char *ocsp_response_name = data.ocsp_list[i].c_str();
@@ -2476,6 +2545,7 @@ SSLMultiCertConfigLoader::load_certs(SSL_CTX *ctx, const std::vector<std::string
         if (!ssl_stapling_init_cert(ctx, cert, data.cert_names_list[i].c_str(), completeOCSPResponsePath.c_str())) {
           Warning("failed to configure SSL_CTX for OCSP Stapling info for certificate at %s", data.cert_names_list[i].c_str());
         }
+
       } else {
         if (!ssl_stapling_init_cert(ctx, cert, data.cert_names_list[i].c_str(), nullptr)) {
           Warning("failed to configure SSL_CTX for OCSP Stapling info for certificate at %s", data.cert_names_list[i].c_str());
@@ -2485,6 +2555,7 @@ SSLMultiCertConfigLoader::load_certs(SSL_CTX *ctx, const std::vector<std::string
 #endif /* TS_USE_TLS_OCSP */
     X509_free(cert);
   }
+
   return true;
 }
 

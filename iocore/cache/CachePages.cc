@@ -21,6 +21,8 @@
   limitations under the License.
  */
 
+// trafficserverが提供しているキャッシュを操作するUI画面に関するページの処理を行うクラスです。
+
 #include "P_Cache.h"
 
 #include "Show.h"

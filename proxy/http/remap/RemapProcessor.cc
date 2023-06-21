@@ -161,9 +161,11 @@ RemapProcessor::finish_remap(HttpTransact::State *s, UrlRewrite *table)
 
     if (request_header->presence(MIME_PRESENCE_REFERER) &&
         (referer_hdr = request_header->value_get(MIME_FIELD_REFERER, MIME_LEN_REFERER, &referer_len)) != nullptr) {
+
       if (referer_len >= static_cast<int>(sizeof(tmp_referer_buf))) {
         referer_len = static_cast<int>(sizeof(tmp_referer_buf) - 1);
       }
+
       memcpy(tmp_referer_buf, referer_hdr, referer_len);
       tmp_referer_buf[referer_len] = 0;
       for (enabled_flag = false; ri; ri = ri->next) {

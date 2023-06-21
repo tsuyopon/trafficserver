@@ -1514,6 +1514,8 @@ Log::flush_thread_main(void * /* args ATS_UNUSED */)
     // 現在時刻が前回実施時刻から一定時間(5秒固定)以上経過していたらperiodic_tasks(now)を実行します。
     if (now >= last_time + periodic_tasks_interval) {
       Debug("log-preproc", "periodic tasks for %" PRId64, (int64_t)now);
+
+      // ここで
       periodic_tasks(now);
       last_time = Thread::get_hrtime() / HRTIME_SECOND;
     }

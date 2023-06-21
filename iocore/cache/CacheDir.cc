@@ -1083,6 +1083,7 @@ Lrestart:
     trigger = eventProcessor.schedule_in(this, SYNC_DELAY);
     return EVENT_CONT;
   }
+
   {
     CACHE_TRY_LOCK(lock, gvol[vol_idx]->mutex, mutex->thread_holding);
     if (!lock.is_locked()) {
@@ -1105,6 +1106,7 @@ Lrestart:
     size_t dirlen = vol->dirlen();
     if (!writepos) {
       // start
+      // キャッシュ書き込みされる際にはこの遷移を通ります
       Debug("cache_dir_sync", "sync started");
       /* Don't sync the directory to disk if its not dirty. Syncing the
          clean directory to disk is also the cause of INKqa07151. Increasing
@@ -1115,6 +1117,7 @@ Lrestart:
         Debug("cache_dir_sync", "Dir %s not dirty", vol->hash_text.get());
         goto Ldone;
       }
+
       if (vol->is_io_in_progress() || vol->agg_buf_pos) {
         Debug("cache_dir_sync", "Dir %s: waiting for agg buffer", vol->hash_text.get());
         vol->dir_sync_waiting = true;
@@ -1123,6 +1126,7 @@ Lrestart:
         }
         return EVENT_CONT;
       }
+
       Debug("cache_dir_sync", "pos: %" PRIu64 " Dir %s dirty...syncing to disk", vol->header->write_pos, vol->hash_text.get());
       vol->header->dirty = 0;
       if (buflen < dirlen) {
@@ -1144,6 +1148,7 @@ Lrestart:
           buf_huge = false;
         }
       }
+
       vol->header->sync_serial++;
       vol->footer->sync_serial = vol->header->sync_serial;
       CHECK_DIR(d);

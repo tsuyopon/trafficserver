@@ -696,6 +696,8 @@ LogObject::_setup_rolling(LogConfig *cfg, Log::RollingEnabledValues rolling_enab
 unsigned
 LogObject::roll_files(long time_now)
 {
+
+  // m_rolling_enabledにNO_ROLLINGが指定されている場合(つまり、ローリングしない)
   if (!m_rolling_enabled) {
     return 0;
   }
@@ -760,8 +762,12 @@ LogObject::_roll_files(long last_roll_time, long time_now)
   unsigned num_rolled = 0;
 
   if (m_logFile) {
+
     // no need to roll if object writes to a pipe
+    // パイプへの書き込みをしている場合には、ローリングは必要ない
     if (!writes_to_pipe()) {
+
+      // ここでログのローリングを行います。m_logFile->rollではLogFile::rollを呼び出します。
       num_rolled += m_logFile->roll(last_roll_time, time_now, m_reopen_after_rolling);
 
       if (Log::config->auto_delete_rolled_files && m_max_rolled > 0) {

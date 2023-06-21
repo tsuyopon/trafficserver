@@ -541,6 +541,7 @@ LocalManager::pollMgmtProcessServer()
 }
 
 // TrafficManagerがprocesserver.sockから受信したレスポンスのメッセージ種別(ms->msg_id)に応じて処理する内容を分岐する
+void
 LocalManager::handleMgmtMsgFromProcesses(MgmtMessageHdr *mh)
 {
   char *data_raw = reinterpret_cast<char *>(mh) + sizeof(MgmtMessageHdr);
@@ -605,16 +606,33 @@ LocalManager::handleMgmtMsgFromProcesses(MgmtMessageHdr *mh)
       executeMgmtCallback(MGMT_SIGNAL_LIBRECORDS, {});
     }
     break;
-  case MGMT_SIGNAL_CONFIG_FILE_CHILD: {
+  case MGMT_SIGNAL_CONFIG_FILE_CHILD: {  
+
+    // ProcessManager::signalConfigFileChildから呼ばれる 
+    // これらはload_ssl_file_callbackやload_config_file_callback関数経由で呼ばれます。
+    //  (1) load_ssl_file_callback
+    //     サーバ証明書に対応する中間証明書の設定に対して呼ばれます。中間証明書の設定の際にはssl_multicert.configを必要とします。
+    //  (2) load_config_file_callback
+    //     parse_remap_fragment()の中から呼ばれるのでremap.configに定義されたincludeで呼び出されたファイルの場合から呼び出される。
+
     static const MgmtMarshallType fields[] = {MGMT_MARSHALL_STRING, MGMT_MARSHALL_STRING};
     char *parent                           = nullptr;
     char *child                            = nullptr;
     if (mgmt_message_parse(data_raw, mh->data_len, fields, countof(fields), &parent, &child) != -1) {
+      // メッセージのparse成功の場合
+      //    ここで下記のparentにはparentConfigのConfigManagerの値を設定しておきます。
+      //    以下の2つのパターンで登録されるケースがあります。
+      //     (1) サーバ証明書に対応する中間証明書呼び出し。
+      //         parentにはssl_multicert.configに対応するConfigManagerの値がセットされます
+      //     (2) remap.config中のinclude時に呼ばれた設定ファイルに対する呼び出し
+      //         parentにはremap.configに対応するConfigManagerの値がセットされます
       configFiles->configFileChild(parent, child);
     } else {
+      // メッセージのparseエラーの場合
       mgmt_log("[LocalManager::handleMgmtMsgFromProcesses] "
                "MGMT_SIGNAL_CONFIG_FILE_CHILD mgmt_message_parse error\n");
     }
+
     // Output pointers are guaranteed to be NULL or valid.
     ats_free_null(parent);
     ats_free_null(child);
@@ -673,13 +691,16 @@ LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
     mgmt_log("[LocalManager::SendMgmtMsgsToProcesses]Event is being constructed .\n");
     break;
 
-  case MGMT_EVENT_CONFIG_FILE_UPDATE:
+  case MGMT_EVENT_CONFIG_FILE_UPDATE:   // ファイル変更に伴う、再読み込み (traffic_ctl config reloadで呼ばれる。records.configだけはLocalManager::processEventQueue関数内部で処理されるので、この関数に到達することはない)
+
     bool found;
     char *fname = nullptr;
     ConfigManager *rb;
     char *data_raw;
 
     data_raw = reinterpret_cast<char *>(mh) + sizeof(MgmtMessageHdr);
+
+    // メッセージヘッダの中には変更を検知したファイル名が含まれています。
     fname    = REC_readString(data_raw, &found);
 
     RecT rec_type;
@@ -690,6 +711,7 @@ LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
     }
 
     ink_assert(found);
+
     if (!(fname && configFiles && configFiles->getConfigObj(fname, &rb)) &&
         (strcmp(data_raw, "proxy.config.body_factory.template_sets_dir") != 0) &&
         (strcmp(data_raw, "proxy.config.ssl.server.ticket_key.filename") != 0)) {
@@ -706,6 +728,8 @@ LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
 
     // mh構造体(MgmtMessageHdr)をpipeを使って書き込みを行う。これによって、trafficmanagerからtrafficserverにデータが伝達されると思われる
     // *重要* processerver.sockへ書き込む
+    //
+    // MGMT_EVENT_LIBRECORDSは直前のswitchで定義されていないけど、バイパスしてそのままprocesserver.sockに書き込みされてそうな気がしている? (要確認)
     if (mgmt_write_pipe(watched_process_fd, reinterpret_cast<char *>(mh), sizeof(MgmtMessageHdr) + mh->data_len) <= 0) {
       // In case of Linux, sometimes when the TS dies, the connection between TS and TM
       // is not closed properly. the socket does not receive an EOF. So, the TM does
@@ -771,9 +795,12 @@ LocalManager::sendMgmtMsgToProcesses(MgmtMessageHdr *mh)
   }
 }
 
+// TrafficManager から TrafficServer へとリクエストを送付する。 (traffic_ctl config reloadが呼ばれた場合にはこの処理を通る)
+// ファイル変更があった場合に通知を行う仕組みとなっている。
 void
 LocalManager::signalFileChange(const char *var_name)
 {
+
   signalEvent(MGMT_EVENT_CONFIG_FILE_UPDATE, var_name);
 
   return;
@@ -790,6 +817,7 @@ LocalManager::signalEvent(int msg_id, const char *data_str)
 void
 LocalManager::signalEvent(int msg_id, const char *data_raw, int data_len)
 {
+
   MgmtMessageHdr *mh;
   size_t n = sizeof(MgmtMessageHdr) + data_len;
 
@@ -844,10 +872,10 @@ LocalManager::processEventQueue()
     auto payload       = mh->payload().rebind<char>();
 
     // check if we have a local file update
-    // MGMT_EVENT_CONFIG_FILE_UPDATEだけはここで処理をする。これ以外のタイプは後の分岐で処理される。
+    // MGMT_EVENT_CONFIG_FILE_UPDATEでかつ、records.configの場合にだけはここで処理をする。これ以外は後の分岐で処理される。
     if (mh->msg_id == MGMT_EVENT_CONFIG_FILE_UPDATE) {
 
-      // 取得したメッセージのペイロードが「records.config」に一致した場合の処理
+      // 取得したメッセージのペイロードが「records.config」に一致した場合の処理 (一致するとstrcmpの戻り値は0になる)
       if (!(strcmp(payload.begin(), ts::filename::RECORDS))) {
 
         // 設定ファイルの更新を行います。
@@ -880,6 +908,7 @@ LocalManager::processEventQueue()
       // (重要) 下記によりtraffic_ctlなどで送られてきた命令をここで処理する
       lmgmt->sendMgmtMsgToProcesses(mh);
     }
+
     ats_free(mh);
   }
 }

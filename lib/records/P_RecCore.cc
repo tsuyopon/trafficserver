@@ -119,25 +119,29 @@ send_push_message()
     rec_mutex_acquire(&(r->lock));
     if (i_am_the_record_owner(r->rec_type)) {
 
-      // REC_PEER_SYNC_REQUIREDはRecExecRawStatSyncCbs関数やRecRawStatUpdateSum関数でフラグがセットされる
+      // REC_PEER_SYNC_REQUIREDは、RecExecRawStatSyncCbs関数やRecRawStatUpdateSum関数でフラグがセットされる
       if (r->sync_required & REC_PEER_SYNC_REQUIRED) {
         m = RecMessageMarshal_Realloc(m, r);
+
         // REC_PEER_SYNC_REQUIREDフラグの処理を行ったのでリセットする
         r->sync_required &= ~REC_PEER_SYNC_REQUIRED;
 
-        // メッセージを送信するかどうかの判定フラグをセットする
+        // メッセージを送信するかどうかの判定フラグをセットする。このフラグはこの関数の最後のif分岐で利用される
         send_msg = true;
       }
     }
+
     rec_mutex_release(&(r->lock));
   }
 
   // 手前の条件分岐でREC_PEER_SYNC_REQUIREDフラグがセットされた場合にsend_msgがtrueにセットされるので、メッセージを送信する
   if (send_msg) {
     RecDebug(DL_Note, "[send] RECG_PUSH [%d bytes]", sizeof(RecMessageHdr) + m->o_write - m->o_start);
+
     // ここでメッセージを送信します
     RecMessageSend(m);
   }
+
   RecMessageFree(m);
 
   return REC_ERR_OKAY;
@@ -640,9 +644,11 @@ RecReadStatsFile()
 //-------------------------------------------------------------------------
 // RecSyncStatsFile
 //-------------------------------------------------------------------------
+// 統計情報としてRECP_PERSISTENTが指定されている場合には、records.snapファイルへと保存しておく
 RecErrT
 RecSyncStatsFile()
 {
+
   RecRecord *r;
   RecMessage *m;
   int i, num_records;
@@ -657,30 +663,40 @@ RecSyncStatsFile()
    */
   ink_assert(g_mode_type != RECM_NULL);
 
+  // この関数はTrafficManagerからしか呼ばれないので、RecLocalInitなので「g_mode_type=RECM_SERVER」が設定されるはず
   if (g_mode_type == RECM_SERVER || g_mode_type == RECM_STAND_ALONE) {
+
     m            = RecMessageAlloc(RECG_NULL);
     num_records  = g_num_records;
     sync_to_disk = false;
 
     // 全レコードでイテレーション
     for (i = 0; i < num_records; i++) {
+
       r = &(g_records[i]);
       rec_mutex_acquire(&(r->lock));
-      // 統計情報のタイプの場合に
+
+      // 統計情報のタイプの場合に処理を行います
       if (REC_TYPE_IS_STAT(r->rec_type)) {
+
+        // RECP_PERSISTENTの場合には、統計情報を維持するケースだと思うので、消えないようにディスク上に書き込みを行なっておく
         if (r->stat_meta.persist_type == RECP_PERSISTENT) {
           m            = RecMessageMarshal_Realloc(m, r);
           sync_to_disk = true;
         }
       }
+
       rec_mutex_release(&(r->lock));
     }
 
+    // 統計情報として「RECP_PERSISTENT」を記録するケースが1件以上あれば、ファイルへの書き込み処理を行う
     if (sync_to_disk) {
       RecDebug(DL_Note, "Writing '%s' [%d bytes]", (const char *)snap_fpath, m->o_write - m->o_start + sizeof(RecMessageHdr));
+
       // records.snapファイルへの書き込みを行う
       RecMessageWriteToDisk(m, snap_fpath);
     }
+
     RecMessageFree(m);
   }
 
@@ -722,6 +738,7 @@ RecReadConfigFile()
 //-------------------------------------------------------------------------
 // RecExecConfigUpdateCbs
 //-------------------------------------------------------------------------
+// この関数はTrafficManagerから実行されることに注意してください
 RecUpdateT
 RecExecConfigUpdateCbs(unsigned int update_required_type)
 {
@@ -734,6 +751,7 @@ RecExecConfigUpdateCbs(unsigned int update_required_type)
 
   // 全レコードでイテレーション操作する
   for (i = 0; i < num_records; i++) {
+
     r = &(g_records[i]);
     rec_mutex_acquire(&(r->lock));
 
@@ -763,15 +781,20 @@ RecExecConfigUpdateCbs(unsigned int update_required_type)
 
         // RecRegisterConfigUpdateCbにてupdate_cb_listに登録されたコールバックはここで実行される
         for (cur_callback = r->config_meta.update_cb_list; cur_callback; cur_callback = cur_callback->next) {
-          // REC_RegisterConfigUpdateFuncに指定されたコールバック関数が実行されます。たとえば、remap.configだとurl_rewrite_CBがコールバック関数として呼ばれます
+          // REC_RegisterConfigUpdateFunc 又は RecRegisterConfigUpdateCb にに指定されたコールバック関数が"cur_callback->update_cb"にセットされています。
+          // コールバックを実行していますが、この関数はTrafficManagerの中で実行されるものですので、TrafficManagerでセットされたコールバックが実行されることに注意してください。
           (*(cur_callback->update_cb))(r->name, r->data_type, r->data, cur_callback->update_cookie);
         }
 
         // r->config_meta.update_requriredに指定されているREC_UPDATE_REQUIREDのフラグを音します。
         r->config_meta.update_required = r->config_meta.update_required & ~update_required_type;
+
       }
+
     }
+
     rec_mutex_release(&(r->lock));
+
   }
 
   return update_type;

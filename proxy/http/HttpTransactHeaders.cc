@@ -48,6 +48,7 @@ HttpTransactHeaders::is_method_cacheable(const HttpConfigParams *http_config_par
           (http_config_param->cache_post_method == 1 && method == HTTP_WKSIDX_POST));
 }
 
+// cf. https://docs.trafficserver.apache.org/en/latest/developer-guide/cache-architecture/architecture.en.html#cacheability
 bool
 HttpTransactHeaders::is_method_cache_lookupable(int method)
 {
@@ -939,23 +940,35 @@ HttpTransactHeaders::remove_host_name_from_url(HTTPHdr *outgoing_request)
 void
 HttpTransactHeaders::add_global_user_agent_header_to_request(const OverridableHttpConfigParams *http_txn_conf, HTTPHdr *header)
 {
+
+  // proxy.config.http.global_user_agent_headerがセットされていたら(デフォルトnull)
+  // https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/files/records.config.en.html#proxy-config-http-global-user-agent-header
   if (http_txn_conf->global_user_agent_header) {
+
     MIMEField *ua_field;
 
-    Debug("http_trans", "Adding User-Agent: %.*s", static_cast<int>(http_txn_conf->global_user_agent_header_size),
-          http_txn_conf->global_user_agent_header);
+    Debug("http_trans", "Adding User-Agent: %.*s", static_cast<int>(http_txn_conf->global_user_agent_header_size), http_txn_conf->global_user_agent_header);
+
+    //  User-Agentが存在していなかったら
     if ((ua_field = header->field_find(MIME_FIELD_USER_AGENT, MIME_LEN_USER_AGENT)) == nullptr) {
+
+      //  User-Agentをオブジェクトに生成して、
       if (likely((ua_field = header->field_create(MIME_FIELD_USER_AGENT, MIME_LEN_USER_AGENT)) != nullptr)) {
+
+        //  User-Agentオブジェクトをattachする
         header->field_attach(ua_field);
       }
     }
+
     // This will remove any old string (free it), and set our User-Agent.
     if (likely(ua_field)) {
+      // User-Agentに対してproxy.config.http.global_user_agent_headerの値をセットする
       header->field_value_set(ua_field, http_txn_conf->global_user_agent_header, http_txn_conf->global_user_agent_header_size);
     }
   }
 }
 
+// リクエストに対してForwarded-Forヘッダの追加を行います。
 void
 HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTPHdr *request)
 {
@@ -1181,10 +1194,11 @@ HttpTransactHeaders::add_server_header_to_response(const OverridableHttpConfigPa
       header->field_value_set(ua_field, http_txn_conf->proxy_response_server_string,
                               http_txn_conf->proxy_response_server_string_len);
     }
+
   }
+
 }
 
-/
 void
 HttpTransactHeaders::remove_privacy_headers_from_request(HttpConfigParams *http_config_param,
                                                          const OverridableHttpConfigParams *http_txn_conf, HTTPHdr *header)
@@ -1313,10 +1327,17 @@ HttpTransactHeaders::normalize_accept_encoding(const OverridableHttpConfigParams
 void
 HttpTransactHeaders::add_connection_close(HTTPHdr *header)
 {
+
+  // Connectionヘッダのオブジェクトを取得する
   MIMEField *field = header->field_find(MIME_FIELD_CONNECTION, MIME_LEN_CONNECTION);
+
+  // Connectionヘッダが存在していなければ、
   if (!field) {
+    // Connectionヘッダが存在していなければ、Connectionフィールドのオブジェクトを作成して、そのオブジェクトをattachする
     field = header->field_create(MIME_FIELD_CONNECTION, MIME_LEN_CONNECTION);
     header->field_attach(field);
   }
+
+  // Connectionヘッダにcloseをセットします。つまり、「Connection: close」をセットする
   header->field_value_set(field, HTTP_VALUE_CLOSE, HTTP_LEN_CLOSE);
 }

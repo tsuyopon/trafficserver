@@ -1091,6 +1091,7 @@ CacheProcessor::lookup(Continuation *cont, const CacheKey *key, CacheFragType fr
 Action *
 CacheProcessor::open_read(Continuation *cont, const CacheKey *key, CacheFragType frag_type, const char *hostname, int hostlen)
 {
+  // Cache::open_readが呼ばれます
   return caches[frag_type]->open_read(cont, key, frag_type, hostname, hostlen);
 }
 
@@ -3030,6 +3031,7 @@ rebuild_host_table(Cache *cache)
 Vol *
 Cache::key_to_vol(const CacheKey *key, const char *hostname, int host_len)
 {
+
   ReplaceablePtr<CacheHostTable>::ScopedReader hosttable(&this->hosttable);
 
   uint32_t h                      = (key->slice32(2) >> DIR_TAG_WIDTH) % VOL_HASH_TABLE_SIZE;
@@ -3051,6 +3053,7 @@ Cache::key_to_vol(const CacheKey *key, const char *hostname, int host_len)
       }
     }
   }
+
   if (hash_table) {
     if (is_debug_tag_set("cache_hosting")) {
       char format_str[50];

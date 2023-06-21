@@ -87,16 +87,20 @@ RecMessageMarshal_Realloc(RecMessage *msg, const RecRecord *record)
     rec_name_len = strlen(record->name) + 1;
     msg_ele_size += rec_name_len;
   }
+
   if (record->data_type == RECD_STRING) {
+
     if (record->data.rec_string) {
       rec_data_str_len = strlen(record->data.rec_string) + 1;
       msg_ele_size += rec_data_str_len;
     }
+
     if (record->data_default.rec_string) {
       rec_data_def_str_len = strlen(record->data_default.rec_string) + 1;
       msg_ele_size += rec_data_def_str_len;
     }
   }
+
   if (REC_TYPE_IS_CONFIG(record->rec_type) && (record->config_meta.check_expr)) {
     rec_cfg_chk_len = strlen(record->config_meta.check_expr) + 1;
     msg_ele_size += rec_cfg_chk_len;
@@ -113,6 +117,7 @@ RecMessageMarshal_Realloc(RecMessage *msg, const RecRecord *record)
     msg              = static_cast<RecMessage *>(ats_realloc(msg, sizeof(RecMessageHdr) + realloc_size));
     msg->o_end       = msg->o_start + realloc_size;
   }
+
   ele_hdr = reinterpret_cast<RecMessageEleHdr *>(reinterpret_cast<char *>(msg) + msg->o_write);
   // The following memset() is pretty CPU intensive, replacing it with something
   // like the below would reduce CPU usage a fair amount. /leif.
@@ -127,24 +132,28 @@ RecMessageMarshal_Realloc(RecMessage *msg, const RecRecord *record)
   memcpy(p, record, sizeof(RecRecord));
   r = reinterpret_cast<RecRecord *>(p);
   p += sizeof(RecRecord);
+
   if (rec_name_len != -1) {
     ink_assert((msg->o_end - ((uintptr_t)p - (uintptr_t)msg)) >= (uintptr_t)rec_name_len);
     memcpy(p, record->name, rec_name_len);
     r->name = (char *)((uintptr_t)p - (uintptr_t)r);
     p += rec_name_len;
   }
+
   if (rec_data_str_len != -1) {
     ink_assert((msg->o_end - ((uintptr_t)p - (uintptr_t)msg)) >= (uintptr_t)rec_data_str_len);
     memcpy(p, record->data.rec_string, rec_data_str_len);
     r->data.rec_string = (char *)((uintptr_t)p - (uintptr_t)r);
     p += rec_data_str_len;
   }
+
   if (rec_data_def_str_len != -1) {
     ink_assert((msg->o_end - ((uintptr_t)p - (uintptr_t)msg)) >= (uintptr_t)rec_data_def_str_len);
     memcpy(p, record->data_default.rec_string, rec_data_def_str_len);
     r->data_default.rec_string = (char *)((uintptr_t)p - (uintptr_t)r);
     p += rec_data_def_str_len;
   }
+
   if (rec_cfg_chk_len != -1) {
     ink_assert((msg->o_end - ((uintptr_t)p - (uintptr_t)msg)) >= (uintptr_t)rec_cfg_chk_len);
     memcpy(p, record->config_meta.check_expr, rec_cfg_chk_len);
@@ -250,10 +259,12 @@ RecMessageRegisterRecvCb(RecMessageRecvCb recv_cb, void *cookie)
 void
 RecMessageRecvThis(ts::MemSpan<void> span)
 {
+
   RecMessage *msg = static_cast<RecMessage *>(span.data());
 
-  // RecMessageRegisterRecvCbで登録されたg_recv_cbを実行する
+  // この関数の直前で定義されたRecMessageRegisterRecvCb関数から登録されたg_recv_cbを実行する
   g_recv_cb(msg, msg->msg_type, g_recv_cookie);
+
 }
 
 //-------------------------------------------------------------------------

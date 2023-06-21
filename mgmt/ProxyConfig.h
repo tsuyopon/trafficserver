@@ -94,6 +94,7 @@ template <typename UpdateClass> struct ConfigUpdateContinuation : public Continu
   ConfigUpdateContinuation(Ptr<ProxyMutex> &m) : Continuation(m.get()) { SET_HANDLER(&ConfigUpdateContinuation::update); }
 };
 
+
 template <typename UpdateClass>
 int
 ConfigScheduleUpdate(Ptr<ProxyMutex> &mutex)
@@ -102,10 +103,15 @@ ConfigScheduleUpdate(Ptr<ProxyMutex> &mutex)
   return 0;
 }
 
+
+// 下記は 「new ConfigUpdateHandler<ParentConfig>()」のようにして呼ばれます
 template <typename UpdateClass> struct ConfigUpdateHandler {
+
   ConfigUpdateHandler() : mutex(new_ProxyMutex()) {}
+
   // The mutex member is ref-counted so should not explicitly free it
   ~ConfigUpdateHandler() {}
+
   int
   attach(const char *name)
   {

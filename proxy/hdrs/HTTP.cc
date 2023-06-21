@@ -1671,14 +1671,19 @@ HTTPHdr::_fill_target_cache() const
   m_target_in_url  = false;
   m_port_in_header = false;
   m_host_mime      = nullptr;
+
   // Check in the URL first, then the HOST field.
   if (nullptr != url->host_get(&m_host_length)) {
+
+    // Hostヘッダフィールドの値が取得できたら
+
     m_target_in_url  = true;
     m_port           = url->port_get();
     m_port_in_header = 0 != url->port_get_raw();
     m_host_mime      = nullptr;
-  } else if (nullptr !=
-             (m_host_mime = const_cast<HTTPHdr *>(this)->get_host_port_values(nullptr, &m_host_length, &port_ptr, &port_len))) {
+
+  } else if (nullptr != (m_host_mime = const_cast<HTTPHdr *>(this)->get_host_port_values(nullptr, &m_host_length, &port_ptr, &port_len))) { // Hostヘッダ中に値がなければnullptrを返す
+
     m_port = 0;
     if (port_ptr) {
       for (; port_len > 0 && isdigit(*port_ptr); ++port_ptr, --port_len) {

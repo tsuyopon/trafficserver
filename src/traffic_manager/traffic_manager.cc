@@ -1026,18 +1026,24 @@ SigChldHandler(int /* sig ATS_UNUSED */)
 {
 }
 
+// この関数はFileManager::fileChanged内のコールバック関数で呼び出されます。
+// ファイル変更があったことをTrafficManagerからTrafficServerに通知します
 void
 fileUpdated(char *fname, char *configName)
 {
   // If there is no config name recorded, assume this file is not reloadable
   // Just log a message
   if (configName == nullptr || configName[0] == '\0') {
+    // configNameが空の場合には、reload不要ということでログにのみ出力する
     mgmt_log("[fileUpdated] %s changed, need restart", fname);
   } else {
+    // ここでTrafficManagerからTrafficServerに設定ファイルの変更によるreloadが必要な通知を送る。MGMT_EVENT_CONFIG_FILE_UPDATEが送られる
     // Signal based on the config entry that has the changed file name
     lmgmt->signalFileChange(configName);
   }
+
   return;
+
 } /* End fileUpdate */
 
 #if TS_USE_POSIX_CAP

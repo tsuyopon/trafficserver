@@ -2263,25 +2263,34 @@ MIMEHdr::get_host_port_values(const char **host_ptr, ///< Pointer to host.
                               const char **port_ptr, ///< Pointer to port.
                               int *port_len)
 {
+
+  // HostフィールドのMIMEFieldオブジェクトを取得する
   MIMEField *field = this->field_find(MIME_FIELD_HOST, MIME_LEN_HOST);
   if (host_ptr) {
     *host_ptr = nullptr;
   }
+
   if (host_len) {
     *host_len = 0;
   }
+
   if (port_ptr) {
     *port_ptr = nullptr;
   }
+
   if (port_len) {
     *port_len = 0;
   }
 
+  // fieldオブジェクトを取得できた場合だけ処理する
   if (field) {
+
     ts::TextView b{field->m_ptr_value, static_cast<size_t>(field->m_len_value)};
     ts::TextView host, port;
 
     if (b) {
+
+      // 先頭が"["の場合 (これは何のためのif文なのか不明: TBD)
       if ('[' == *b) {
         auto idx = b.find(']');
         if (idx <= b.size() && b[idx + 1] == ':') {
@@ -2290,16 +2299,23 @@ MIMEHdr::get_host_port_values(const char **host_ptr, ///< Pointer to host.
         } else {
           host = b;
         }
+
       } else {
+
+        // ホスト名とポートを区別する「:」でsplitする 。具体例 「example.com:80」
         auto x = b.split_prefix_at(':');
+
+        // xがあればportが含まれている
         if (x) {
           host = x;
           port = b;
         } else {
           host = b;
         }
+
       }
 
+      // Hostヘッダ中にホスト名が値として存在している場合
       if (host) {
         if (host_ptr) {
           *host_ptr = host.data();
@@ -2308,6 +2324,8 @@ MIMEHdr::get_host_port_values(const char **host_ptr, ///< Pointer to host.
           *host_len = static_cast<int>(host.size());
         }
       }
+
+      // Hostヘッダ中にポート番号が値として存在している場合
       if (port) {
         if (port_ptr) {
           *port_ptr = port.data();
@@ -2316,10 +2334,14 @@ MIMEHdr::get_host_port_values(const char **host_ptr, ///< Pointer to host.
           *port_len = static_cast<int>(port.size());
         }
       }
+
     } else {
+      // Hostヘッダ中に値が存在しない場合にはnullptrを応答する
       field = nullptr; // no value in field, signal fail.
     }
+
   }
+
   return field;
 }
 

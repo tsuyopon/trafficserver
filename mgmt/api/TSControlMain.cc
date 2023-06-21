@@ -557,6 +557,7 @@ handle_proxy_state_set(int fd, void *req, size_t reqlen)
 static TSMgmtError
 handle_reconfigure(int fd, void *req, size_t reqlen)
 {
+
   MgmtMarshallInt err;
   MgmtMarshallInt optype;
 

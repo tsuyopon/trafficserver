@@ -67,6 +67,8 @@ BaseManager::dequeue()
 
 // コールバック情報をcb_listの末尾に登録する
 // このコールバックを呼び出ししている箇所は「git grep registerMgmtCallback」で出てきます
+//
+// (注意) TrafficServer内部にはcblistとcb_listが存在しているので読み間違えないように注意
 int
 BaseManager::registerMgmtCallback(int msg_id, MgmtCallback const &cb)
 {
@@ -75,6 +77,7 @@ BaseManager::registerMgmtCallback(int msg_id, MgmtCallback const &cb)
   auto &cb_list{mgmt_callback_table[msg_id]};
 
   // 下記ではmgmt_callback_table[msg_id]の参照への値にcbをemplace_backしていますが、ここで登録した値というのはこの関数直後のBaseManager::executeMgmtCallbackで呼び出されることになります
+  // (注意) TrafficServer内部にはcblistとcb_listが存在しているので読み間違えないように注意
   cb_list.emplace_back(cb);
   return msg_id;
 }

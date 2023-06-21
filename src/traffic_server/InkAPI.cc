@@ -5920,6 +5920,8 @@ TSHttpTxnServerAddrGet(TSHttpTxn txnp)
   return &sm->t_state.server_info.dst_addr.sa;
 }
 
+// 宛先のIPアドレス情報をあらかじめ静的に登録しておく
+// これによりtrafficserver本体側ではt_state.api_server_addr_setフラグを確認するこでDNS Lookup処理をskipすることができる。
 TSReturnCode
 TSHttpTxnServerAddrSet(TSHttpTxn txnp, struct sockaddr const *addr)
 {

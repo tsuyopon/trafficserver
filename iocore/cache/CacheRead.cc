@@ -28,10 +28,15 @@
 Action *
 Cache::open_read(Continuation *cont, const CacheKey *key, CacheFragType type, const char *hostname, int host_len)
 {
+
+  // まだキャッシュが書き込みされていないような初回リクエストの場合には、このif分岐の中でCACHE_EVENT_OPEN_READ_FAILEDが指定されhandleEventが呼ばれます。
   if (!CacheProcessor::IsCacheReady(type)) {
     cont->handleEvent(CACHE_EVENT_OPEN_READ_FAILED, (void *)-ECACHE_NOT_READY);
     return ACTION_RESULT_DONE;
   }
+
+  // キャッシュ書き込み可能な場合に通ります
+  
   ink_assert(caches[type] == this);
 
   Vol *vol = key_to_vol(key, hostname, host_len);
@@ -39,7 +44,9 @@ Cache::open_read(Continuation *cont, const CacheKey *key, CacheFragType type, co
   ProxyMutex *mutex = cont->mutex.get();
   OpenDirEntry *od  = nullptr;
   CacheVC *c        = nullptr;
+
   {
+
     CACHE_TRY_LOCK(lock, vol->mutex, mutex->thread_holding);
     if (!lock.is_locked() || (od = vol->open_read(key)) || dir_probe(key, vol, &result, &last_collision)) {
       c = new_CacheVC(cont);
@@ -52,16 +59,20 @@ Cache::open_read(Continuation *cont, const CacheKey *key, CacheFragType type, co
       c->frag_type                            = type;
       c->od                                   = od;
     }
+
     if (!c) {
       goto Lmiss;
     }
+
     if (!lock.is_locked()) {
       CONT_SCHED_LOCK_RETRY(c);
       return &c->_action;
     }
+
     if (c->od) {
       goto Lwriter;
     }
+
     c->dir            = result;
     c->last_collision = last_collision;
     switch (c->do_read_call(&c->key)) {
@@ -90,6 +101,7 @@ Lcallreturn:
   return &c->_action;
 }
 
+// (要確認) Cache::open_readは上でもオーバーロード関数として定義されていますが、Lwriterラベルの際にset_readwhilewrite_inprogress(true)がセットされていない。これはなぜか?
 Action *
 Cache::open_read(Continuation *cont, const CacheKey *key, CacheHTTPHdr *request, const OverridableHttpConfigParams *params,
                  CacheFragType type, const char *hostname, int host_len)
@@ -131,6 +143,7 @@ Cache::open_read(Continuation *cont, const CacheKey *key, CacheHTTPHdr *request,
     if (c->od) {
       goto Lwriter;
     }
+
     // hit
     c->dir = c->first_dir = result;
     c->last_collision     = last_collision;
@@ -1058,24 +1071,31 @@ Lrestart:
 int
 CacheVC::openReadStartHead(int event, Event *e)
 {
+
   intptr_t err = ECACHE_NO_DOC;
   Doc *doc     = nullptr;
   cancel_trigger();
   set_io_not_in_progress();
+
   if (_action.cancelled) {
     return free_CacheVC(this);
   }
+
   {
+
     CACHE_TRY_LOCK(lock, vol->mutex, mutex->thread_holding);
     if (!lock.is_locked()) {
       VC_SCHED_LOCK_RETRY();
     }
+
     if (!buf) {
       goto Lread;
     }
+
     if (!io.ok()) {
       goto Ldone;
     }
+
     // an object needs to be outside the aggregation window in order to be
     // be evacuated as it is read
     if (!dir_agg_valid(vol, &dir)) {
@@ -1086,6 +1106,7 @@ CacheVC::openReadStartHead(int event, Event *e)
       goto Lread;
     }
     doc = reinterpret_cast<Doc *>(buf->data());
+
     if (doc->magic != DOC_MAGIC) {
       char tmpstring[CRYPTO_HEX_SIZE];
       if (is_action_tag_set("cache")) {
@@ -1105,20 +1126,27 @@ CacheVC::openReadStartHead(int event, Event *e)
       last_collision = nullptr;
       goto Lread;
     }
+
     if (!(doc->first_key == key)) {
       goto Lread;
     }
+
     if (f.lookup) {
       goto Lookup;
     }
+
     earliest_dir = dir;
     CacheHTTPInfo *alternate_tmp;
+
     if (frag_type == CACHE_FRAG_TYPE_HTTP) {
+
       uint32_t uml;
       ink_assert(doc->hlen);
+
       if (!doc->hlen) {
         goto Ldone;
       }
+
       if ((uml = this->load_http_info(&vector, doc)) != doc->hlen) {
         if (buf) {
           HTTPCacheAlt *alt  = reinterpret_cast<HTTPCacheAlt *>(doc->hdr());
@@ -1145,6 +1173,7 @@ CacheVC::openReadStartHead(int event, Event *e)
         err = ECACHE_BAD_META_DATA;
         goto Ldone;
       }
+
       if (cache_config_select_alternate) {
         alternate_index = HttpTransactCache::SelectFromAlternates(&vector, &request, params);
         if (alternate_index < 0) {
@@ -1154,6 +1183,7 @@ CacheVC::openReadStartHead(int event, Event *e)
       } else {
         alternate_index = 0;
       }
+
       alternate_tmp = vector.get(alternate_index);
       if (!alternate_tmp->valid()) {
         if (buf) {
@@ -1237,6 +1267,7 @@ CacheVC::openReadStartHead(int event, Event *e)
       SET_HANDLER(&CacheVC::openReadFromWriter);
       return handleEvent(EVENT_IMMEDIATE, nullptr);
     }
+
     if (dir_probe(&key, vol, &dir, &last_collision)) {
       first_dir = dir;
       int ret   = do_read_call(&key);
@@ -1246,6 +1277,7 @@ CacheVC::openReadStartHead(int event, Event *e)
       return ret;
     }
   }
+
 Ldone:
   if (!f.lookup) {
     CACHE_INCREMENT_DYN_STAT(cache_read_failure_stat);

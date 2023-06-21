@@ -1098,6 +1098,8 @@ typedef void (*TransactEntryFunc_t)(HttpTransact::State *s);
 inline bool
 is_response_body_precluded(HTTPStatus status_code)
 {
+
+  // 200 OKでない、かつ、(304 Not Modified, 10x、204 No Contentのいずれか)であればtrue
   if (((status_code != HTTP_STATUS_OK) &&
        ((status_code == HTTP_STATUS_NOT_MODIFIED) || ((status_code < HTTP_STATUS_OK) && (status_code >= HTTP_STATUS_CONTINUE)) ||
         (status_code == HTTP_STATUS_NO_CONTENT)))) {

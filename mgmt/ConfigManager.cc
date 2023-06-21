@@ -90,6 +90,7 @@ ConfigManager::ConfigManager(const char *fileName_, const char *configName_, boo
 //
 //  A wrapper for stat()
 //
+// bufにはTrafficserverのsysconfdirを指定したstatの結果が入る
 int
 ConfigManager::statFile(struct stat *buf)
 {
@@ -101,6 +102,8 @@ ConfigManager::statFile(struct stat *buf)
   std::string filePath = Layout::get()->relative_to(sysconfdir, fileName);
 
   // root権限が必要かどうかで処理を分岐する。
+  // 下記ではstatをディレクトリに対して指定しているが、ディレクトリ中に含まれるファイルが更新された場合にもst_mtimeは更新される。
+  //    http://linuxjm.osdn.jp/html/LDP_man-pages/man2/stat.2.html
   statResult = root_access_needed ? elevating_stat(filePath.c_str(), buf) : stat(filePath.c_str(), buf);
 
   return statResult;
@@ -126,13 +129,13 @@ ConfigManager::checkForUserUpdate(RollBackCheckType how)
     return false;
   }
 
-  // 保存しておいたファイルの前回更新時刻とstatから取得した最新の前回更新時刻を比較する
+  // 保存しておいた前回更新時刻とディレクトリを指定してstatシステムコールから取得したディレクトリ内のファイル最終更新時刻(fileInfo.st_mtime)を比較する。
   if (fileLastModified < TS_ARCHIVE_STAT_MTIME(fileInfo)) {
 
     // ROLLBACK_CHECK_AND_UPDATEの場合には、設定されたファイルに対するコールバック関数を実行する
     if (how == ROLLBACK_CHECK_AND_UPDATE) {
 
-      // statから取得した最新の前回更新時刻をfileLastModifiedとして次回実行の判断のために保存しておきます
+      // 次回実行の判断のために保存しておきます。fileLastModifiedにはTrafficserverのsysconfdirのディレクトリをstatに指定したst_mtimeの値が入ります。
       fileLastModified = TS_ARCHIVE_STAT_MTIME(fileInfo);
 
       // TBD: 不明。ssl_multicert.configの様な場合にtrueとなるっぽい?

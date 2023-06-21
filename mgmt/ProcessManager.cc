@@ -288,6 +288,8 @@ ProcessManager::signalConfigFileChild(const char *parent, const char *child)
   void *buffer = ats_malloc(len);
 
   mgmt_message_marshall(buffer, len, fields, countof(fields), &parent, &child);
+
+  // ここで設定ファイル
   signalManager(MGMT_SIGNAL_CONFIG_FILE_CHILD, static_cast<const char *>(buffer), len);
 
   ats_free(buffer);
@@ -568,7 +570,7 @@ ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
       this->cbtable->invoke(msg.data());
     }
   } break;
-  case MGMT_EVENT_CONFIG_FILE_UPDATE:
+  case MGMT_EVENT_CONFIG_FILE_UPDATE:   // このメッセージは送付されてくる。しかし、TrafficManagerのts_ctrl_mainからmainで受け取られて、main中でMGMT_EVENT_CONFIG_FILE_UPケースとしてハンドリングされた後に、MGMT_EVENT_LIBRECORDSとしてメッセージが再度送付されてくることになる。実際のファイル更新はMGMT_EVENT_LIBRECORDSで行われる
     /*
       librecords -- we don't do anything in here because we are traffic_server
       and we are not the owner of proxy.config.* variables.
@@ -584,7 +586,7 @@ ProcessManager::handleMgmtMsgFromLM(MgmtMessageHdr *mh)
       for details.
     */
     break;
-  case MGMT_EVENT_LIBRECORDS:
+  case MGMT_EVENT_LIBRECORDS:                              // 「traffic_ctl config reload」はここにくる
     executeMgmtCallback(MGMT_EVENT_LIBRECORDS, payload);   // pmgmt->registerMgmtCallback(MGMT_EVENT_LIBRECORDS, &RecMessageRecvThis);
     break;
   case MGMT_EVENT_STORAGE_DEVICE_CMD_OFFLINE:

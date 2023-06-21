@@ -270,6 +270,7 @@ ExtractIpRange(char *match_str, sockaddr *addr1, sockaddr *addr2)
 char *
 tokLine(char *buf, char **last, char cont)
 {
+
   char *start;
   char *cur;
   char *prev = nullptr;
@@ -424,9 +425,28 @@ const matcher_tags socks_server_tags = {nullptr, nullptr, "dest_ip", nullptr, nu
 //   If successful, nullptr is returned.  If unsuccessful,
 //     a static error string is returned
 //
+// parseConfigLineはssl_multicert.configの行毎のパース処理を行います。
+// p_lineには下記のような値が入ります。
+//
+// p_line[0][i] には labelが入り、label[1][i]にはvalが入る。
+// 「dest_ip=111.11.11.1 ssl_cert_name=server.pem ssl_ticket_enabled=1 ticket_key_name=ticket.key」ならば、p_lineにはパースした結果として次のような値が設定されていることになります。
+//
+// p_line[0][0] = "dest_ip"
+// p_line[0][1] = "ssl_cert_name"
+// p_line[0][2] = "ssl_ticket_enabled"
+// p_line[0][3] = "ticket_key_name"
+//
+// p_line[1][0] = "111.11.11.1"
+// p_line[1][1] = "server.pem"
+// p_line[1][2] = "1"
+// p_line[1][3] = "ticket.key"
+//
+// p_line->num_el には行内に含まれる「label=val」のペア数が入ります
+//
 const char *
 parseConfigLine(char *line, matcher_line *p_line, const matcher_tags *tags)
 {
+
   enum pState {
     FIND_LABEL,
     PARSE_LABEL,
@@ -448,24 +468,50 @@ parseConfigLine(char *line, matcher_line *p_line, const matcher_tags *tags)
   // Zero out the parsed line structure
   memset(p_line, 0, sizeof(matcher_line));
 
+  // sの先頭ポインタがnullの場合には何もしない
   if (*s == '\0') {
     return nullptr;
   }
 
+  // do - while分 (sの値がnullでない間続ける)
   do {
+
+    // この中で処理のstate machineを構築している
+    // 次の流れとなる
+    // 1. FIND_LABEL ラベル
+    //     見つけた箇所の先頭ポインタをlabelに保存しておく。次のフェーズPARSE_LABELに遷移する。
+    // 2. PARSE_LABEL ラベル
+    //     「=」を見つけると、その位置に文字列終端を格納する。次のフェーズSTART_PARSE_VALに遷移する
+    // 3. START_PARSE_VALラベル
+
     switch (state) {
+    // 最初はこのラベルを処理する
     case FIND_LABEL:
+      // スペースでなければ何かしら文字があると判断してPARSE_LABELのcaseに遷移する
       if (!isspace(*s)) {
         state = PARSE_LABEL;
+
+        // スペースでない場合の先頭ポインタsをlabelに保存しておく
+        // 例えば、「   dest_ip=111.11.11.1 ssl_cert_name=server.pem ssl_ticket_enabled=1 ticket_key_name=ticket.key」ならば、最初の「dest_ip」の「d」、「ssl_cert_name」の「s」、「ssl_ticket_enabled：の「t」、「ticket_key_name」の「t」のkeyに相当する先頭位置のポインタがlabelに保存されることになる。
         label = s;
       }
+
+      // 先頭ポインタを進める
       s++;
       break;
     case PARSE_LABEL:
+      // FIND_LABELの次に来る状態遷移が、このPARSE_LABELのフェーズ
+      // 「=」を見つけると次の状態へと遷移させます。
       if (*s == '=') {
+
+        // 「=」を見つけた部分の値として文字列の終端のnullptrを入れておきます。
         *s    = '\0';
+
+        // 次の状態フェーズを指定する
         state = START_PARSE_VAL;
       }
+
+      // 先頭ポインタを進める
       s++;
       break;
     case START_PARSE_VAL:
@@ -473,10 +519,13 @@ parseConfigLine(char *line, matcher_line *p_line, const matcher_tags *tags)
       copyForward = nullptr;
       copyFrom    = nullptr;
 
+      // 値が始まる場合には必ず「"」ダブルクォートが必要となる。この場合にinQuote変数をtrueにする
+      // s+1の値が具体的な値が設定されている部分のポインタなので、それをvalに保存しておく
       if (*s == '"') {
         inQuote = true;
         val     = s + 1;
       } else if (*s == '\\') {
+        // TBD: これは改行を表しているのか?
         inQuote = false;
         val     = s + 1;
       } else {
@@ -484,15 +533,24 @@ parseConfigLine(char *line, matcher_line *p_line, const matcher_tags *tags)
         val     = s;
       }
 
+      // inQuoteがfalse かつ 先頭ポインタがスペースか、１つ加算したポインタが文字列終端のnullptrだったら、
       if (inQuote == false && (isspace(*s) || *(s + 1) == '\0')) {
+        // ここに入る具体例としては以下の2パターンが該当します。
+        //  (1) 「dest_ip=111.11.11.1 ssl_cert_name=server.pem ssl_ticket_enabled=1 ticket_key_name=ticket.key」の中で「111.11.11.1」の後、「server.pem」の後、「1」の後、「ticket.key」の後などが該当します。
+        //  (2) 「dest_ip=111.11.11.1 ssl_cert_name=server.pem ssl_ticket_enabled=1 ticket_key_name=ticket.key       」行の最後の「ticket.key」よりも後の部分を処理すると思われる
+
+        // CONSUMEステートは処理するフェーズです
         state = CONSUME;
       } else {
+        // ifでの条件以外のinQuoteがtrueの場合には、値が"で始まり、値の設定値を取得するPARSE_VALフェーズに移動する
         state = PARSE_VAL;
       }
 
+      // 先頭ポインタを進める
       s++;
       break;
     case PARSE_VAL:
+
       if (inQuote == true) {
         if (*s == '\\') {
           // The next character is escaped
@@ -548,10 +606,13 @@ parseConfigLine(char *line, matcher_line *p_line, const matcher_tags *tags)
       }
       break;
     case CONSUME:
+      // CONSUMEの場合にはここでは何もしないが、そのすぐ後にif文でCONSUMEの処理を行なっています。
       break;
     }
 
+    // 行の先頭から処理し、labelとvalueまでの取得が完了した時点で、このCONSUMEフェーズに移動する
     if (state == CONSUME) {
+
       // See if there are any quote copy overs
       //   we've pushed into the future
       if (copyForward != nullptr) {
@@ -560,8 +621,14 @@ parseConfigLine(char *line, matcher_line *p_line, const matcher_tags *tags)
         *(copyForward + toCopy) = '\0';
       }
 
+      // 例えば、
+      // 「dest_ip=111.11.11.1 ssl_cert_name=server.pem ssl_ticket_enabled=1 ticket_key_name=ticket.key」
+      // の場合
+      // labelは「dest_ip」、「ssl_cert_name」、「ssl_ticket_enabled」、「ticket_key_name」の文字列の先頭ポインタを表す
+      // valは「111.11.11.1」、「server.pem」、「1」、「ticket.key」の文字列の先頭ポインタを表す
       p_line->line[0][num_el] = label;
       p_line->line[1][num_el] = val;
+
       type                    = MATCH_NONE;
 
       // Check to see if this the primary specifier we are looking for
@@ -578,6 +645,7 @@ parseConfigLine(char *line, matcher_line *p_line, const matcher_tags *tags)
       } else if (tags->match_host_regex && strcasecmp(tags->match_host_regex, label) == 0) {
         type = MATCH_HOST_REGEX;
       }
+
       // If this a destination tag, use it
       if (type != MATCH_NONE) {
         // Check to see if this second destination specifier
@@ -592,18 +660,25 @@ parseConfigLine(char *line, matcher_line *p_line, const matcher_tags *tags)
           p_line->type       = type;
         }
       }
+
+      // 行に含まれるlabel=valのペアの数を数える
       num_el++;
 
+      // 行に含まれるlabel=valのペアの数が40を超過する場合にはエラーとなる
       if (num_el > MATCHER_MAX_TOKENS) {
         return "Malformed line: Too many tokens";
       }
 
+      // CONSUMEは各行の「label=val」のペアの発見が完了した時点で処理されるので、「label=val label=val label=val」となっている仕様なので、次のlabel=valを探索するために初期状態であるFIND_LABLEに状態を戻します。
       state = FIND_LABEL;
     }
-  } while (*s != '\0');
 
+  } while (*s != '\0');    // sの値がnullでない間続ける
+
+  // 行に含まれる「label=val」のペアが合計何個あるのかを保存しておきます。
   p_line->num_el = num_el;
 
+  // 行を解析した処理がCONSUMEかFIND_LABELのいずれでもなければ、ssl_multicert.configに設定されている行は不正なエントリと見なされます。
   if (state != CONSUME && state != FIND_LABEL) {
     return "Malformed entry";
   }

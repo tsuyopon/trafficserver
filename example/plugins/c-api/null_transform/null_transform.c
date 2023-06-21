@@ -21,6 +21,9 @@
   limitations under the License.
  */
 
+// このプラグインの説明ドキュメントは下記にあります
+// https://docs.trafficserver.apache.org/en/latest/developer-guide/plugins/http-transformations/sample-null-transformation-plugin.en.html
+
 #include <stdio.h>
 #include <unistd.h>
 #include <inttypes.h>
@@ -240,6 +243,7 @@ null_transform(TSCont contp, TSEvent event, void *edata)
 static int
 transformable(TSHttpTxn txnp)
 {
+
   /*
    *  We are only interested in transforming "200 OK" responses.
    */
@@ -251,9 +255,15 @@ transformable(TSHttpTxn txnp)
 
   TSDebug(PLUGIN_NAME, "Entering transformable()");
 
+  // サーバからのレスポンス取得に成功した場合
   if (TS_SUCCESS == TSHttpTxnServerRespGet(txnp, &bufp, &hdr_loc)) {
+
+    // サーバレスポンスのステータスを取得する
     resp_status = TSHttpHdrStatusGet(bufp, hdr_loc);
+
+    // 200 OKの場合にだけ1を返す
     retv        = (resp_status == TS_HTTP_STATUS_OK);
+
     TSHandleMLocRelease(bufp, TS_NULL_MLOC, hdr_loc);
   }
 
@@ -267,6 +277,8 @@ transform_add(TSHttpTxn txnp)
   TSVConn connp;
 
   TSDebug(PLUGIN_NAME, "Entering transform_add()");
+
+  // TSTransformCreateであることに注意
   connp = TSTransformCreate(null_transform, txnp);
   TSHttpTxnHookAdd(txnp, TS_HTTP_RESPONSE_TRANSFORM_HOOK, connp);
 }
@@ -296,6 +308,7 @@ transform_plugin(TSCont contp, TSEvent event, void *edata)
 void
 TSPluginInit(int argc, const char *argv[])
 {
+
   TSPluginRegistrationInfo info;
 
   info.plugin_name   = PLUGIN_NAME;

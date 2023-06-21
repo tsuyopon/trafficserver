@@ -399,14 +399,16 @@ ServerBacktrace(unsigned /* options */, char **trace)
  * Rereads configuration files
  */
 
-// TrafficManagerがmgmtapi.sockにてRECONFIGUREコマンドを受信したら実行される関数です
+// TrafficManagerがmgmtapi.sockにてRECONFIGUREコマンドを受信したら実行される関数です。また、traffic_managerのmainからSIGHUPを受信した場合にも呼ばれます。
 TSMgmtError
 Reconfigure()
 {
 
+  // 設定ファイルを再読み込みさせるように指示する
   configFiles->rereadConfig();                              // TM rereads
 
   // ここで指定されたMGMT_EVENT_PLUGIN_CONFIG_UPDATEがキューに格納されて、その後、dequeueされてtraffic_managerで処理されることになる。
+  // TrafficServer側ではこのメッセージを受け取ったら、プラグインに登録されたコールバックの実行を行なうことになります。(プラグインにコールバックが登録されるために、そのプラグインを使わない限りは呼ばれません)
   lmgmt->signalEvent(MGMT_EVENT_PLUGIN_CONFIG_UPDATE, "*"); // TS rereads
 
   RecSetRecordInt("proxy.node.config.reconfigure_time", time(nullptr), REC_SOURCE_DEFAULT);

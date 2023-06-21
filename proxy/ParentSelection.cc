@@ -74,6 +74,7 @@ ParentSelectionPolicy::ParentSelectionPolicy()
   FailThreshold = fail_threshold;
 }
 
+// ParentConfig::reconfigure()からnewされた際に呼ばれる
 ParentConfigParams::ParentConfigParams(P_table *_parent_table) : parent_table(_parent_table), DefaultParent(nullptr), policy()
 {
   char *default_val = nullptr;
@@ -102,6 +103,7 @@ ParentConfigParams::apiParentExists(HttpRequestData *rdata)
 void
 ParentConfigParams::findParent(HttpRequestData *rdata, ParentResult *result, unsigned int fail_threshold, unsigned int retry_time)
 {
+
   P_table *tablePtr        = parent_table;
   ParentRecord *defaultPtr = DefaultParent;
   ParentRecord *rec;
@@ -109,6 +111,8 @@ ParentConfigParams::findParent(HttpRequestData *rdata, ParentResult *result, uns
   // Check to see if the parent was set through the
   //   api
   if (apiParentExists(rdata)) {
+
+    // ここでPARENTが指定されたことがセットされる
     result->result       = PARENT_SPECIFIED;
     result->hostname     = rdata->api_info->parent_proxy_name;
     result->port         = rdata->api_info->parent_proxy_port;
@@ -246,6 +250,7 @@ ParentConfigParams::parentExists(HttpRequestData *rdata)
       }
     }
   }
+
   if (rec->secondary_parents && rec->num_secondary_parents > 0) {
     for (int ii = 0; ii < rec->num_secondary_parents; ii++) {
       if (rec->secondary_parents[ii].available) {
@@ -254,26 +259,32 @@ ParentConfigParams::parentExists(HttpRequestData *rdata)
       }
     }
   }
+
   return false;
 }
 
 int ParentConfig::m_id = 0;
 
+// この関数はtrafficserverのmainから呼ばれる
 void
 ParentConfig::startup()
 {
   parentConfigUpdate = new ConfigUpdateHandler<ParentConfig>();
 
   // Load the initial configuration
+  // parent.configの設定を行う
   reconfigure();
 
   // Setup the callbacks for reconfiuration
   //   parent table
   parentConfigUpdate->attach(file_var);
+
   //   default parent
   parentConfigUpdate->attach(default_var);
+
   //   Retry time
   parentConfigUpdate->attach(retry_var);
+
   //   Fail Threshold
   parentConfigUpdate->attach(threshold_var);
 }
@@ -281,6 +292,8 @@ ParentConfig::startup()
 void
 ParentConfig::reconfigure()
 {
+
+  // parent.configを読み込んだことを出力する
   Note("%s loading ...", ts::filename::PARENT);
 
   ParentConfigParams *params = nullptr;
@@ -293,6 +306,7 @@ ParentConfig::reconfigure()
 
   m_id = configProcessor.set(m_id, params);
 
+  // parent_configタグが指定された場合に、parent.configの設定情報を出力する
   if (is_debug_tag_set("parent_config")) {
     ParentConfig::print();
   }
@@ -440,6 +454,7 @@ ParentRecord::PreProcessParents(const char *val, const int line_num, char *buf, 
 const char *
 ParentRecord::ProcessParents(char *val, bool isPrimary)
 {
+
   Tokenizer pTok(",; \t\r");
   int numTok          = 0;
   const char *current = nullptr;
@@ -451,6 +466,7 @@ ParentRecord::ProcessParents(char *val, bool isPrimary)
   if (parents != nullptr && isPrimary == true) {
     return "Can not specify more than one set of parents";
   }
+
   if (secondary_parents != nullptr && isPrimary == false) {
     return "Can not specify more than one set of secondary parents";
   }
@@ -604,6 +620,7 @@ ParentRecord::DefaultInit(char *val)
   this->ignore_query    = false;
   this->scheme          = nullptr;
   this->parent_is_proxy = true;
+
   errPtr                = ProcessParents(val, true);
 
   if (errPtr != nullptr) {
@@ -658,6 +675,11 @@ ParentRecord::Init(matcher_line *line_info)
       continue;
     }
 
+    // parent.configの設定を解釈する
+    // parent.configに指定できる値は下記を参照すること
+    // cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/parent.config.en.html
+   
+    // round_robinの解釈を行う
     if (strcasecmp(label, "round_robin") == 0) {
       if (strcasecmp(val, "true") == 0) {
         round_robin = P_HASH_ROUND_ROBIN;
@@ -675,14 +697,17 @@ ParentRecord::Init(matcher_line *line_info)
       }
       used = true;
     } else if (strcasecmp(label, "parent") == 0 || strcasecmp(label, "primary_parent") == 0) {
+      // parent設定の解釈を行う
       PreProcessParents(val, line_num, parent_buf, sizeof(parent_buf) - 1);
       errPtr = ProcessParents(parent_buf, true);
       used   = true;
     } else if (strcasecmp(label, "secondary_parent") == 0) {
+      // secondary_parent設定の解釈を行う
       PreProcessParents(val, line_num, parent_buf, sizeof(parent_buf) - 1);
       errPtr = ProcessParents(parent_buf, false);
       used   = true;
     } else if (strcasecmp(label, "go_direct") == 0) {
+      // go_direct設定の解釈を行う
       if (strcasecmp(val, "false") == 0) {
         go_direct = false;
       } else if (strcasecmp(val, "true") != 0) {
@@ -692,6 +717,9 @@ ParentRecord::Init(matcher_line *line_info)
       }
       used = true;
     } else if (strcasecmp(label, "qstring") == 0) {
+
+      // qstring設定の解釈を行う
+
       // qstring=ignore | consider
       if (strcasecmp(val, "ignore") == 0) {
         this->ignore_query = true;
@@ -884,6 +912,7 @@ ParentRecord::Print() const
 ParentRecord *
 createDefaultParent(char *val)
 {
+
   ParentRecord *newRec;
 
   if (val == nullptr || *val == '\0') {
@@ -1101,6 +1130,7 @@ EXCLUSIVE_REGRESSION_TEST(PARENTSELECTION)(RegressionTest * /* t ATS_UNUSED */, 
     }                                                                  \
   } while (0)
 
+// FP = Find Parent
 #define FP                                                           \
   do {                                                               \
     params->findParent(request, result, fail_threshold, retry_time); \

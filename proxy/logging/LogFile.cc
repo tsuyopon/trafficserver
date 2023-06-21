@@ -366,6 +366,7 @@ LogFile::trim_rolled(size_t rolling_max_count)
 int
 LogFile::roll(long interval_start, long interval_end, bool reopen_after_rolling)
 {
+
   if (m_log) {
     // Due to commit 346b419 the BaseLogFile::close_file() is no longer called within BaseLogFile::roll().
     // For diagnostic log files, the rolling is implemented by renaming and destroying the BaseLogFile object
@@ -377,6 +378,9 @@ LogFile::roll(long interval_start, long interval_end, bool reopen_after_rolling)
     // single log flush thread.
     // Since these two methods of using BaseLogFile are not compatible, we perform the logging log file specific
     // close file operation here within the containing LogFile object.
+
+    // ここで開始時刻と終了時刻を指定してログのローリングを行います
+    // proxy/logging/LogFile.hでm_logはBaseLogFileであることが定義されている。つまり、BaseLogFile::rollを呼び出します
     if (m_log->roll(interval_start, interval_end)) {
       if (m_log->close_file()) {
         Error("Error closing LogFile %s: %s.", m_log->get_name(), strerror(errno));

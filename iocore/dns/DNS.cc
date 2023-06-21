@@ -1251,6 +1251,7 @@ DNSEntry::delayEvent(int event, Event *e)
 int
 DNSEntry::mainEvent(int event, Event *e)
 {
+
   switch (event) {
   default:
     ink_assert(!"bad case");
@@ -1312,7 +1313,8 @@ DNSEntry::mainEvent(int event, Event *e)
 Action *
 DNSProcessor::getby(DNSQueryData x, int type, Continuation *cont, Options const &opt)
 {
-  if (type == T_PTR) {
+
+  if (type == T_PTR) {  // PTRレコードの場合
     Debug("dns", "received reverse query type = %d, timeout = %d", type, opt.timeout);
   } else {
     Debug("dns", "received query %.*s type = %d, timeout = %d", int(x.name.size()), x.name.data(), type, opt.timeout);
@@ -1321,6 +1323,7 @@ DNSProcessor::getby(DNSQueryData x, int type, Continuation *cont, Options const 
             opt.timeout);
     }
   }
+
   DNSEntry *e = dnsEntryAllocator.alloc();
   e->retries  = dns_retries;
   e->init(x, type, cont, opt);
@@ -1384,13 +1387,17 @@ dns_result(DNSHandler *h, DNSEntry *e, HostEnt *ent, bool retry, bool tcp_retry)
         return;
       }
     }
+
     if (retry) {
       DNS_INCREMENT_DYN_STAT(dns_max_retries_exceeded_stat);
     }
+
   }
+
   if (ent == BAD_DNS_RESULT) {
     ent = nullptr;
   }
+
   if (!cancelled) {
     if (!ent || !ent->good) {
       DNS_SUM_DYN_STAT(dns_fail_time_stat, Thread::get_hrtime() - e->submit_time);
@@ -1483,10 +1490,12 @@ DNSEntry::postAllEvent(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 int
 DNSEntry::post(DNSHandler *h, HostEnt *ent)
 {
+
   if (timeout) {
     timeout->cancel(this);
     timeout = nullptr;
   }
+
   result_ent = ent;
   if (h->mutex->thread_holding == submit_thread) {
     MUTEX_TRY_LOCK(lock, action.mutex, h->mutex->thread_holding);
@@ -1506,10 +1515,17 @@ DNSEntry::post(DNSHandler *h, HostEnt *ent)
 int
 DNSEntry::postOneEvent(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 {
+
+  // DNSの取得処理が正常に完了した場合
   if (!action.cancelled) {
+
+    // 出力例「called back continuation for httpbin.org」  この例の場合、httpbin.orgはオリジン側のFQDNを表します。
     Debug("dns", "called back continuation for %s", qname);
+
+    // 次の状態に遷移させます
     action.continuation->handleEvent(DNS_EVENT_LOOKUP, result_ent.get());
   }
+
   result_ent   = nullptr;
   action.mutex = nullptr;
   mutex        = nullptr;
@@ -1521,6 +1537,7 @@ DNSEntry::postOneEvent(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 static bool
 dns_process(DNSHandler *handler, HostEnt *buf, int len)
 {
+
   ProxyMutex *mutex = handler->mutex.get();
   HEADER *h         = reinterpret_cast<HEADER *>(buf->buf);
   DNSEntry *e       = get_dns(handler, static_cast<uint16_t>(ntohs(h->id)));
@@ -1536,6 +1553,7 @@ dns_process(DNSHandler *handler, HostEnt *buf, int len)
     Debug("dns", "unknown DNS id = %u", (uint16_t)ntohs(h->id));
     return false; // cannot count this as a success
   }
+
   //
   // It is no longer in flight
   //
@@ -1743,6 +1761,7 @@ dns_process(DNSHandler *handler, HostEnt *buf, int len)
         ++error;
         break;
       }
+
       //
       // Decode names
       //
@@ -1813,10 +1832,14 @@ dns_process(DNSHandler *handler, HostEnt *buf, int len)
           buf->ent.h_addrtype = T_A == type ? AF_INET : AF_INET6;
           buf->ent.h_name     = reinterpret_cast<char *>(bp);
           nn                  = strlen(reinterpret_cast<char *>(bp)) + 1;
+
+          // 出力例: 「received A name = httpbin.org」
+          // オリジン側のIPアドレスをひく際のFQDNを表示する
           Debug("dns", "received %s name = %s", QtypeName(type), bp);
           bp += nn;
           buflen -= nn;
         }
+
         // attempt to use the original buffer (if it is word aligned)
         if (!(((uintptr_t)cp) % sizeof(unsigned int))) {
           *hap++ = cp;
@@ -1829,8 +1852,12 @@ dns_process(DNSHandler *handler, HostEnt *buf, int len)
             break;
           }
           memcpy((*hap++ = bp), cp, n);
+
+          // 出力例: 「received A = 44.205.81.225」
+          // httpbin.orgのAレコードを出力します。whileのループの中にいるので、上記のレコードは取得したAレコード数分のログが出力されます。
           Debug("dns", "received %s = %s", QtypeName(type),
                 inet_ntop(T_AAAA == type ? AF_INET6 : AF_INET, bp, ip_string, sizeof(ip_string)));
+
           bp += n;
           cp += n;
         }
@@ -1839,6 +1866,7 @@ dns_process(DNSHandler *handler, HostEnt *buf, int len)
       }
       ++answer;
     }
+
     if (answer) {
       *ap  = nullptr;
       *hap = nullptr;
@@ -1851,6 +1879,8 @@ dns_process(DNSHandler *handler, HostEnt *buf, int len)
         ink_strlcpy(reinterpret_cast<char *>(bp), e->qname, sizeof(buf->hostbuf) - (bp - buf->hostbuf));
         buf->ent.h_name = reinterpret_cast<char *>(bp);
       }
+
+      // 出力例:「Returning 6 DNS records for [httpbin.org]」
       Debug("dns", "Returning %d DNS records for [%s]", answer, e->qname);
       dns_result(handler, e, buf, retry);
       return server_ok;

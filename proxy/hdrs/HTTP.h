@@ -789,6 +789,7 @@ HTTPHdr::host_get(int *length) const
 
   if (length)
     *length = 0;
+
   return nullptr;
 }
 
@@ -805,6 +806,7 @@ HTTPHdr::port_get()
 /*-------------------------------------------------------------------------
   -------------------------------------------------------------------------*/
 
+// Hostヘッダ中からホスト名が取得できた場合
 inline bool
 HTTPHdr::is_target_in_url() const
 {
@@ -875,7 +877,11 @@ is_header_keep_alive(const HTTPVersion &http_version, const MIMEField *con_hdr)
   HTTPKeepAlive keep_alive = HTTP_NO_KEEPALIVE;
   //    *unknown_tokens = false;
 
+  // 「Connection」ヘッダが存在する場合
   if (con_hdr) {
+
+    // 「Connection」ヘッダの値に応じて処理を分岐する
+    // ifが「keep-alive」の値が存在する場合、else ifが値として「close」が存在する場合
     if (con_hdr->value_get_index("keep-alive", 10) >= 0)
       con_token = CON_TOKEN_KEEP_ALIVE;
     else if (con_hdr->value_get_index("close", 5) >= 0)
@@ -883,8 +889,15 @@ is_header_keep_alive(const HTTPVersion &http_version, const MIMEField *con_hdr)
   }
 
   if (HTTP_1_0 == http_version) {
+
+    // HTTP/1.0 このバージョンではKeep-Aliveには対応していなかった気がするが処理は分岐する?(TBD)
+
     keep_alive = (con_token == CON_TOKEN_KEEP_ALIVE) ? (HTTP_KEEPALIVE) : (HTTP_NO_KEEPALIVE);
+
   } else if (HTTP_1_1 == http_version) {
+
+    // HTTP/1.1 このバージョンからKeep-Alvieが対応している
+
     // We deviate from the spec here.  If the we got a response where
     //   where there is no Connection header and the request 1.0 was
     //   1.0 don't treat this as keep-alive since Netscape-Enterprise/3.6 SP1
@@ -893,6 +906,7 @@ is_header_keep_alive(const HTTPVersion &http_version, const MIMEField *con_hdr)
                    (HTTP_KEEPALIVE) :
                    (HTTP_NO_KEEPALIVE);
   } else {
+    // HTTP/0.9
     keep_alive = HTTP_NO_KEEPALIVE;
   }
   return (keep_alive);
@@ -1000,6 +1014,8 @@ HTTPHdr::url_create(URL *u)
 inline URL *
 HTTPHdr::url_get() const
 {
+
+  // assert
   ink_assert(valid());
   ink_assert(m_http->m_polarity == HTTP_TYPE_REQUEST);
 
@@ -1013,6 +1029,7 @@ HTTPHdr::url_get() const
     m_url_cached.m_url_impl = real_impl;
     this->mark_target_dirty();
   }
+
   return (&m_url_cached);
 }
 

@@ -78,6 +78,7 @@ i_am_the_record_owner(RecT rec_type)
 //-------------------------------------------------------------------------
 // sync_thr
 //-------------------------------------------------------------------------
+// RecLocalStartからスレッド生成される
 static void *
 sync_thr(void *data)
 {
@@ -87,17 +88,24 @@ sync_thr(void *data)
   // Shutdownシグナルを受信するまでループし続ける
   while (!TSSystemState::is_event_system_shut_down()) {
 
+    // sync_requiredにREC_PEER_SYNC_REQUIREDがセットされた場合には、メッセージを送信する
+    // REC_PEER_SYNC_REQUIREDは例えば、MGMT_EVENT_CONFIG_FILE_UPDATEが送られた場合にはセットされます。
     send_push_message();
+
+    // 統計情報としてRECP_PERSISTENTが指定されている場合には、records.snapファイルへと保存しておく
     RecSyncStatsFile();
 
     // If we didn't successfully sync to disk, check whether we need to update ....
     bool found;
 
-    // 下記設定値によって設定ファイルの変更をtrackするかどうかを行います。
+    // 下記設定値によって設定ファイルの変更をtrackするかどうかの有効・無効が設定できます(デフォルトはproxy.config.track_config_filesの値は1)
     // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-track-config-files
     int track_time = static_cast<int>(REC_readInteger("proxy.config.track_config_files", &found));
+
     if (found && track_time > 0) {
       if (configFiles->isConfigStale()) {
+        // カウンターを加算する
+        // https://docs.trafficserver.apache.org/en/9.1.x/admin-guide/monitoring/statistics/core/general.en.html#stat-proxy-node-config-reconfigure-required
         RecSetRecordInt("proxy.node.config.reconfigure_required", 1, REC_SOURCE_DEFAULT);
       }
     }
@@ -112,9 +120,11 @@ sync_thr(void *data)
 //-------------------------------------------------------------------------
 // config_update_thr
 //-------------------------------------------------------------------------
+// TrafficManagerから実行されるスレッドの起点関数
 static void *
 config_update_thr(void * /* data */)
 {
+
   while (!TSSystemState::is_event_system_shut_down()) {
 
     // 下記RecExecConfigUpdateCbs関数で設定ファイルのスイッチを行う
@@ -131,8 +141,11 @@ config_update_thr(void * /* data */)
       break;
     }
 
+    // 3秒スリープする
     usleep(REC_CONFIG_UPDATE_INTERVAL_MS * 1000);
+
   }
+
   return nullptr;
 }
 
@@ -237,6 +250,9 @@ RecMessageSend(RecMessage *msg)
   if (g_mode_type == RECM_CLIENT || g_mode_type == RECM_SERVER) {
     msg->o_end = msg->o_write;
     msg_size   = sizeof(RecMessageHdr) + (msg->o_write - msg->o_start);
+
+    // このケースではtraffic_manager.ccのmain側での処理はそのままbypassしてprocesserver.sockに書き込まれている気がする
+    // sendMgmtMsgToProcesses関数の中のswitchによりMGMT_EVENT_LIBRECORDSの分岐は特になさそう
     lmgmt->signalEvent(MGMT_EVENT_LIBRECORDS, reinterpret_cast<char *>(msg), msg_size);
   }
 

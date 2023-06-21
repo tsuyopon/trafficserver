@@ -1350,6 +1350,9 @@ init_core_size()
 {
   bool found;
   RecInt coreSize;
+
+  // proxy.config.core_limitを指定することによってコアの生成を指示することができます。
+  // cf https://docs.trafficserver.apache.org/developer-guide/debugging/debug-builds.en.html#debug-builds
   found = (RecGetRecordInt("proxy.config.core_limit", &coreSize) == REC_ERR_OKAY);
 
   if (found == false) {
@@ -2125,11 +2128,14 @@ main(int /* argc ATS_UNUSED */, const char **argv)
       }
     }
   } else {
+
     RecProcessStart();
     initCacheControl();
     IpAllow::startup();
     HostStatus::instance().loadHostStatusFromStats();
     netProcessor.init_socks();
+
+    // parent.configの読み込みを行う
     ParentConfig::startup();
     SplitDNSConfig::startup();
 
@@ -2167,7 +2173,7 @@ main(int /* argc ATS_UNUSED */, const char **argv)
     quic_NetProcessor.start(-1, stacksize);
 #endif
 
-    // TSMgmtUpdateRegisterからglobal_config_cbs変数に登録される模様。つまり、プラグインから登録される仕組みと思われる
+    // TSMgmtUpdateRegisterからglobal_config_cbs変数に登録される模様。つまり、プラグインから登録される仕組みと思われる。このコールバックはtraffic_ctl reloadなどで呼ばれる
     pmgmt->registerPluginCallbacks(global_config_cbs);
 
     cacheProcessor.afterInitCallbackSet(&CB_After_Cache_Init);
@@ -2374,6 +2380,7 @@ load_ssl_file_callback(const char *ssl_file)
   pmgmt->signalConfigFileChild(ts::filename::SSL_MULTICERT, ssl_file);
 }
 
+// load_remap_file_cbから呼び出されます
 void
 load_config_file_callback(const char *parent_file, const char *remap_file)
 {

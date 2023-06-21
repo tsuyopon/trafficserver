@@ -76,6 +76,7 @@ public:
 
   bool read_locked  = false;
   bool write_locked = false;
+
   // Flag to check whether read-while-write is in progress or not
   bool readwhilewrite_inprogress = false;
 

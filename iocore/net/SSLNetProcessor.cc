@@ -41,11 +41,15 @@ NetProcessor &sslNetProcessor = ssl_NetProcessor;
 
 #if TS_USE_TLS_OCSP
 struct OCSPContinuation : public Continuation {
+
   int
   mainEvent(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
   {
     Note("OCSP refresh started");
+
+    // ここがET_OCSPで実行されるスレッドのメインとなる起点のポイント
     ocsp_update();
+
     Note("OCSP refresh finished");
     return EVENT_CONT;
   }
@@ -79,12 +83,22 @@ SSLNetProcessor::start(int, size_t stacksize)
   SSLInitializeStatistics();
 
 #if TS_USE_TLS_OCSP
+  // proxy.config.ssl.ocsp.enabledが有効であれば
   if (SSLConfigParams::ssl_ocsp_enabled) {
+
+    // OCSP専用にET_OCSPスレッドを1つ生成します
     EventType ET_OCSP  = eventProcessor.spawn_event_threads("ET_OCSP", 1, stacksize);
+
+    // スレッドの起点となるエンドポイントはOCSPContinuationクラスです。この中でocsp_update関数が実行されます。
     Continuation *cont = new OCSPContinuation();
+
     // schedule the update initially to get things populated
+    // 即時実行と定期実行2つ指定しています。
+    //   即時実行により起動時に即座に執行情報を最初に取得します。
+    //   定期実行(デフォルト60秒)により定期的にX.509に記載のOCSPレスポンダにアクセスして、最新の執行状況を取得します
     eventProcessor.schedule_imm(cont, ET_OCSP);
     eventProcessor.schedule_every(cont, HRTIME_SECONDS(SSLConfigParams::ssl_ocsp_update_period), ET_OCSP);
+
   }
 #endif /* TS_USE_TLS_OCSP */
 

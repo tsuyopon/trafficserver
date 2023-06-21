@@ -340,6 +340,7 @@ CtrlEngine::config_match()
   }
 }
 
+// 「traffic_ctl config reload」コマンドから実行される
 void
 CtrlEngine::config_reload()
 {

@@ -278,6 +278,7 @@ HttpVCTable::cleanup_all()
     SMDebug("http", "[%s, %s]", #state_name, HttpDebugNames::get_event_name(event));   \
   }
 
+// default_handlerに登録される
 #define HTTP_SM_SET_DEFAULT_HANDLER(_h)   \
   {                                       \
     REMEMBER(NO_EVENT, reentrancy_count); \
@@ -417,6 +418,8 @@ HttpSM::set_ua_half_close_flag()
 inline int
 HttpSM::do_api_callout()
 {
+
+  // プラグインのhookが存在すればhooks_setはtrue
   if (hooks_set) {
     return do_api_callout_internal();
   } else {
@@ -428,6 +431,7 @@ HttpSM::do_api_callout()
 int
 HttpSM::state_add_to_list(int event, void * /* data ATS_UNUSED */)
 {
+
   // The list if for stat pages and general debugging
   //   The config variable exists mostly to allow us to
   //   measure an performance drop during benchmark runs
@@ -683,6 +687,7 @@ HttpSM::setup_blind_tunnel_port()
 int
 HttpSM::state_read_client_request_header(int event, void *data)
 {
+
   STATE_ENTER(&HttpSM::state_read_client_request_header, event);
 
   ink_assert(ua_entry->read_vio == (VIO *)data);
@@ -729,6 +734,7 @@ HttpSM::state_read_client_request_header(int event, void *data)
     milestones[TS_MILESTONE_UA_FIRST_READ] = Thread::get_hrtime();
     ua_txn->set_inactivity_timeout(HRTIME_SECONDS(t_state.txn_conf->transaction_no_activity_timeout_in));
   }
+
   /////////////////////
   // tokenize header //
   /////////////////////
@@ -749,6 +755,7 @@ HttpSM::state_read_client_request_header(int event, void *data)
   // may have sent all of the data already followed by a FIN and that
   // should be OK.
   if (ua_raw_buffer_reader != nullptr) {
+
     bool do_blind_tunnel = false;
     // If we had a parse error and we're done reading data
     // blind tunnel
@@ -761,6 +768,7 @@ HttpSM::state_read_client_request_header(int event, void *data)
                ua_txn->get_remote_reader()->read_avail() > 0 && !t_state.hdr_info.client_request.is_keep_alive_set()) {
       do_blind_tunnel = true;
     }
+
     if (do_blind_tunnel) {
       SMDebug("http", "first request on connection failed parsing, switching to passthrough.");
 
@@ -881,26 +889,43 @@ HttpSM::state_read_client_request_header(int event, void *data)
 
     ua_txn->set_session_active();
 
+    // クライアントからのリクエストが
+    // HTTP/1.1 かつ POSTかPUTの場合
     if (t_state.hdr_info.client_request.version_get() == HTTP_1_1 &&
         (t_state.hdr_info.client_request.method_get_wksidx() == HTTP_WKSIDX_POST ||
          t_state.hdr_info.client_request.method_get_wksidx() == HTTP_WKSIDX_PUT)) {
+
       int len            = 0;
+
+      // クライアントリクエストからExpectヘッダの値を取得する
       const char *expect = t_state.hdr_info.client_request.value_get(MIME_FIELD_EXPECT, MIME_LEN_EXPECT, &len);
+
+      // クライアントからのリクエストが、「Expect: 100-continue」と一致する場合に下記に入る
       if ((len == HTTP_LEN_100_CONTINUE) && (strncasecmp(expect, HTTP_VALUE_100_CONTINUE, HTTP_LEN_100_CONTINUE) == 0)) {
+
         // When receive an "Expect: 100-continue" request from client, ATS sends a "100 Continue" response to client
         // immediately, before receive the real response from original server.
+
+        // send_100_continue_response(=proxy.config.http.send_100_continue_response)の設定値が0ならばバッファを蓄積完了した後にオリジンサーバにリクエストを送る。設定値が1ならばPOSTボディを待たずに即座に100-Continueを応答する。(デフォルトの設定値は0)
+        // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-send-100-continue-response
         if (t_state.http_config_param->send_100_continue_response) {
+
           int64_t alloc_index = buffer_size_to_index(len_100_continue_response, t_state.http_config_param->max_payload_iobuf_index);
           if (ua_entry->write_buffer) {
             free_MIOBuffer(ua_entry->write_buffer);
             ua_entry->write_buffer = nullptr;
           }
+
           ua_entry->write_buffer    = new_MIOBuffer(alloc_index);
           IOBufferReader *buf_start = ua_entry->write_buffer->alloc_reader();
           SMDebug("http_seq", "send 100 Continue response to client");
+
+          // 「HTTP/1.1 100 Continue」という固定文字列を応答する
           int64_t nbytes      = ua_entry->write_buffer->write(str_100_continue_response, len_100_continue_response);
           ua_entry->write_vio = ua_txn->do_io_write(this, nbytes, buf_start);
+
         } else {
+          // デフォルトの設定値は t_state.http_config_param->send_100_continue_respons = 0なので、この分岐に入ります
           t_state.hdr_info.client_request.m_100_continue_required = true;
         }
       }
@@ -981,6 +1006,7 @@ HttpSM::wait_for_full_body()
 int
 HttpSM::state_watch_for_client_abort(int event, void *data)
 {
+
   STATE_ENTER(&HttpSM::state_watch_for_client_abort, event);
 
   ink_assert(ua_entry->read_vio == (VIO *)data || ua_entry->write_vio == (VIO *)data);
@@ -1464,6 +1490,7 @@ HttpSM::state_api_callback(int event, void *data)
 int
 HttpSM::state_api_callout(int event, void *data)
 {
+
   // enum and variable for figuring out what the next action is after
   //   after we've finished the api state
   enum AfterApiReturn_t {
@@ -1475,6 +1502,7 @@ HttpSM::state_api_callout(int event, void *data)
     API_RETURN_SHUTDOWN,
     API_RETURN_INVALIDATE_ERROR
   };
+
   AfterApiReturn_t api_next = API_RETURN_UNKNOWN;
 
   if (event != EVENT_NONE) {
@@ -1671,6 +1699,7 @@ plugins required to work with sni_routing.
 void
 HttpSM::handle_api_return()
 {
+
   switch (t_state.api_next_action) {
   case HttpTransact::SM_ACTION_API_SM_START: {
     NetVConnection *netvc     = ua_txn->get_netvc();
@@ -1685,6 +1714,9 @@ HttpSM::handle_api_return()
   }
   case HttpTransact::SM_ACTION_API_CACHE_LOOKUP_COMPLETE:
   case HttpTransact::SM_ACTION_API_READ_CACHE_HDR:
+    // InkAPIから操作された場合しか、下記のifのコードパスには入りません
+    //    t_state.api_cleanup_cache_readはTSHttpTxnCacheLookupStatusSetのInkAPIからのみtrueとなる
+    //    t_state.api_update_cached_objectはTSHttpTxnUpdateCachedObjectのInkAPIからのみ更新される
     if (t_state.api_cleanup_cache_read && t_state.api_update_cached_object != HttpTransact::UPDATE_CACHED_OBJECT_PREPARE) {
       t_state.api_cleanup_cache_read = false;
       t_state.cache_info.object_read = nullptr;
@@ -1731,12 +1763,14 @@ HttpSM::handle_api_return()
   }
 
   switch (t_state.next_action) {
+
   case HttpTransact::SM_ACTION_TRANSFORM_READ: {
     HttpTunnelProducer *p = setup_transfer_from_transform();
     perform_transform_cache_write_action();
     tunnel.tunnel_run(p);
     break;
   }
+
   case HttpTransact::SM_ACTION_SERVER_READ: {
     if (unlikely(t_state.did_upgrade_succeed)) {
       // We've successfully handled the upgrade, let's now setup
@@ -1866,13 +1900,15 @@ HttpSM::create_server_txn(PoolableSession *new_session)
 int
 HttpSM::state_http_server_open(int event, void *data)
 {
+
   SMDebug("http_track", "entered inside state_http_server_open: %s", HttpDebugNames::get_event_name(event));
   STATE_ENTER(&HttpSM::state_http_server_open, event);
-  ink_release_assert(event == EVENT_INTERVAL || event == NET_EVENT_OPEN || event == NET_EVENT_OPEN_FAILED ||
-                     pending_action.empty());
+  ink_release_assert(event == EVENT_INTERVAL || event == NET_EVENT_OPEN || event == NET_EVENT_OPEN_FAILED || pending_action.empty());
+
   if (event != NET_EVENT_OPEN) {
     pending_action = nullptr;
   }
+
   milestones[TS_MILESTONE_SERVER_CONNECT_END] = Thread::get_hrtime();
 
   switch (event) {
@@ -2187,6 +2223,8 @@ HttpSM::state_send_server_request_header(int event, void *data)
         setup_transform_to_server_transfer();
       } else {
         // Go ahead and set up the post tunnel if we are not waiting for a 100 response
+        // proxy.config.http.send_100_continue_responseの設定値が0ならばバッファを蓄積完了した後にオリジンサーバにリクエストを送る。設定値が1ならばPOSTボディを待たずに即座に100-Continueを応答する。
+        // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-send-100-continue-response
         if (!t_state.hdr_info.client_request.m_100_continue_required) {
           do_setup_post_tunnel(HTTP_SERVER_VC);
         }
@@ -2491,6 +2529,7 @@ HttpSM::state_mark_os_down(int event, void *data)
 int
 HttpSM::state_handle_stat_page(int event, void *data)
 {
+
   STATE_ENTER(&HttpSM::state_handle_stat_page, event);
   switch (event) {
   case STAT_PAGE_SUCCESS:
@@ -2535,6 +2574,7 @@ HttpSM::state_handle_stat_page(int event, void *data)
 int
 HttpSM::state_cache_open_write(int event, void *data)
 {
+
   STATE_ENTER(&HttpSM : state_cache_open_write, event);
 
   // Make sure we are on the "right" thread
@@ -2653,6 +2693,9 @@ HttpSM::setup_cache_lookup_complete_api()
 //  object for reading.
 //
 //////////////////////////////////////////////////////////////////////////
+
+// キャッシュを持っているかどうかに関わらずこの関数を通ります
+// キャッシュ状態による処理の分岐はここで分かれることになります。
 int
 HttpSM::state_cache_open_read(int event, void *data)
 {
@@ -2667,6 +2710,9 @@ HttpSM::state_cache_open_read(int event, void *data)
   case CACHE_EVENT_OPEN_READ: {
     pending_action = nullptr;
 
+    // cacheによる書き込みが行われて以降のアクセスであればこのcaseに到達します。
+    // cacheによる書き込みが行われていないケースではここには入りません
+
     SMDebug("http", "cache_open_read - CACHE_EVENT_OPEN_READ");
 
     /////////////////////////////////
@@ -2676,10 +2722,16 @@ HttpSM::state_cache_open_read(int event, void *data)
     t_state.source = HttpTransact::SOURCE_CACHE;
 
     cache_sm.cache_read_vc->get_http_info(&t_state.cache_info.object_read);
+
     // ToDo: Should support other levels of cache hits here, but the cache does not support it (yet)
+    // データベース中にキャッシュが存在しているか、RAM中にキャッシュが存在しているかを変数に保存します
     if (cache_sm.cache_read_vc->is_ram_cache_hit()) {
+      // RAM中にキャッシュが存在する
+      // キャッシュヒット時の2度目以降のアクセスはこちらになるはず
       t_state.cache_info.hit_miss_code = SQUID_HIT_RAM;
     } else {
+      // DISK(データベース中)にキャッシュが存在する
+      // キャッシュヒット時の初回アクセスはこちらになるはず
       t_state.cache_info.hit_miss_code = SQUID_HIT_DISK;
     }
 
@@ -2688,12 +2740,18 @@ HttpSM::state_cache_open_read(int event, void *data)
     break;
   }
   case CACHE_EVENT_OPEN_READ_FAILED:
+
     pending_action = nullptr;
 
+    // cacheによる書き込みが行われていないケースであればこのcaseに到達します。
+    // cacheによる書き込みが行われているケースではここには入りません。
+
+    // ログ出力例: HttpSM.cc:2693 (state_cache_open_read)> (http) [0] cache_open_read - CACHE_EVENT_OPEN_READ_FAILED with ECACHE_NO_DOC (20400)
     SMDebug("http", "cache_open_read - CACHE_EVENT_OPEN_READ_FAILED with %s (%d)", InkStrerror(-cache_sm.get_last_error()),
             -cache_sm.get_last_error());
 
     SMDebug("http", "open read failed.");
+
     // Inform HttpTransact somebody else is updating the document
     // HttpCacheSM already waited so transact should go ahead.
     if (cache_sm.get_last_error() == -ECACHE_DOC_BUSY) {
@@ -2742,6 +2800,7 @@ HttpSM::main_handler(int event, void *data)
   }
 
   if (vc_entry) {
+    // HttpSM::attach_client_sessionで「ua_entry->vc_handler = &HttpSM::state_read_client_request_header;」がセットされます
     jump_point = vc_entry->vc_handler;
     ink_assert(jump_point != (HttpSMHandler) nullptr);
     ink_assert(vc_entry->vc != (VConnection *)nullptr);
@@ -2778,6 +2837,7 @@ HttpSM::main_handler(int event, void *data)
 void
 HttpSM::tunnel_handler_post_or_put(HttpTunnelProducer *p)
 {
+
   ink_assert(p->vc_type == HT_HTTP_CLIENT || (p->handler_state == HTTP_SM_POST_UA_FAIL && p->vc_type == HT_BUFFER_READ));
   HttpTunnelConsumer *c;
 
@@ -3318,6 +3378,7 @@ HttpSM::is_bg_fill_necessary(HttpTunnelConsumer *c)
         return false;
       }
     }
+
     // If threshold is 0.0 or negative then do background
     //   fill regardless of the content length.  Since this
     //   is floating point just make sure the number is near zero
@@ -3563,6 +3624,7 @@ HttpSM::tunnel_handler_cache_read(int event, HttpTunnelProducer *p)
 int
 HttpSM::tunnel_handler_cache_write(int event, HttpTunnelConsumer *c)
 {
+
   STATE_ENTER(&HttpSM::tunnel_handler_cache_write, event);
   SMDebug("http", "handling cache event: %s", HttpDebugNames::get_event_name(event));
 
@@ -3613,6 +3675,7 @@ HttpSM::tunnel_handler_cache_write(int event, HttpTunnelConsumer *c)
 
   HTTP_DECREMENT_DYN_STAT(http_current_cache_connections_stat);
   return 0;
+
 }
 
 int
@@ -3703,6 +3766,7 @@ HttpSM::tunnel_handler_post_ua(int event, HttpTunnelProducer *p)
 int
 HttpSM::tunnel_handler_for_partial_post(int event, void * /* data ATS_UNUSED */)
 {
+
   STATE_ENTER(&HttpSM::tunnel_handler_for_partial_post, event);
   tunnel.deallocate_buffers();
   tunnel.reset();
@@ -3966,6 +4030,7 @@ HttpSM::tunnel_handler_ssl_consumer(int event, HttpTunnelConsumer *c)
 int
 HttpSM::tunnel_handler_transform_write(int event, HttpTunnelConsumer *c)
 {
+
   STATE_ENTER(&HttpSM::tunnel_handler_transform_write, event);
 
   HttpTransformInfo *i;
@@ -4160,6 +4225,8 @@ HttpSM::check_sni_host()
   // Check that the SNI and host name fields match, if it matters
   // Issue warning or mark the transaction to be terminated as necessary
   int host_len;
+
+  // クライアントリクエストのHostヘッダを取得する
   const char *host_name = t_state.hdr_info.client_request.host_get(&host_len);
   if (host_name && host_len) {
 
@@ -4220,6 +4287,7 @@ HttpSM::do_remap_request(bool run_inline)
   check_sni_host();
 
   // Preserve effective url before remap
+  // remap処理を実行しておく前に実行URL(remap前のURL)を保存しておく
   t_state.unmapped_url.create(t_state.hdr_info.client_request.url_get()->m_heap);
   t_state.unmapped_url.copy(t_state.hdr_info.client_request.url_get());
 
@@ -4228,6 +4296,8 @@ HttpSM::do_remap_request(bool run_inline)
   // is not already there, promote it only in the unmapped_url. This avoids breaking any logic that
   // depends on the lack of promotion in the client request URL.
   if (!t_state.unmapped_url.m_url_impl->m_ptr_host) {
+
+    // クライアントリクエストのHostフィールドを取得する
     MIMEField *host_field = t_state.hdr_info.client_request.field_find(MIME_FIELD_HOST, MIME_LEN_HOST);
     if (host_field) {
       int host_len;
@@ -4682,14 +4752,20 @@ HttpSM::do_range_parse(MIMEField *range_field)
 void
 HttpSM::do_range_setup_if_necessary()
 {
+
   MIMEField *field;
 
+  // Rangeフィールドを取得する
   field = t_state.hdr_info.client_request.field_find(MIME_FIELD_RANGE, MIME_LEN_RANGE);
   ink_assert(field != nullptr);
 
   t_state.range_setup = HttpTransact::RANGE_NONE;
 
+  // RangeヘッダはGETメソッド、かつ、HTTP/1.1にのみ有効なヘッダである
+  // cf. https://datatracker.ietf.org/doc/html/rfc7233#section-3
+  // cf. https://laboradian.com/get-a-part-of-the-page-with-http-range/
   if (t_state.method == HTTP_WKSIDX_GET && t_state.hdr_info.client_request.version_get() == HTTP_1_1) {
+
     do_range_parse(field);
 
     if (t_state.range_setup == HttpTransact::RANGE_REQUESTED) {
@@ -4728,17 +4804,19 @@ HttpSM::do_range_setup_if_necessary()
 
       // We have to do the transform on (allowed) multi-range request, *or* if the VC is not pread capable
       if (do_transform) {
+
         if (api_hooks.get(TS_HTTP_RESPONSE_TRANSFORM_HOOK) == nullptr) {
           int field_content_type_len = -1;
           const char *content_type   = nullptr;
           int64_t content_length     = 0;
 
           if (t_state.cache_info.object_read && t_state.cache_info.action != HttpTransact::CACHE_DO_REPLACE) {
-            content_type = t_state.cache_info.object_read->response_get()->value_get(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE,
-                                                                                     &field_content_type_len);
+            content_type = t_state.cache_info.object_read->response_get()->value_get(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE, &field_content_type_len);
             content_length = t_state.cache_info.object_read->object_size_get();
           } else {
+
             // We don't want to transform a range request if the server response has a content encoding.
+            // サーバレスポンス中にContent-Encoding ヘッダが存在していた場合の処理
             if (t_state.hdr_info.server_response.presence(MIME_PRESENCE_CONTENT_ENCODING)) {
               Debug("http_trans", "Cannot setup range transform for server response with content encoding");
               t_state.range_setup = HttpTransact::RANGE_NONE;
@@ -4747,8 +4825,7 @@ HttpSM::do_range_setup_if_necessary()
 
             // Since we are transforming the range from the server, we want to cache the original response
             t_state.api_info.cache_untransformed = true;
-            content_type =
-              t_state.hdr_info.server_response.value_get(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE, &field_content_type_len);
+            content_type = t_state.hdr_info.server_response.value_get(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE, &field_content_type_len);
             content_length = t_state.hdr_info.server_response.get_content_length();
           }
 
@@ -4759,6 +4836,7 @@ HttpSM::do_range_setup_if_necessary()
                                                                              &t_state.hdr_info.transform_response, content_type,
                                                                              field_content_type_len, content_length);
           api_hooks.append(TS_HTTP_RESPONSE_TRANSFORM_HOOK, range_trans);
+
         } else {
           // ToDo: Do we do something here? The theory is that multiple transforms do not behave well with
           // the range transform needed here.
@@ -4768,9 +4846,11 @@ HttpSM::do_range_setup_if_necessary()
   }
 }
 
+// この関数はキャッシュを持っていなくても通ることに注意してください
 void
 HttpSM::do_cache_lookup_and_read()
 {
+
   // TODO decide whether to uncomment after finish testing redirect
   // ink_assert(server_txn == NULL);
   ink_assert(pending_action.empty());
@@ -4783,6 +4863,7 @@ HttpSM::do_cache_lookup_and_read()
   milestones[TS_MILESTONE_CACHE_OPEN_READ_BEGIN] = Thread::get_hrtime();
   t_state.cache_lookup_result                    = HttpTransact::CACHE_LOOKUP_NONE;
   t_state.cache_info.lookup_count++;
+
   // YTS Team, yamsat Plugin
   // Changed the lookup_url to c_url which enables even
   // the new redirect url to perform a CACHE_LOOKUP
@@ -4793,14 +4874,17 @@ HttpSM::do_cache_lookup_and_read()
     c_url = t_state.cache_info.lookup_url;
   }
 
+  /// ログ出力例: <HttpSM.cc:4796 (do_cache_lookup_and_read)> (http_seq) [0] Issuing cache lookup for URL http://httpbin.org/get 
   SMDebug("http_seq", "Issuing cache lookup for URL %s", c_url->string_get(&t_state.arena));
 
   HttpCacheKey key;
   Cache::generate_key(&key, c_url, t_state.txn_conf->cache_generation_number);
 
+  // HttpCacheSM::open_readが呼ばれます
   pending_action = cache_sm.open_read(
     &key, c_url, &t_state.hdr_info.client_request, t_state.txn_conf,
     static_cast<time_t>((t_state.cache_control.pin_in_cache_for < 0) ? 0 : t_state.cache_control.pin_in_cache_for));
+
   //
   // pin_in_cache value is an open_write parameter.
   // It is passed in open_read to allow the cluster to
@@ -4916,6 +5000,7 @@ HttpSM::send_origin_throttled_response()
   if (t_state.current.request_to != HttpTransact::PARENT_PROXY) {
     t_state.current.attempts = t_state.txn_conf->connect_attempts_max_retries;
   }
+
   t_state.current.state = HttpTransact::OUTBOUND_CONGESTION;
   call_transact_and_set_next_state(HttpTransact::HandleResponse);
 }
@@ -5004,6 +5089,7 @@ HttpSM::get_outbound_sni() const
 //  HttpSM::do_http_server_open()
 //
 //////////////////////////////////////////////////////////////////////////
+// オリジンサーバに接続する
 void
 HttpSM::do_http_server_open(bool raw)
 {
@@ -5068,6 +5154,8 @@ HttpSM::do_http_server_open(bool raw)
     int method_str_len     = 0;
     const char *method_str = nullptr;
 
+    // ip_allow.yamlに関するACL処理を行なっている
+    // cf. https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/files/ip_allow.yaml.en.html
     if (acl.isValid()) {
       if (acl.isDenyAll()) {
         deny_request = true;
@@ -5081,6 +5169,7 @@ HttpSM::do_http_server_open(bool raw)
       }
     }
 
+    // ip_allow.yamlに関する設定の結果拒否されたリクエスト
     if (deny_request) {
       if (is_debug_tag_set("ip-allow")) {
         ip_text_buffer ipb;
@@ -5108,6 +5197,7 @@ HttpSM::do_http_server_open(bool raw)
   }
 
   // Check for self loop.
+  // Viaヘッダによるループ検知を行う
   if (!ua_txn->is_outbound_transparent() && HttpTransact::will_this_request_self_loop(&t_state)) {
     call_transact_and_set_next_state(HttpTransact::SelfLoop);
     return;
@@ -5130,9 +5220,11 @@ HttpSM::do_http_server_open(bool raw)
   // know that the session will be private. This is overridable meaning that if a plugin later decides
   // it shouldn't be private it can still be returned to a shared pool.
   //
+
+  // proxy.config.http.auth_server_session_privateが1の場合には、Authorization, Proxy-Authorization, WWW-Authenticateが現れた場合には、privateとして扱う
+  //   cf. https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/files/records.config.en.html?highlight=proxy%20config%20http%20auth_server_session_private#proxy-config-http-auth-server-session-private
   if (t_state.txn_conf->auth_server_session_private == 1 &&
-      t_state.hdr_info.server_request.presence(MIME_PRESENCE_AUTHORIZATION | MIME_PRESENCE_PROXY_AUTHORIZATION |
-                                               MIME_PRESENCE_WWW_AUTHENTICATE)) {
+      t_state.hdr_info.server_request.presence(MIME_PRESENCE_AUTHORIZATION | MIME_PRESENCE_PROXY_AUTHORIZATION | MIME_PRESENCE_WWW_AUTHENTICATE)) {
     SMDebug("http_ss_auth", "Setting server session to private for authorization header");
     will_be_private_ss = true;
   }
@@ -5176,6 +5268,7 @@ HttpSM::do_http_server_open(bool raw)
       hsm_release_assert(0);
     }
   }
+
   // Avoid a problem where server session sharing is disabled and we have keep-alive, we are trying to open a new server
   // session when we already have an attached server session.
   else if ((TS_SERVER_SESSION_SHARING_MATCH_NONE == t_state.txn_conf->server_session_sharing_match || is_private()) &&
@@ -5229,6 +5322,7 @@ HttpSM::do_http_server_open(bool raw)
       ink_release_assert(ua_txn == nullptr);
     }
   }
+
   // Check to see if we have reached the max number of connections.
   // Atomically read the current number of connections and check to see
   // if we have gone above the max allowed.
@@ -5649,6 +5743,7 @@ HttpSM::release_server_session(bool serve_from_cache)
        (t_state.hdr_info.server_request.method_get_wksidx() == HTTP_WKSIDX_HEAD &&
         t_state.www_auth_content != HttpTransact::CACHE_AUTH_NONE)) &&
       plugin_tunnel_type == HTTP_NO_PLUGIN_TUNNEL && (!server_entry || !server_entry->eos)) {
+
     if (t_state.www_auth_content == HttpTransact::CACHE_AUTH_NONE || serve_from_cache == false) {
       // Must explicitly set the keep_alive_no_activity time before doing the release
       server_txn->set_inactivity_timeout(HRTIME_SECONDS(t_state.txn_conf->keep_alive_no_activity_timeout_out));
@@ -5659,7 +5754,9 @@ HttpSM::release_server_session(bool serve_from_cache)
       t_state.www_auth_content = HttpTransact::CACHE_AUTH_SERVE;
       ua_txn->attach_server_session(static_cast<PoolableSession *>(server_txn->get_proxy_ssn()), false);
     }
+
   } else {
+
     server_txn->do_io_close();
     if (TS_SERVER_SESSION_SHARING_MATCH_NONE == t_state.txn_conf->server_session_sharing_match) {
       HTTP_INCREMENT_DYN_STAT(http_origin_shutdown_release_no_sharing);
@@ -5934,14 +6031,11 @@ HttpSM::setup_transform_to_server_transfer()
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler_post);
 
   HttpTunnelConsumer *c = tunnel.get_consumer(post_transform_info.vc);
-
-  HttpTunnelProducer *p = tunnel.add_producer(post_transform_info.vc, nbytes, buf_start, &HttpSM::tunnel_handler_transform_read,
-                                              HT_TRANSFORM, "post transform");
+  HttpTunnelProducer *p = tunnel.add_producer(post_transform_info.vc, nbytes, buf_start, &HttpSM::tunnel_handler_transform_read, HT_TRANSFORM, "post transform");
   tunnel.chain(c, p);
   post_transform_info.entry->in_tunnel = true;
 
-  tunnel.add_consumer(server_entry->vc, post_transform_info.vc, &HttpSM::tunnel_handler_post_server, HT_HTTP_SERVER,
-                      "http server post");
+  tunnel.add_consumer(server_entry->vc, post_transform_info.vc, &HttpSM::tunnel_handler_post_server, HT_HTTP_SERVER, "http server post");
   server_entry->in_tunnel = true;
 
   tunnel.tunnel_run(p);
@@ -5950,15 +6044,20 @@ HttpSM::setup_transform_to_server_transfer()
 void
 HttpSM::do_drain_request_body(HTTPHdr &response)
 {
+
   int64_t content_length = t_state.hdr_info.client_request.get_content_length();
   int64_t avail          = ua_txn->get_remote_reader()->read_avail();
 
+  // クライアントからのリクエストが「Transfer-Encoding: chunked」の場合
   if (t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING) {
     SMDebug("http", "Chunked body, setting the response to non-keepalive");
     goto close_connection;
   }
 
+  // 「Content-Length」ヘッダが0よりも大きい場合
   if (content_length > 0) {
+
+    // Content-Length以上の利用バイト数(avail)であれば、すべての値がまだcomsumeされていないのでconsume処理を行う
     if (avail >= content_length) {
       SMDebug("http", "entire body is in the buffer, consuming");
       int64_t act_on            = (avail < content_length) ? avail : content_length;
@@ -6050,8 +6149,7 @@ HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
     if (post_redirect) {
       chunked = false;
       HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler_for_partial_post);
-      tunnel.add_consumer(server_entry->vc, HTTP_TUNNEL_STATIC_PRODUCER, &HttpSM::tunnel_handler_post_server, HT_HTTP_SERVER,
-                          "redirect http server post");
+      tunnel.add_consumer(server_entry->vc, HTTP_TUNNEL_STATIC_PRODUCER, &HttpSM::tunnel_handler_post_server, HT_HTTP_SERVER, "redirect http server post");
     } else {
       HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler_post);
       tunnel.add_consumer(server_entry->vc, ua_entry->vc, &HttpSM::tunnel_handler_post_server, HT_HTTP_SERVER, "http server post");
@@ -6136,6 +6234,8 @@ HttpSM::perform_cache_write_action()
   SMDebug("http", "%s", HttpDebugNames::get_cache_action_name(t_state.cache_info.action));
 
   switch (t_state.cache_info.action) {
+
+  // キャッシュ設定を行なっていない場合
   case HttpTransact::CACHE_DO_NO_ACTION:
 
   {
@@ -6178,10 +6278,13 @@ HttpSM::perform_cache_write_action()
     // Fix need to set up delete for after cache write has
     //   completed
     if (transform_info.entry == nullptr || t_state.api_info.cache_untransformed == true) {
+
       cache_sm.close_read();
       t_state.cache_info.write_status = HttpTransact::CACHE_WRITE_IN_PROGRESS;
-      setup_cache_write_transfer(&cache_sm, server_entry->vc, &t_state.cache_info.object_store, client_response_hdr_bytes,
-                                 "cache write");
+
+      // これからキャッシュする場合には、この遷移に入るはず
+      setup_cache_write_transfer(&cache_sm, server_entry->vc, &t_state.cache_info.object_store, client_response_hdr_bytes, "cache write");
+
     } else {
       // We are not caching the untransformed.  We might want to
       //  use the cache writevc to cache the transformed copy
@@ -6439,6 +6542,7 @@ HttpSM::setup_server_read_response_header()
 HttpTunnelProducer *
 HttpSM::setup_cache_read_transfer()
 {
+
   int64_t alloc_index, hdr_size;
   int64_t doc_size;
 
@@ -6470,9 +6574,9 @@ HttpSM::setup_cache_read_transfer()
     doc_size += hdr_size;
   }
 
-  HttpTunnelProducer *p = tunnel.add_producer(cache_sm.cache_read_vc, doc_size, buf_start, &HttpSM::tunnel_handler_cache_read,
-                                              HT_CACHE_READ, "cache read");
+  HttpTunnelProducer *p = tunnel.add_producer(cache_sm.cache_read_vc, doc_size, buf_start, &HttpSM::tunnel_handler_cache_read, HT_CACHE_READ, "cache read");
   tunnel.add_consumer(ua_entry->vc, cache_sm.cache_read_vc, &HttpSM::tunnel_handler_ua, HT_HTTP_CLIENT, "user agent");
+
   // if size of a cached item is not known, we'll do chunking for keep-alive HTTP/1.1 clients
   // this only applies to read-while-write cases where origin server sends a dynamically generated chunked content
   // w/o providing a Content-Length header
@@ -6480,6 +6584,7 @@ HttpSM::setup_cache_read_transfer()
     tunnel.set_producer_chunking_action(p, client_response_hdr_bytes, TCA_CHUNK_CONTENT);
     tunnel.set_producer_chunking_size(p, t_state.txn_conf->http_chunking_size);
   }
+
   ua_entry->in_tunnel    = true;
   cache_sm.cache_read_vc = nullptr;
   return p;
@@ -6505,21 +6610,22 @@ HttpSM::setup_cache_transfer_to_transform()
 
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::state_response_wait_for_transform_read);
 
-  HttpTunnelProducer *p = tunnel.add_producer(cache_sm.cache_read_vc, doc_size, buf_start, &HttpSM::tunnel_handler_cache_read,
-                                              HT_CACHE_READ, "cache read");
+  // producerとconsumerの追加を行う
+  HttpTunnelProducer *p = tunnel.add_producer(cache_sm.cache_read_vc, doc_size, buf_start, &HttpSM::tunnel_handler_cache_read, HT_CACHE_READ, "cache read");
+  tunnel.add_consumer(transform_info.vc, cache_sm.cache_read_vc, &HttpSM::tunnel_handler_transform_write, HT_TRANSFORM, "transform write");
 
-  tunnel.add_consumer(transform_info.vc, cache_sm.cache_read_vc, &HttpSM::tunnel_handler_transform_write, HT_TRANSFORM,
-                      "transform write");
   transform_info.entry->in_tunnel = true;
   cache_sm.cache_read_vc          = nullptr;
 
   return p;
 }
 
+// キャッシュ書き込みされる際にはこの関数に入ります
 void
-HttpSM::setup_cache_write_transfer(HttpCacheSM *c_sm, VConnection *source_vc, HTTPInfo *store_info, int64_t skip_bytes,
-                                   const char *name)
+HttpSM::setup_cache_write_transfer(HttpCacheSM *c_sm, VConnection *source_vc, HTTPInfo *store_info, int64_t skip_bytes, const char *name)
 {
+
+  // assert
   ink_assert(c_sm->cache_write_vc != nullptr);
   ink_assert(t_state.request_sent_time > 0);
   ink_assert(t_state.response_received_time > 0);
@@ -6530,6 +6636,14 @@ HttpSM::setup_cache_write_transfer(HttpCacheSM *c_sm, VConnection *source_vc, HT
   c_sm->cache_write_vc->set_http_info(store_info);
   store_info->clear();
 
+  // producerで登録された内容はここでキャッシュに書き込むためにconsumerに追加されます
+  // キャッシュが存在せずに、キャッシュ書き込みする場合にはここで「cache write」のnameが追加される
+  //
+  // 一般的にキャッシュ書き込みの場合には下記のログになります。つまり、「adding producer 'http server'」としてオリジンサーバから取得した内容が、「adding consumer 'cache write'」としてキャッシュ書き込みに利用されることになります
+  //  [Jun 16 13:34:20.628] [ET_NET 0] DEBUG: <HttpTunnel.cc:626 (add_producer)> (http_tunnel) [0] adding producer 'http server'
+  //  [Jun 16 13:34:20.628] [ET_NET 0] DEBUG: <HttpTunnel.cc:681 (add_consumer)> (http_tunnel) [0] adding consumer 'user agent'
+  //  [Jun 16 13:34:20.628] [ET_NET 0] DEBUG: <HttpSM.cc:6136 (perform_cache_write_action)> (http) [0] CACHE_DO_WRITE
+  //  [Jun 16 13:34:20.628] [ET_NET 0] DEBUG: <HttpTunnel.cc:681 (add_consumer)> (http_tunnel) [0] adding consumer 'cache write'
   tunnel.add_consumer(c_sm->cache_write_vc, source_vc, &HttpSM::tunnel_handler_cache_write, HT_CACHE_WRITE, name, skip_bytes);
 
   c_sm->cache_write_vc = nullptr;
@@ -6538,6 +6652,7 @@ HttpSM::setup_cache_write_transfer(HttpCacheSM *c_sm, VConnection *source_vc, HT
 void
 HttpSM::setup_100_continue_transfer()
 {
+
   MIOBuffer *buf            = new_MIOBuffer(HTTP_HEADER_BUFFER_SIZE_INDEX);
   IOBufferReader *buf_start = buf->alloc_reader();
 
@@ -6553,10 +6668,8 @@ HttpSM::setup_100_continue_transfer()
   tunnel.reset();
 
   // Setup the tunnel to the client
-  HttpTunnelProducer *p = tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, client_response_hdr_bytes, buf_start,
-                                              (HttpProducerHandler) nullptr, HT_STATIC, "internal msg - 100 continue");
-  tunnel.add_consumer(ua_entry->vc, HTTP_TUNNEL_STATIC_PRODUCER, &HttpSM::tunnel_handler_100_continue_ua, HT_HTTP_CLIENT,
-                      "user agent");
+  HttpTunnelProducer *p = tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, client_response_hdr_bytes, buf_start, (HttpProducerHandler) nullptr, HT_STATIC, "internal msg - 100 continue");
+  tunnel.add_consumer(ua_entry->vc, HTTP_TUNNEL_STATIC_PRODUCER, &HttpSM::tunnel_handler_100_continue_ua, HT_HTTP_CLIENT, "user agent");
 
   // Make sure the half_close is not set.
   ua_txn->set_half_close_flag(false);
@@ -6607,6 +6720,7 @@ HttpSM::setup_error_transfer()
 void
 HttpSM::setup_internal_transfer(HttpSMHandler handler_arg)
 {
+
   bool is_msg_buf_present;
 
   if (t_state.internal_msg_buffer) {
@@ -6631,6 +6745,7 @@ HttpSM::setup_internal_transfer(HttpSMHandler handler_arg)
     } else {
       t_state.hdr_info.client_response.value_set(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE, "text/html", 9);
     }
+
   } else {
     is_msg_buf_present = false;
 
@@ -6645,8 +6760,7 @@ HttpSM::setup_internal_transfer(HttpSMHandler handler_arg)
 
   t_state.source = HttpTransact::SOURCE_INTERNAL;
 
-  int64_t buf_size =
-    index_to_buffer_size(HTTP_HEADER_BUFFER_SIZE_INDEX) + (is_msg_buf_present ? t_state.internal_msg_buffer_size : 0);
+  int64_t buf_size = index_to_buffer_size(HTTP_HEADER_BUFFER_SIZE_INDEX) + (is_msg_buf_present ? t_state.internal_msg_buffer_size : 0);
 
   MIOBuffer *buf            = new_MIOBuffer(buffer_size_to_index(buf_size, t_state.http_config_param->max_payload_iobuf_index));
   IOBufferReader *buf_start = buf->alloc_reader();
@@ -6684,14 +6798,14 @@ HttpSM::setup_internal_transfer(HttpSMHandler handler_arg)
   HTTP_SM_SET_DEFAULT_HANDLER(handler_arg);
 
   if (ua_entry && ua_entry->vc) {
+
     // Clear the decks before we setup the new producers
     // As things stand, we cannot have two static producers operating at
     // once
     tunnel.reset();
 
     // Setup the tunnel to the client
-    HttpTunnelProducer *p =
-      tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, nbytes, buf_start, (HttpProducerHandler) nullptr, HT_STATIC, "internal msg");
+    HttpTunnelProducer *p = tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, nbytes, buf_start, (HttpProducerHandler) nullptr, HT_STATIC, "internal msg");
     tunnel.add_consumer(ua_entry->vc, HTTP_TUNNEL_STATIC_PRODUCER, &HttpSM::tunnel_handler_ua, HT_HTTP_CLIENT, "user agent");
 
     ua_entry->in_tunnel = true;
@@ -6783,11 +6897,10 @@ HttpSM::setup_server_transfer_to_transform()
 
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::state_response_wait_for_transform_read);
 
-  HttpTunnelProducer *p =
-    tunnel.add_producer(server_entry->vc, nbytes, buf_start, &HttpSM::tunnel_handler_server, HT_HTTP_SERVER, "http server");
+  // HTTP Serverへの処理をproducerとして追加する
+  HttpTunnelProducer *p = tunnel.add_producer(server_entry->vc, nbytes, buf_start, &HttpSM::tunnel_handler_server, HT_HTTP_SERVER, "http server");
 
-  tunnel.add_consumer(transform_info.vc, server_entry->vc, &HttpSM::tunnel_handler_transform_write, HT_TRANSFORM,
-                      "transform write");
+  tunnel.add_consumer(transform_info.vc, server_entry->vc, &HttpSM::tunnel_handler_transform_write, HT_TRANSFORM, "transform write");
 
   server_entry->in_tunnel         = true;
   transform_info.entry->in_tunnel = true;
@@ -6803,6 +6916,7 @@ HttpSM::setup_server_transfer_to_transform()
 HttpTunnelProducer *
 HttpSM::setup_transfer_from_transform()
 {
+
   int64_t alloc_index = find_server_buffer_size();
 
   // TODO change this call to new_empty_MIOBuffer()
@@ -6821,8 +6935,7 @@ HttpSM::setup_transfer_from_transform()
 
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler);
 
-  HttpTunnelProducer *p = tunnel.add_producer(transform_info.vc, INT64_MAX, buf_start, &HttpSM::tunnel_handler_transform_read,
-                                              HT_TRANSFORM, "transform read");
+  HttpTunnelProducer *p = tunnel.add_producer(transform_info.vc, INT64_MAX, buf_start, &HttpSM::tunnel_handler_transform_read, HT_TRANSFORM, "transform read");
   tunnel.chain(c, p);
 
   tunnel.add_consumer(ua_entry->vc, transform_info.vc, &HttpSM::tunnel_handler_ua, HT_HTTP_CLIENT, "user agent");
@@ -6854,8 +6967,7 @@ HttpSM::setup_transfer_from_transform_to_cache_only()
 
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler);
 
-  HttpTunnelProducer *p = tunnel.add_producer(transform_info.vc, INT64_MAX, buf_start, &HttpSM::tunnel_handler_transform_read,
-                                              HT_TRANSFORM, "transform read");
+  HttpTunnelProducer *p = tunnel.add_producer(transform_info.vc, INT64_MAX, buf_start, &HttpSM::tunnel_handler_transform_read, HT_TRANSFORM, "transform read");
   tunnel.chain(c, p);
 
   transform_info.entry->in_tunnel = true;
@@ -6900,23 +7012,27 @@ HttpSM::setup_server_transfer_to_cache_only()
 HttpTunnelProducer *
 HttpSM::setup_server_transfer()
 {
+
   SMDebug("http", "Setup Server Transfer");
   int64_t alloc_index, hdr_size;
   int64_t nbytes;
 
   alloc_index = find_server_buffer_size();
+
 #ifndef USE_NEW_EMPTY_MIOBUFFER
   MIOBuffer *buf = new_MIOBuffer(alloc_index);
 #else
   MIOBuffer *buf = new_empty_MIOBuffer(alloc_index);
   buf->append_block(HTTP_HEADER_BUFFER_SIZE_INDEX);
 #endif
+
   buf->water_mark           = static_cast<int>(t_state.txn_conf->default_buffer_water_mark);
   IOBufferReader *buf_start = buf->alloc_reader();
 
   // we need to know if we are going to chunk the response or not
   // before we write the response header into buffer
   TunnelChunkingAction_t action;
+
   if (t_state.client_info.receive_chunked_response == false) {
     if (t_state.current.server->transfer_encoding == HttpTransact::CHUNKED_ENCODING) {
       action = TCA_DECHUNK_CONTENT;
@@ -6924,6 +7040,8 @@ HttpSM::setup_server_transfer()
       action = TCA_PASSTHRU_DECHUNKED_CONTENT;
     }
   } else {
+
+    // 「Transfer-Encoding: chunked」ではない場合
     if (t_state.current.server->transfer_encoding != HttpTransact::CHUNKED_ENCODING) {
       if (t_state.client_info.http_version == HTTP_0_9) {
         action = TCA_PASSTHRU_DECHUNKED_CONTENT; // send as-is
@@ -6934,9 +7052,13 @@ HttpSM::setup_server_transfer()
       action = TCA_PASSTHRU_CHUNKED_CONTENT;
     }
   }
+
+  // TCA_CHUNK_CONTENTかTCA_PASSTHRU_CHUNKED_CONTENTのいずれかである場合には
   if (action == TCA_CHUNK_CONTENT || action == TCA_PASSTHRU_CHUNKED_CONTENT) { // remove Content-Length
+    // クライアントのレスポンスからContent-Lengthヘッダを削除します
     t_state.hdr_info.client_response.field_delete(MIME_FIELD_CONTENT_LENGTH, MIME_LEN_CONTENT_LENGTH);
   }
+
   // Now dump the header into the buffer
   ink_assert(t_state.hdr_info.client_response.status_get() != HTTP_STATUS_NOT_MODIFIED);
   client_response_hdr_bytes = hdr_size = write_response_header_into_buffer(&t_state.hdr_info.client_response, buf);
@@ -6950,11 +7072,11 @@ HttpSM::setup_server_transfer()
     nbytes += s;
   }
 
+  // default_handlerをセットしておく
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler);
 
-  HttpTunnelProducer *p =
-    tunnel.add_producer(server_entry->vc, nbytes, buf_start, &HttpSM::tunnel_handler_server, HT_HTTP_SERVER, "http server");
-
+  // Tunnelにproducerとconsumerそれぞれの追加を行います。
+  HttpTunnelProducer *p = tunnel.add_producer(server_entry->vc, nbytes, buf_start, &HttpSM::tunnel_handler_server, HT_HTTP_SERVER, "http server");
   tunnel.add_consumer(ua_entry->vc, server_entry->vc, &HttpSM::tunnel_handler_ua, HT_HTTP_CLIENT, "user agent");
 
   ua_entry->in_tunnel     = true;
@@ -7082,8 +7204,7 @@ HttpSM::setup_blind_tunnel(bool send_response_hdr, IOBufferReader *initial)
 
   p_ua = tunnel.add_producer(ua_entry->vc, -1, r_from, &HttpSM::tunnel_handler_ssl_producer, HT_HTTP_CLIENT, "user agent - tunnel");
 
-  c_os = tunnel.add_consumer(server_entry->vc, ua_entry->vc, &HttpSM::tunnel_handler_ssl_consumer, HT_HTTP_SERVER,
-                             "http server - tunnel");
+  c_os = tunnel.add_consumer(server_entry->vc, ua_entry->vc, &HttpSM::tunnel_handler_ssl_consumer, HT_HTTP_SERVER, "http server - tunnel");
 
   // Make the tunnel aware that the entries are bi-directional
   tunnel.chain(c_os, p_os);
@@ -7104,6 +7225,7 @@ HttpSM::setup_blind_tunnel(bool send_response_hdr, IOBufferReader *initial)
 void
 HttpSM::setup_plugin_agents(HttpTunnelProducer *p, int num_header_bytes)
 {
+
   APIHook *agent           = txn_hook_get(TS_HTTP_RESPONSE_CLIENT_HOOK);
   has_active_plugin_agents = agent != nullptr;
   while (agent) {
@@ -7564,6 +7686,7 @@ HttpSM::call_transact_and_set_next_state(TransactEntryFunc_t f)
 void
 HttpSM::set_next_state()
 {
+
   ///////////////////////////////////////////////////////////////////////
   // Use the returned "next action" code to set the next state handler //
   ///////////////////////////////////////////////////////////////////////
@@ -7589,11 +7712,15 @@ HttpSM::set_next_state()
   }
 
   case HttpTransact::SM_ACTION_REMAP_REQUEST: {
+
     // remap処理はここで行われます。下記を辿るとTSRemapDoRemapが呼ばれます
     do_remap_request(true); /* run inline */
 
     SMDebug("url_rewrite", "completed inline remapping request");
+
+    // remap処理を終了する
     t_state.url_remap_success = remapProcessor.finish_remap(&t_state, m_remap);
+
     if (t_state.next_action == HttpTransact::SM_ACTION_SEND_ERROR_CACHE_NOOP && t_state.transact_return_point == nullptr) {
       // It appears that we can now set the next_action to error and transact_return_point to nullptr when
       // going through do_remap_request presumably due to a plugin setting an error.  In that case, it seems
@@ -7609,19 +7736,26 @@ HttpSM::set_next_state()
     sockaddr const *addr;
 
     if (t_state.api_server_addr_set) {
+
+      // TSHttpTxnServerAddrSetのAPI関数で事前にIPアドレスがセットされているケースの場合には、DNS Lookupはskipする
+
       /* If the API has set the server address before the OS DNS lookup
        * then we can skip the lookup
        */
       ip_text_buffer ipb;
       SMDebug("dns", "Skipping DNS lookup for API supplied target %s.",
               ats_ip_ntop(&t_state.server_info.dst_addr, ipb, sizeof(ipb)));
+
       // this seems wasteful as we will just copy it right back
       ats_ip_copy(t_state.host_db_info.ip(), &t_state.server_info.dst_addr);
       t_state.dns_info.lookup_success = true;
       call_transact_and_set_next_state(nullptr);
       break;
-    } else if (0 == ats_ip_pton(t_state.dns_info.lookup_name, t_state.host_db_info.ip()) &&
-               ats_is_ip_loopback(t_state.host_db_info.ip())) {
+
+    } else if (0 == ats_ip_pton(t_state.dns_info.lookup_name, t_state.host_db_info.ip()) && ats_is_ip_loopback(t_state.host_db_info.ip())) {
+
+      // 
+
       // If it's 127.0.0.1 or ::1 don't bother with hostdb
       SMDebug("dns", "Skipping DNS lookup for %s because it's loopback", t_state.dns_info.lookup_name);
       t_state.dns_info.lookup_success = true;
@@ -7702,12 +7836,16 @@ HttpSM::set_next_state()
   }
 
   case HttpTransact::SM_ACTION_CACHE_LOOKUP: {
+
+    // default_handlerにハンドラが登録される
     HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::state_cache_open_read);
     do_cache_lookup_and_read();
     break;
+
   }
 
   case HttpTransact::SM_ACTION_ORIGIN_SERVER_OPEN: {
+
     // Pre-emptively set a server connect failure that will be cleared once a WRITE_READY is received from origin or
     // bytes are received back
     t_state.set_connect_fail(EIO);
@@ -7756,13 +7894,25 @@ HttpSM::set_next_state()
   case HttpTransact::SM_ACTION_SERVER_READ: {
     t_state.source = HttpTransact::SOURCE_HTTP_ORIGIN_SERVER;
 
+    // transform_info.vcは、HttpSM::do_transform_openの中でTS_HTTP_RESPONSE_TRANSFORM_HOOKフックが設定されている場合にセットされている
     if (transform_info.vc) {
+
+      // プラグインにTS_HTTP_RESPONSE_TRANSFORM_HOOKフックの処理が存在する場合
+
+      // assert
       ink_assert(t_state.hdr_info.client_response.valid() == 0);
       ink_assert((t_state.hdr_info.transform_response.valid() ? true : false) == true);
+
+      // トンネル処理については、TS_HTTP_RESPONSE_TRANSFORM_HOOKのための処理と思われる
       HttpTunnelProducer *p = setup_server_transfer_to_transform();
       perform_cache_write_action();
       tunnel.tunnel_run(p);
+
     } else {
+
+      // プラグインにTS_HTTP_RESPONSE_TRANSFORM_HOOKフックの処理が存在しない場合
+
+      // assert
       ink_assert((t_state.hdr_info.client_response.valid() ? true : false) == true);
       t_state.api_next_action = HttpTransact::SM_ACTION_API_SEND_RESPONSE_HDR;
 
@@ -7777,25 +7927,40 @@ HttpSM::set_next_state()
     break;
   }
 
+  // キャッシュが存在し、キャッシュからコンテンツを提供する際の読み込みはこちらから行います。
+  // この場合には、オリジンの処理がないのでHttpTransact::SM_ACTION_SERVER_READは通らないと思われます。
   case HttpTransact::SM_ACTION_SERVE_FROM_CACHE: {
+
     ink_assert(t_state.cache_info.action == HttpTransact::CACHE_DO_SERVE ||
                t_state.cache_info.action == HttpTransact::CACHE_DO_SERVE_AND_DELETE ||
                t_state.cache_info.action == HttpTransact::CACHE_DO_SERVE_AND_UPDATE);
+
     release_server_session(true);
     t_state.source = HttpTransact::SOURCE_CACHE;
 
+    // transform_info.vcは、HttpSM::do_transform_openの中でTS_HTTP_RESPONSE_TRANSFORM_HOOKフックが設定されている場合にセットされている
     if (transform_info.vc) {
+
+      // プラグインにTS_HTTP_RESPONSE_TRANSFORM_HOOKフックの処理が存在する場合
+
       ink_assert(t_state.hdr_info.client_response.valid() == 0);
       ink_assert((t_state.hdr_info.transform_response.valid() ? true : false) == true);
+
       do_drain_request_body(t_state.hdr_info.transform_response);
       t_state.hdr_info.cache_response.create(HTTP_TYPE_RESPONSE);
       t_state.hdr_info.cache_response.copy(&t_state.hdr_info.transform_response);
 
+      // トンネル処理については、TS_HTTP_RESPONSE_TRANSFORM_HOOKのための処理と思われる
       HttpTunnelProducer *p = setup_cache_transfer_to_transform();
       perform_cache_write_action();
       tunnel.tunnel_run(p);
+
     } else {
+
+      // プラグインにTS_HTTP_RESPONSE_TRANSFORM_HOOKフックの処理が存在しない場合
+
       ink_assert((t_state.hdr_info.client_response.valid() ? true : false) == true);
+
       do_drain_request_body(t_state.hdr_info.client_response);
       t_state.hdr_info.cache_response.create(HTTP_TYPE_RESPONSE);
       t_state.hdr_info.cache_response.copy(&t_state.hdr_info.client_response);
@@ -7810,6 +7975,7 @@ HttpSM::set_next_state()
         handle_api_return();
       }
     }
+
     break;
   }
 
@@ -7847,6 +8013,7 @@ HttpSM::set_next_state()
   }
 
   case HttpTransact::SM_ACTION_INTERNAL_CACHE_DELETE: {
+
     // Nuke all the alternates since this is mostly likely
     //   the result of a delete method
     cache_sm.end_both();
@@ -7878,6 +8045,7 @@ HttpSM::set_next_state()
     pending_action = statPagesManager.handle_http(this, &t_state.hdr_info.client_request);
     break;
 
+  // Origin server Round Robin Mark Down
   case HttpTransact::SM_ACTION_ORIGIN_SERVER_RR_MARK_DOWN: {
     HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::state_mark_os_down);
 
@@ -8526,11 +8694,13 @@ HttpSM::milestone_update_api_time()
   // non-active API time. In that case we need to make a note of it and flip the value back
   // to positive.
   if (api_timer) {
+
     ink_hrtime delta;
     bool active = api_timer >= 0;
     if (!active) {
       api_timer = -api_timer;
     }
+
     delta     = Thread::get_hrtime_updated() - api_timer;
     api_timer = 0;
     // Zero or negative time is a problem because we want to signal *something* happened
@@ -8543,6 +8713,7 @@ HttpSM::milestone_update_api_time()
     if (0 == milestones[TS_MILESTONE_PLUGIN_TOTAL]) {
       milestones[TS_MILESTONE_PLUGIN_TOTAL] = milestones[TS_MILESTONE_SM_START];
     }
+
     milestones[TS_MILESTONE_PLUGIN_TOTAL] += delta;
     if (active) {
       if (0 == milestones[TS_MILESTONE_PLUGIN_ACTIVE]) {

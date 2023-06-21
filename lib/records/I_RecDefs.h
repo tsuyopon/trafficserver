@@ -72,7 +72,7 @@ enum RecDataT {
 
 enum RecPersistT {
   RECP_NULL,
-  RECP_PERSISTENT,
+  RECP_PERSISTENT,     // 統計情報を維持する
   RECP_NON_PERSISTENT,
 };
 

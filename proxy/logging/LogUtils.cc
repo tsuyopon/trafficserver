@@ -515,7 +515,7 @@ LogUtils::get_unrolled_filename(ts::TextView rolled_filename)
     // 下記ではもともとの「squid.log_some.hostname.com.20191029.18h15m02s-20191029.18h30m02s.old」という名称から、「.hostname.com.20191029.18h15m02s-20191029.18h30m02s.old」のsuffixを除去しています(+1しているのは先頭のドットの文字列を含めるため)
     return unrolled_name.remove_suffix(suffix.size() + 1);
   }
-‘
+
   // If there isn't a '.' or an '_' after the first '.', then this
   // doesn't look like a rolled file.
   return rolled_filename;

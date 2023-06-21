@@ -77,7 +77,10 @@ FileManager::registerCallback(FileCallbackFunc func)
   ink_assert(newcb != nullptr);
   newcb->func = func;
   ink_mutex_acquire(&cbListLock);
+
+  // cblistへの登録を行います。このcblistはFileManager::fileChangedからコールバックが呼ばれています。
   cblist.push(newcb);
+
   ink_mutex_release(&cbListLock);
 }
 
@@ -91,9 +94,10 @@ FileManager::registerCallback(FileCallbackFunc func)
 //
 //  Pointers to the new objects are stored in the bindings hashtable
 //
+
+// 第５引数のparentConfigは指定されない場合にはnullptrとなります。
 void
-FileManager::addFile(const char *fileName, const char *configName, bool root_access_needed, bool isRequired,
-                     ConfigManager *parentConfig)
+FileManager::addFile(const char *fileName, const char *configName, bool root_access_needed, bool isRequired, ConfigManager *parentConfig)
 {
   ink_mutex_acquire(&accessLock);
   addFileHelper(fileName, configName, root_access_needed, isRequired, parentConfig);
@@ -101,19 +105,21 @@ FileManager::addFile(const char *fileName, const char *configName, bool root_acc
 }
 
 // caller must hold the lock
-// この関数は直前で定義されるFileManager::addFileから呼び出される
+// この関数は直前で定義されるFileManager::addFileから呼び出されるが、この場合はparentConfigにはnullptrが指定される
+// いこの関数はFileManager::configFileChildからも呼び出されるが、この場合にはparentConfigが設定される。
 void
-FileManager::addFileHelper(const char *fileName, const char *configName, bool root_access_needed, bool isRequired,
-                           ConfigManager *parentConfig)
+FileManager::addFileHelper(const char *fileName, const char *configName, bool root_access_needed, bool isRequired, ConfigManager *parentConfig)
 {
   ink_assert(fileName != nullptr);
 
   // ファイルの情報をConfigManagerクラスのインスタンスへと変換する
+  // parentConfigは
   ConfigManager *rb = new ConfigManager(fileName, configName, root_access_needed, isRequired, parentConfig);
   rb->configFiles   = this;
 
   // bindings変数はmgmtapi.sockでRECONFIGUREを受け取ったら対象ファイルのチェックで利用される模様。rbにはConfigManagerクラスに変換されたインスタンスが入る
   bindings.emplace(rb->getFileName(), rb);
+
 }
 
 // bool FileManager::getConfigManagerObj(char* fileName, ConfigManager** rbPtr)
@@ -126,13 +132,18 @@ FileManager::addFileHelper(const char *fileName, const char *configName, bool ro
 bool
 FileManager::getConfigObj(const char *fileName, ConfigManager **rbPtr)
 {
+
   ink_mutex_acquire(&accessLock);
+
+  // 指定されたfileNameに関連したConfigManager構造体を探索する
   auto it    = bindings.find(fileName);
   bool found = it != bindings.end();
   ink_mutex_release(&accessLock);
 
+  // 指定されたfileNameに関連したConfigManager構造体をrbPtrにセットする
   *rbPtr = found ? it->second : nullptr;
   return found;
+
 }
 
 // bool FileManager::fileChanged(const char* fileName)
@@ -151,15 +162,25 @@ FileManager::fileChanged(const char *fileName, const char *configName)
   ink_mutex_acquire(&cbListLock);
 
   // コールバックのリストでイテレーション操作していると思われる
+  // (注意) TrafficServer内部にはcblistとcb_listが存在しているので読み間違えないように注意
+  //
+  // 自分が調査した限りcblistに登録されているのはfileUpdated()という関数のみ
+  // cb_listへの追加はFileManager::registerCallbackから行われます。
   for (cb = cblist.head; cb != nullptr; cb = cb->link.next) {
+
     // Dup the string for each callback to be
     //  defensive in case it's modified when it's not supposed to be
     confignameCopy = ats_strdup(configName);
     filenameCopy   = ats_strdup(fileName);
+
+    // (重要) cblistに登録されているコールバックはここで実行される
+    // 調査した限り下記のコールバックで呼び出されるのは fileUpdated 関数のみと思われます。
     (*cb->func)(filenameCopy, confignameCopy);
+
     ats_free(filenameCopy);
     ats_free(confignameCopy);
   }
+
   ink_mutex_release(&cbListLock);
 }
 
@@ -204,9 +225,11 @@ FileManager::rereadConfig()
   std::vector<ConfigManager *> childFileNeedDelete;
   n = changedFiles.size();
   for (size_t i = 0; i < n; i++) {
+
     if (changedFiles[i]->isChildManaged()) {
       continue;
     }
+
     // for each parent file, if it is changed, then delete all its children
     for (auto &&it : bindings) {
       rb = it.second;
@@ -216,7 +239,9 @@ FileManager::rereadConfig()
         }
       }
     }
+
   }
+
   n = childFileNeedDelete.size();
   for (size_t i = 0; i < n; i++) {
     bindings.erase(childFileNeedDelete[i]->getFileName());
@@ -270,11 +295,19 @@ FileManager::isConfigStale()
 void
 FileManager::configFileChild(const char *parent, const char *child)
 {
+
   ConfigManager *parentConfig = nullptr;
   ink_mutex_acquire(&accessLock);
   if (auto it = bindings.find(parent); it != bindings.end()) {
+
+    // parentConfigはここでのみ設定されます。
+    // 設定されるケースは以下の2つです
+    //  (1) remap.configのincludeで指定されたファイルを読み込んだ場合にparentにはremap.configのConfigManagerが指定される
+    //  (2) サーバ証明書に対応する中間証明書を読み込んだ場合にparentにはssl_multicert.configのConfigManagerが指定される
+    //
     parentConfig = it->second;
     addFileHelper(child, "", parentConfig->rootAccessNeeded(), parentConfig->getIsRequired(), parentConfig);
+
   }
   ink_mutex_release(&accessLock);
 }

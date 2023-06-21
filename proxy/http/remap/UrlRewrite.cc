@@ -403,6 +403,7 @@ UrlRewrite::ReverseMap(HTTPHdr *response_header)
 void
 UrlRewrite::PerformACLFiltering(HttpTransact::State *s, url_mapping *map)
 {
+
   if (unlikely(!s || s->acl_filtering_performed || !s->client_connection_enabled)) {
     return;
   }

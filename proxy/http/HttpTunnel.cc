@@ -621,6 +621,7 @@ HttpTunnelProducer *
 HttpTunnel::add_producer(VConnection *vc, int64_t nbytes_arg, IOBufferReader *reader_start, HttpProducerHandler sm_handler,
                          HttpTunnelType_t vc_type, const char *name_arg)
 {
+
   HttpTunnelProducer *p;
 
   Debug("http_tunnel", "[%" PRId64 "] adding producer '%s'", sm->sm_id, name_arg);
@@ -675,9 +676,9 @@ HttpTunnel::add_producer(VConnection *vc, int64_t nbytes_arg, IOBufferReader *re
 //    false if the consumer was not added because the source failed
 //
 HttpTunnelConsumer *
-HttpTunnel::add_consumer(VConnection *vc, VConnection *producer, HttpConsumerHandler sm_handler, HttpTunnelType_t vc_type,
-                         const char *name_arg, int64_t skip_bytes)
+HttpTunnel::add_consumer(VConnection *vc, VConnection *producer, HttpConsumerHandler sm_handler, HttpTunnelType_t vc_type, const char *name_arg, int64_t skip_bytes)
 {
+
   Debug("http_tunnel", "[%" PRId64 "] adding consumer '%s'", sm->sm_id, name_arg);
 
   // Find the producer entry
@@ -712,10 +713,12 @@ HttpTunnel::chain(HttpTunnelConsumer *c, HttpTunnelProducer *p)
 {
   p->self_consumer = c;
   c->self_producer = p;
+
   // If the flow is already throttled update the chained producer.
   if (c->producer->is_throttled()) {
     p->set_throttle_src(c->producer->flow_control_source);
   }
+
 }
 
 // void HttpTunnel::tunnel_run()
@@ -725,10 +728,13 @@ HttpTunnel::chain(HttpTunnelConsumer *c, HttpTunnelProducer *p)
 void
 HttpTunnel::tunnel_run(HttpTunnelProducer *p_arg)
 {
+
   Debug("http_tunnel", "tunnel_run started, p_arg is %s", p_arg ? "provided" : "NULL");
   if (p_arg) {
+    // add_producerで登録したハンドラや、add_consumerで登録したハンドラは下記で呼ばれます。
     producer_run(p_arg);
   } else {
+
     HttpTunnelProducer *p;
 
     ink_assert(active == false);
@@ -736,6 +742,7 @@ HttpTunnel::tunnel_run(HttpTunnelProducer *p_arg)
     for (int i = 0; i < MAX_PRODUCERS; ++i) {
       p = producers + i;
       if (p->vc != nullptr && (p->alive || (p->vc_type == HT_STATIC && p->buffer_start != nullptr))) {
+        // add_producerで登録したハンドラや、add_consumerで登録したハンドラは下記で呼ばれます。
         producer_run(p);
       }
     }
@@ -754,6 +761,7 @@ HttpTunnel::tunnel_run(HttpTunnelProducer *p_arg)
 void
 HttpTunnel::producer_run(HttpTunnelProducer *p)
 {
+
   // Determine whether the producer has a cache-write consumer,
   // since all chunked content read by the producer gets dechunked
   // prior to being written into the cache.
@@ -761,6 +769,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
   bool transform_consumer = false;
 
   for (c = p->consumer_list.head; c; c = c->link.next) {
+    // Cache書き込みが必要なコンシューマかどうかをチェックする
     if (c->vc_type == HT_CACHE_WRITE) {
       cache_write_consumer = c;
       break;
@@ -803,6 +812,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
 
   IOBufferReader *chunked_buffer_start = nullptr, *dechunked_buffer_start = nullptr;
   if (p->do_chunking || p->do_dechunking || p->do_chunked_passthru) {
+
     p->chunked_handler.init(p->buffer_start, p);
 
     // Copy the header into the chunked/dechunked buffers.
@@ -811,6 +821,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       chunked_buffer_start = p->chunked_handler.chunked_buffer->alloc_reader();
       p->chunked_handler.chunked_buffer->write(p->buffer_start, p->chunked_handler.skip_bytes);
     }
+
     if (p->do_dechunking) {
       // bz57413
       Debug("http_tunnel", "[producer_run] do_dechunking p->chunked_handler.chunked_reader->read_avail() = %" PRId64 "",
@@ -845,6 +856,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
   // At least set up the consumer readers first so the data
   // doesn't disappear out from under the tunnel
   for (c = p->consumer_list.head; c; c = c->link.next) {
+
     // Create a reader for each consumer.  The reader allows
     // us to implement skip bytes
     if (c->vc_type == HT_CACHE_WRITE) {
@@ -882,6 +894,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
   // including the maximum configured post data size
   if ((p->vc_type == HT_BUFFER_READ && sm->is_postbuf_valid()) ||
       (p->alive && sm->t_state.method == HTTP_WKSIDX_POST && sm->enable_redirection && p->vc_type == HT_HTTP_CLIENT)) {
+
     Debug("http_redirect", "[HttpTunnel::producer_run] client post: %" PRId64 " max size: %" PRId64 "",
           p->buffer_start->read_avail(), HttpConfig::m_master.post_copy_size);
 
@@ -907,6 +920,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
     // If there is data to process in the buffer, do it now
     producer_handler(VC_EVENT_READ_READY, p);
   } else if (p->do_dechunking || p->do_chunked_passthru) {
+
     // remove the dechunked reader marker so that it doesn't act like a buffer guard
     if (p->do_dechunking && dechunked_buffer_start) {
       p->chunked_handler.dechunked_buffer->dealloc_reader(dechunked_buffer_start);
@@ -914,12 +928,11 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
 
     // bz57413
     // If there is no transformation plugin, then we didn't add the header, hence no need to consume it
-    Debug("http_tunnel", "[producer_run] do_dechunking p->chunked_handler.chunked_reader->read_avail() = %" PRId64 "",
-          p->chunked_handler.chunked_reader->read_avail());
+    Debug("http_tunnel", "[producer_run] do_dechunking p->chunked_handler.chunked_reader->read_avail() = %" PRId64 "", p->chunked_handler.chunked_reader->read_avail());
+
     if (!transform_consumer && (p->chunked_handler.chunked_reader->read_avail() >= p->chunked_handler.skip_bytes)) {
       p->chunked_handler.chunked_reader->consume(p->chunked_handler.skip_bytes);
-      Debug("http_tunnel", "[producer_run] do_dechunking p->chunked_handler.skip_bytes = %" PRId64 "",
-            p->chunked_handler.skip_bytes);
+      Debug("http_tunnel", "[producer_run] do_dechunking p->chunked_handler.skip_bytes = %" PRId64 "", p->chunked_handler.skip_bytes);
     }
     // if(p->chunked_handler.chunked_reader->read_avail() > 0)
     // p->chunked_handler.chunked_reader->consume(
@@ -933,8 +946,11 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       // (incorrectly) to INT64_MAX.  It needs to be set to 0 to prevent triggering another read.
       producer_n = 0;
     }
+
   }
+
   for (c = p->consumer_list.head; c; c = c->link.next) {
+
     int64_t c_write = consumer_n;
 
     // Don't bother to set up the consumer if it is dead
@@ -947,6 +963,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       // The amount to write in some cases is dependent on the type of the consumer, so this
       // value must be computed for each consumer
       c_write = final_consumer_bytes_to_write(p, c);
+
     } else {
       // INKqa05109 - if we don't know the length leave it at
       //  INT64_MAX or else the cache may bounce the write
@@ -984,6 +1001,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
           p->handler_state = HTTP_SM_POST_SUCCESS;
         }
       }
+
       // Start the writes now that we know we will consume all the initial data
       c->write_vio = c->vc->do_io_write(this, c_write, c->buffer_reader);
       ink_assert(c_write > 0);
@@ -992,6 +1010,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       }
     }
   }
+
   if (p->alive) {
     ink_assert(producer_n >= 0);
 
@@ -1018,6 +1037,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
   if (p->read_buffer && p->buffer_start) {
     p->read_buffer->dealloc_reader(p->buffer_start);
   }
+
   p->buffer_start = nullptr;
 }
 
@@ -1127,6 +1147,7 @@ HttpTunnel::producer_handler_chunked(int event, HttpTunnelProducer *p)
 bool
 HttpTunnel::producer_handler(int event, HttpTunnelProducer *p)
 {
+
   HttpTunnelConsumer *c;
   HttpProducerHandler jump_point;
   bool sm_callback = false;
@@ -1163,9 +1184,11 @@ HttpTunnel::producer_handler(int event, HttpTunnelProducer *p)
               " reader_avail=%" PRId64 " limit=%" PRId64 "",
               sm->postbuf_buffer_avail(), sm->postbuf_reader_avail(), HttpConfig::m_master.post_copy_size);
       sm->disable_redirect();
+
       if (p->vc_type == HT_BUFFER_READ) {
         event = VC_EVENT_ERROR;
       }
+
     } else {
       sm->postbuf_copy_partial_data();
       if (event == VC_EVENT_READ_COMPLETE || event == HTTP_TUNNEL_EVENT_PRECOMPLETE || event == VC_EVENT_EOS) {
@@ -1218,6 +1241,8 @@ HttpTunnel::producer_handler(int event, HttpTunnelProducer *p)
     //  initiate async I/O operation.  The SM needs to
     //  set how much I/O to do before async I/O is
     //  initiated
+
+    // p->vc_handlerはHttpTunnel::add_producerへのハンドラの引数で指定された値が指定されている
     jump_point = p->vc_handler;
     (sm->*jump_point)(event, p);
     sm_callback = true;
@@ -1242,12 +1267,16 @@ HttpTunnel::producer_handler(int event, HttpTunnelProducer *p)
       } else {
         p->bytes_read = 0;
       }
+
       // Clear any outstanding reads so they don't
       // collide with future tunnel IO's
       p->vc->do_io_read(nullptr, 0, nullptr);
       // Interesting tunnel event, call SM
+
+      // p->vc_handlerはHttpTunnel::add_producerへのハンドラの引数で指定された値が指定されている
       jump_point = p->vc_handler;
       (sm->*jump_point)(event, p);
+
       sm_callback = true;
       // Failure case anyway
       p->update_state_if_not_set(HTTP_SM_POST_UA_FAIL);
@@ -1280,12 +1309,15 @@ HttpTunnel::consumer_reenable(HttpTunnelConsumer *c)
     HttpTunnelProducer *srcp = p->flow_control_source;
 
     if (backlog >= flow_state.high_water) {
+
       if (is_debug_tag_set("http_tunnel")) {
         Debug("http_tunnel", "[%" PRId64 "] Throttle   %p %" PRId64 " / %" PRId64, sm->sm_id, p, backlog, p->backlog());
       }
       p->throttle(); // p becomes srcp for future calls to this method
+
     } else {
       if (srcp && srcp->alive && c->is_sink()) {
+
         // Check if backlog is below low water - note we need to check
         // against the source producer, not necessarily the producer
         // for this consumer. We don't have to recompute the backlog
@@ -1294,16 +1326,21 @@ HttpTunnel::consumer_reenable(HttpTunnelConsumer *c)
         if (srcp != p) {
           backlog = srcp->backlog(flow_state.low_water);
         }
+
         if (backlog < flow_state.low_water) {
+
           if (is_debug_tag_set("http_tunnel")) {
             Debug("http_tunnel", "[%" PRId64 "] Unthrottle %p %" PRId64 " / %" PRId64, sm->sm_id, p, backlog, p->backlog());
           }
+
           srcp->unthrottle();
           if (srcp->read_vio) {
             srcp->read_vio->reenable();
           }
+
           // Kick source producer to get flow ... well, flowing.
           this->producer_handler(VC_EVENT_READ_READY, srcp);
+
         } else {
           // We can stall for small thresholds on network sinks because this event happens
           // before the actual socket write. So we trap for the buffer becoming empty to
@@ -1337,6 +1374,7 @@ HttpTunnel::consumer_reenable(HttpTunnelConsumer *c)
 bool
 HttpTunnel::consumer_handler(int event, HttpTunnelConsumer *c)
 {
+
   bool sm_callback = false;
   HttpConsumerHandler jump_point;
   HttpTunnelProducer *p = c->producer;
@@ -1366,6 +1404,7 @@ HttpTunnel::consumer_handler(int event, HttpTunnelConsumer *c)
     c->bytes_written = c->write_vio ? c->write_vio->ndone : 0;
 
     // Interesting tunnel event, call SM
+    // c->vc_handlerはHttpTunnel::add_consumerへのハンドラの引数で指定された値が指定されている
     jump_point = c->vc_handler;
     (sm->*jump_point)(event, c);
     // Make sure the handler_state is set
@@ -1474,6 +1513,7 @@ HttpTunnel::chain_abort_all(HttpTunnelProducer *p)
 //
 // Determine the number of bytes a consumer should read from a producer
 //
+// consumerがproducerから何byte読み込むべきかを決定する
 int64_t
 HttpTunnel::final_consumer_bytes_to_write(HttpTunnelProducer *p, HttpTunnelConsumer *c)
 {
@@ -1522,6 +1562,7 @@ HttpTunnel::final_consumer_bytes_to_write(HttpTunnelProducer *p, HttpTunnelConsu
 void
 HttpTunnel::finish_all_internal(HttpTunnelProducer *p, bool chain)
 {
+
   ink_assert(p->alive == false);
   HttpTunnelConsumer *c         = p->consumer_list.head;
   int64_t total_bytes           = 0;

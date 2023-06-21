@@ -256,6 +256,7 @@ ats_ip_pton(const std::string_view &src, sockaddr *ip)
 
   ats_ip_invalidate(ip);
   if (0 == ats_ip_parse(src, &addr, &port)) {
+
     // Copy if not terminated.
     if (0 != addr[addr.size() - 1]) {
       char *tmp = static_cast<char *>(alloca(addr.size() + 1));
@@ -263,6 +264,8 @@ ats_ip_pton(const std::string_view &src, sockaddr *ip)
       tmp[addr.size()] = 0;
       addr             = std::string_view(tmp, addr.size());
     }
+
+    // IPアドレス中にコロン(:)が含まれていたらIPv6と判断し、コロンが含まれていなければIPv4と判断します。
     if (addr.find(':') != std::string_view::npos) { // colon -> IPv6
       in6_addr addr6;
       if (inet_pton(AF_INET6, addr.data(), &addr6)) {
@@ -276,6 +279,7 @@ ats_ip_pton(const std::string_view &src, sockaddr *ip)
         ats_ip4_set(ip, addr4.s_addr);
       }
     }
+
     // If we had a successful conversion, set the port.
     if (ats_is_ip(ip)) {
       ats_ip_port_cast(ip) = port.empty() ? 0 : htons(atoi(port.data()));
@@ -285,9 +289,11 @@ ats_ip_pton(const std::string_view &src, sockaddr *ip)
   return zret;
 }
 
+// IPアドレスRangeとしてパース可能なフォーマットになっているかを確認する
 int
 ats_ip_range_parse(std::string_view src, IpAddr &lower, IpAddr &upper)
 {
+
   int zret = TS_ERROR;
   IpAddr addr, addr2;
   static const IpAddr ZERO_ADDR4{INADDR_ANY};
@@ -362,6 +368,7 @@ ats_ip_range_parse(std::string_view src, IpAddr &lower, IpAddr &upper)
       lower = addr;
       upper = addr2;
     }
+
   } else if (TS_SUCCESS == addr.load(src)) {
     zret  = TS_SUCCESS;
     lower = upper = addr;

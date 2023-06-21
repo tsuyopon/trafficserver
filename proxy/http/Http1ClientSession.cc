@@ -42,6 +42,7 @@
 
 #define HttpSsnDebug(fmt, ...) SsnDebug(this, "http_cs", fmt, __VA_ARGS__)
 
+// 下記のように do { } while(0)とすることで、ループはしませんが、最後にセミコロンを付与する構文上の問題を回避することができます。
 #define STATE_ENTER(state_name, event, vio)                                                             \
   do {                                                                                                  \
     /*ink_assert (magic == HTTP_SM_MAGIC_ALIVE);  REMEMBER (event, NULL, reentrancy_count); */          \
@@ -66,9 +67,12 @@ Http1ClientSession::Http1ClientSession() : super(), trans(this) {}
 void
 Http1ClientSession::destroy()
 {
+
+  // read_stateがHCS(Http1 Client Session)がCLOSEDでなかったら
   if (read_state != HCS_CLOSED) {
     return;
   }
+
   if (!in_destroy) {
     in_destroy = true;
 

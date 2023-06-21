@@ -383,13 +383,18 @@ query_responder(BIO *b, const char *host, const char *path, const char *user_age
   start = Thread::get_hrtime();
   end   = ink_hrtime_add(start, ink_hrtime_from_sec(req_timeout));
 
+
+  // OCSPレスポンダへのリクエストのための構造体を生成する
   ctx = OCSP_sendreq_new(b, path, nullptr, -1);
+
+  // OCSPレスポンダへのHTTPエンドポイントに対してHostヘッダとUser-Agentヘッダを付与する
   OCSP_REQ_CTX_add1_header(ctx, "Host", host);
   if (user_agent != nullptr) {
     OCSP_REQ_CTX_add1_header(ctx, "User-Agent", user_agent);
   }
   OCSP_REQ_CTX_set1_req(ctx, req);
 
+  // OCSPレスポンダへのリクエストを行います
   do {
     rv = OCSP_sendreq_nbio(&resp, ctx);
     ink_hrtime_sleep(HRTIME_MSECONDS(1));
@@ -397,15 +402,18 @@ query_responder(BIO *b, const char *host, const char *path, const char *user_age
 
   OCSP_REQ_CTX_free(ctx);
 
+  // OCSPレスポンダへのリクエストに成功したらレスポンス(resp)を応答します
   if (rv == 1) {
     return resp;
   }
 
+  // X.509証明書に記載されるOCSPサーバにアクセスしたけど、正常に接続できない場合には以下のエラーが表示される
   Error("failed to connect to OCSP server; host=%s path=%s", host, path);
 
   return nullptr;
 }
 
+// OCSPレスポンダへのHTTPリクエストを行います。戻り値はOCSPレスポンダの戻り値を応答します。
 static OCSP_RESPONSE *
 process_responder(OCSP_REQUEST *req, const char *host, const char *path, const char *port, const char *user_agent, int req_timeout)
 {
@@ -415,6 +423,8 @@ process_responder(OCSP_REQUEST *req, const char *host, const char *path, const c
   if (!cbio) {
     goto end;
   }
+
+  // OCSPレスポンダへのport番号が指定されていたらセットします
   if (port) {
     BIO_set_conn_port(cbio, port);
   }
@@ -424,6 +434,7 @@ process_responder(OCSP_REQUEST *req, const char *host, const char *path, const c
     Debug("ssl_ocsp", "process_responder: failed to connect to OCSP server; host=%s port=%s path=%s", host, port, path);
     goto end;
   }
+
   resp = query_responder(cbio, host, path, user_agent, req, req_timeout);
 
 end:
@@ -445,6 +456,7 @@ stapling_refresh_response(certinfo *cinf, OCSP_RESPONSE **prsp)
 
   *prsp = nullptr;
 
+  // X.509から取得したOCSPの情報(cinf->uri)をhost, port, path, ssl_flagなどにパースします。
   if (!OCSP_parse_url(cinf->uri, &host, &port, &path, &ssl_flag)) {
     Debug("ssl_ocsp", "stapling_refresh_response: OCSP_parse_url failed; uri=%s", cinf->uri);
     goto err;
@@ -456,14 +468,17 @@ stapling_refresh_response(certinfo *cinf, OCSP_RESPONSE **prsp)
   if (!req) {
     goto err;
   }
+
   id = OCSP_CERTID_dup(cinf->cid);
   if (!id) {
     goto err;
   }
+
   if (!OCSP_request_add0_id(req, id)) {
     goto err;
   }
 
+  // OCSPレスポンダヘとアクセスする
   *prsp = process_responder(req, host, path, port, cinf->user_agent, SSLConfigParams::ssl_ocsp_request_timeout);
   if (*prsp == nullptr) {
     goto done;
@@ -502,6 +517,7 @@ done:
   return rv;
 }
 
+// 下記のocsp_updateはOCSPContinuationがnewした際に呼ばれます
 void
 ocsp_update()
 {
@@ -526,15 +542,21 @@ ocsp_update()
             cinf = iter.second;
             ink_mutex_acquire(&cinf->stapling_mutex);
             current_time = time(nullptr);
+
             if (cinf->resp_derlen == 0 || cinf->is_expire || cinf->expire_time < current_time) {
               ink_mutex_release(&cinf->stapling_mutex);
+
+              // OCSPレスポンダへのリクエストを行います。
               if (stapling_refresh_response(cinf, &resp)) {
+                // OCSPレスポンダから正常にレスポンスを取得した場合
                 Debug("ssl_ocsp", "Successfully refreshed OCSP for %s certificate. url=%s", cinf->certname, cinf->uri);
                 SSL_INCREMENT_DYN_STAT(ssl_ocsp_refreshed_cert_stat);
               } else {
+                // OCSPレスポンダから正常にレスポンスを取得できなかった場合
                 Error("Failed to refresh OCSP for %s certificate. url=%s", cinf->certname, cinf->uri);
                 SSL_INCREMENT_DYN_STAT(ssl_ocsp_refresh_cert_failure_stat);
               }
+
             } else {
               ink_mutex_release(&cinf->stapling_mutex);
             }

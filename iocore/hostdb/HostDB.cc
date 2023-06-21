@@ -1644,6 +1644,7 @@ HostDBContinuation::do_dns()
 int
 HostDBContinuation::backgroundEvent(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 {
+
   // No nothing if hosts file checking is not enabled.
   if (hostdb_hostfile_check_interval == 0) {
     return EVENT_CONT;
@@ -2191,6 +2192,7 @@ ParseHostLine(Ptr<RefCountedHostsFileMap> &map, char *l)
 }
 
 // hostdbをパースします。hostdbは/etc/hostsのようなaddr, hostnameの形式となっています void
+void
 ParseHostFile(const char *path, unsigned int hostdb_hostfile_check_interval_parse)
 {
   Ptr<RefCountedHostsFileMap> parsed_hosts_file_ptr;

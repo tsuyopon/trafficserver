@@ -769,6 +769,7 @@ TSProxyBacktraceGet(unsigned options, TSString *trace)
 tsapi TSMgmtError
 TSReconfigure()
 {
+  // src/traffic_ctl/config.cc から呼ばれた場合にはmgmt/api/CoreAPIRemote.ccのReconfigure()が呼ばれる
   return Reconfigure();
 }
 

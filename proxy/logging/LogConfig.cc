@@ -358,6 +358,7 @@ LogConfig::init(LogConfig *prev_config)
     }
   }
 
+  // Log::error_logはここでerrlogが設定されることになります。
   ink_atomic_swap(&Log::error_log, errlog);
 
   initialized = true;
