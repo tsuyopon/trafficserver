@@ -564,11 +564,13 @@ rcv_rst_stream_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
 static Http2Error
 rcv_settings_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
 {
+
   Http2SettingsParameter param;
   char buf[HTTP2_SETTINGS_PARAMETER_LEN];
   unsigned nbytes               = 0;
   const Http2StreamId stream_id = frame.header().streamid;
 
+  // クライアントからSETTINGSフレームを受信したら表示する
   Http2StreamDebug(cstate.session, stream_id, "Received SETTINGS frame");
 
   if (cstate.get_zombie_event()) {
@@ -577,6 +579,7 @@ rcv_settings_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
 
   // Update SETTIGNS frame count per minute
   cstate.increment_received_settings_frame_count();
+
   // Close this connection if its SETTINGS frame count exceeds a limit
   if (cstate.get_received_settings_frame_count() > Http2::max_settings_frames_per_minute) {
     HTTP2_INCREMENT_THREAD_DYN_STAT(HTTP2_STAT_MAX_SETTINGS_FRAMES_PER_MINUTE_EXCEEDED, this_ethread());
@@ -641,6 +644,11 @@ rcv_settings_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
       }
     }
 
+    // 受信したパラメータ設定を表示する。具体例も示す
+    // 
+    // [Jun 23 09:31:10.956] [ET_NET 3] DEBUG: <Http2ConnectionState.cc:644 (rcv_settings_frame)> (http2_con) [0] [0]    MAX_CONCURRENT_STREAMS : 100
+    // [Jun 23 09:31:10.956] [ET_NET 3] DEBUG: <Http2ConnectionState.cc:644 (rcv_settings_frame)> (http2_con) [0] [0]    INITIAL_WINDOW_SIZE : 33554432
+    // [Jun 23 09:31:10.956] [ET_NET 3] DEBUG: <Http2ConnectionState.cc:644 (rcv_settings_frame)> (http2_con) [0] [0]    ENABLE_PUSH : 0
     Http2StreamDebug(cstate.session, stream_id, "   %s : %u", Http2DebugNames::get_settings_param_name(param.id), param.value);
 
     // [RFC 7540] 6.9.2. When the value of SETTINGS_INITIAL_WINDOW_SIZE
@@ -657,6 +665,7 @@ rcv_settings_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
 
   // Update settings count per minute
   cstate.increment_received_settings_count(n_settings);
+
   // Close this connection if its settings count received exceeds a limit
   if (cstate.get_received_settings_count() > Http2::max_settings_per_minute) {
     HTTP2_INCREMENT_THREAD_DYN_STAT(HTTP2_STAT_MAX_SETTINGS_PER_MINUTE_EXCEEDED, this_ethread());
@@ -672,6 +681,7 @@ rcv_settings_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
   cstate.session->xmit(ack_frame);
 
   return Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_NONE);
+
 }
 
 static Http2Error
@@ -798,8 +808,15 @@ rcv_window_update_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
     }
   }
 
+  // ストリームID=0(ConnectionレベルのWindow設定)か、ストリームレベル(ID != 0)のWindow設定か
   if (stream_id == 0) {
+
+    // 全体レベルのwindow_updateフレームによる設定更新処理です
+
     // Connection level window update
+
+    //   cf. https://datatracker.ietf.org/doc/html/rfc9113#name-window_update
+    // [Jun 23 09:31:10.956] [ET_NET 3] DEBUG: <Http2ConnectionState.cc:803 (rcv_window_update_frame)> (http2_con) [0] [0] Received WINDOW_UPDATE frame - updated to: 33554432 delta: 33488897
     Http2StreamDebug(cstate.session, stream_id, "Received WINDOW_UPDATE frame - updated to: %zd delta: %u",
                      (cstate.client_rwnd() + size), size);
 
@@ -821,7 +838,11 @@ rcv_window_update_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
     }
 
     cstate.restart_streams();
+
   } else {
+
+    // ストリームレベルのwindow_updateフレームによる設定更新処理です
+
     // Stream level window update
     Http2Stream *stream = cstate.find_stream(stream_id);
 

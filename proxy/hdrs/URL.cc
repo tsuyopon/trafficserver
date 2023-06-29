@@ -1715,10 +1715,24 @@ url_print(URLImpl *url, char *buf_start, int buf_length, int *buf_index_inout, i
 #undef TRY
 }
 
+// 指定されたURLの詳細情報を表示する関数です
 void
 url_describe(HdrHeapObjImpl *raw, bool /* recurse ATS_UNUSED */)
 {
+
   URLImpl *obj = (URLImpl *)raw;
+
+  // 下記のようなデバッグログが出力されます
+  //    DEBUG: <URL.cc:1723 (url_describe)> (http) [URLTYPE: 1, SWKSIDX: 99,
+  //    DEBUG: <URL.cc:1724 (url_describe)> (http) 	SCHEME: "http", SCHEME_LEN: 4,
+  //    DEBUG: <URL.cc:1726 (url_describe)> (http) 	USER: "", USER_LEN: 0,
+  //    DEBUG: <URL.cc:1727 (url_describe)> (http) 	PASSWORD: "", PASSWORD_LEN: 0,
+  //    DEBUG: <URL.cc:1729 (url_describe)> (http) 	HOST: "localhost", HOST_LEN: 9,
+  //    DEBUG: <URL.cc:1730 (url_describe)> (http) 	PORT: "88", PORT_LEN: 2, PORT_NUM: 88
+  //    DEBUG: <URL.cc:1732 (url_describe)> (http) 	PATH: "", PATH_LEN: 0,
+  //    DEBUG: <URL.cc:1733 (url_describe)> (http) 	PARAMS: "", PARAMS_LEN: 0,
+  //    DEBUG: <URL.cc:1735 (url_describe)> (http) 	QUERY: "", QUERY_LEN: 0,
+  //    DEBUG: <URL.cc:1737 (url_describe)> (http) 	FRAGMENT: "", FRAGMENT_LEN: 0]
 
   Debug("http", "[URLTYPE: %d, SWKSIDX: %d,", obj->m_url_type, obj->m_scheme_wks_idx);
   Debug("http", "\tSCHEME: \"%.*s\", SCHEME_LEN: %d,", obj->m_len_scheme, (obj->m_ptr_scheme ? obj->m_ptr_scheme : "NULL"),

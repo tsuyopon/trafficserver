@@ -1299,7 +1299,10 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
         errStr = "missing 'strategy' name argument, unable to add mapping rule";
         goto MAP_ERROR;
       } else {
+
         strategy++;
+
+        // findParent関数から「mp->strategy」などで呼ばれているケースはここでセットされているものと思われる。(深くは辿っていない)
         new_mapping->strategy = bti->rewrite->strategyFactory->strategyInstance(strategy);
 
         if (!new_mapping->strategy) {
@@ -1307,6 +1310,7 @@ remap_parse_config_bti(const char *path, BUILD_TABLE_INFO *bti)
           errStr = errStrBuf;
           goto MAP_ERROR;
         }
+
         Debug("url_rewrite_regex", "mapped the 'strategy' named %s", strategy);
       }
 

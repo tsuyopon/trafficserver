@@ -94,6 +94,7 @@ ParentConfigParams::~ParentConfigParams()
   delete DefaultParent;
 }
 
+// TSHttpTxnParentProxySet関数により指定された場合にだけ、trueとなる
 bool
 ParentConfigParams::apiParentExists(HttpRequestData *rdata)
 {
@@ -111,6 +112,8 @@ ParentConfigParams::findParent(HttpRequestData *rdata, ParentResult *result, uns
   // Check to see if the parent was set through the
   //   api
   if (apiParentExists(rdata)) {
+
+    // TSHttpTxnParentProxySet関数により設定された場合にのみこの遷移に入る
 
     // ここでPARENTが指定されたことがセットされる
     result->result       = PARENT_SPECIFIED;
@@ -130,19 +133,28 @@ ParentConfigParams::findParent(HttpRequestData *rdata, ParentResult *result, uns
   tablePtr->Match(rdata, result);
   rec = result->rec;
 
+  // parent.configが指定されていない場合には下記のパスに入る
   if (rec == nullptr) {
+
     // No parents were found
     //
     // If there is a default parent, use it
     if (defaultPtr != nullptr) {
       rec = result->rec = defaultPtr;
     } else {
+
+      // 親となるキャッシュサーバが指定されていない場合に通る
+
       result->result = PARENT_DIRECT;
+
+      // DEBUG: <ParentSelection.cc:137 (findParent)> (parent_select) Returning PARENT_DIRECT (no parents were found)
       Debug("parent_select", "Returning PARENT_DIRECT (no parents were found)");
+
       return;
     }
   }
 
+  // TBD: このextApiRecordが何を表すのか不明
   if (rec != extApiRecord) {
     selectParent(true, result, rdata, fail_threshold, retry_time);
   }
@@ -161,7 +173,7 @@ ParentConfigParams::findParent(HttpRequestData *rdata, ParentResult *result, uns
     Debug("parent_select", "PARENT_DIRECT");
     Debug("parent_select", "Result for %s was %s", host, ParentResultStr[result->result]);
     break;
-  case PARENT_SPECIFIED:
+  case PARENT_SPECIFIED:  // ParentConfigParams::findParentをみると、InkAPI経由で明示的に指定された場合
     Debug("parent_select", "PARENT_SPECIFIED");
     Debug("parent_select", "Result for %s was parent %s:%d", host, result->hostname, result->port);
     break;
@@ -172,9 +184,11 @@ ParentConfigParams::findParent(HttpRequestData *rdata, ParentResult *result, uns
   }
 }
 
+// assertをみるとPARENT_SPECIFIEDの場合にこの関数に遷移があるが、ParentConfigParams::findParentをみるとInkAPI経由で明示的に指定された場合にPARENT_SPECIFIEDがセットされる
 void
 ParentConfigParams::nextParent(HttpRequestData *rdata, ParentResult *result, unsigned int fail_threshold, unsigned int retry_time)
 {
+
   P_table *tablePtr = parent_table;
 
   Debug("parent_select", "ParentConfigParams::nextParent(): parent_table: %p, result->rec: %p", parent_table, result->rec);
@@ -214,7 +228,7 @@ ParentConfigParams::nextParent(HttpRequestData *rdata, ParentResult *result, uns
     Debug("parent_select", "PARENT_DIRECT");
     Debug("parent_select", "Retry result for %s was %s", host, ParentResultStr[result->result]);
     break;
-  case PARENT_SPECIFIED:
+  case PARENT_SPECIFIED:    // ParentConfigParams::findParentをみると、InkAPI経由で明示的に指定された場合
     Debug("parent_select", "Retry result for %s was parent %s:%d", host, result->hostname, result->port);
     break;
   default:
@@ -408,6 +422,9 @@ ParentRecord::PreProcessParents(const char *val, const int line_num, char *buf, 
       ink_assert(length < sizeof(fqdn));
       memset(fqdn, 0, sizeof(fqdn));
       strncpy(fqdn, token, length);
+
+      // proxy.config.http.parent_proxy.self_detectの値と自分自身からのselfリクエストかどうかにより処理を分岐する (デフォルト: 2)
+      //   cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-parent-proxy-self-detect
       if (self_detect && machine->is_self(std::string_view(fqdn))) {
         if (self_detect == 1) {
           Debug("parent_select", "token: %s, matches this machine.  Removing self from parent list at line %d", fqdn, line_num);
@@ -415,18 +432,24 @@ ParentRecord::PreProcessParents(const char *val, const int line_num, char *buf, 
           continue;
         } else {
           Debug("parent_select", "token: %s, matches this machine.  Marking down self from parent list at line %d", fqdn, line_num);
+
+          // Mark the host down. This is the default.
           hs.setHostStatus(fqdn, TSHostStatus::TS_HOST_STATUS_DOWN, 0, Reason::SELF_DETECT);
         }
       }
     } else {
+
+      // proxy.config.http.parent_proxy.self_detectの値と自分自身からのselfリクエストかどうかにより処理を分岐する (デフォルト: 2)
+      //   cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-parent-proxy-self-detect
       if (self_detect && machine->is_self(std::string_view(token))) {
         if (self_detect == 1) {
           Debug("parent_select", "token: %s, matches this machine.  Removing self from parent list at line %d", token, line_num);
           token = strtok_r(nullptr, PARENT_DELIMITERS, &savePtr);
           continue;
         } else {
-          Debug("parent_select", "token: %s, matches this machine.  Marking down self from parent list at line %d", token,
-                line_num);
+          Debug("parent_select", "token: %s, matches this machine.  Marking down self from parent list at line %d", token, line_num);
+
+          // Mark the host down. This is the default.
           hs.setHostStatus(token, TSHostStatus::TS_HOST_STATUS_DOWN, 0, Reason::SELF_DETECT);
         }
       }
@@ -1932,7 +1955,7 @@ show_result(ParentResult *p)
   case PARENT_DIRECT:
     printf("result is PARENT_DIRECT\n");
     break;
-  case PARENT_SPECIFIED:
+  case PARENT_SPECIFIED:    // ParentConfigParams::findParentをみると、InkAPI経由で明示的に指定された場合
     printf("result is PARENT_SPECIFIED\n");
     printf("hostname is %s\n", p->hostname);
     printf("port is %d\n", p->port);

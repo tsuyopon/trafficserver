@@ -1264,12 +1264,19 @@ static void
 check_fd_limit()
 {
   int fds_throttle = -1;
+
+  // https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-net-connections-throttle
   REC_ReadConfigInteger(fds_throttle, "proxy.config.net.connections_throttle");
+
+  // ファイルディスクリプタの限界値の方が設定された値よりも小さい場合
   if (fds_throttle > fds_limit - THROTTLE_FD_HEADROOM) {
+
+    // 設定された値がバッファを差し引いて1よりも小さい場合には、設定されたファイルディスクリプた数が低いとして処理を終了する
     int new_fds_throttle = fds_limit - THROTTLE_FD_HEADROOM;
     if (new_fds_throttle < 1) {
       ink_abort("too few file descriptors (%d) available", fds_limit);
     }
+
     char msg[256];
     snprintf(msg, sizeof(msg),
              "connection throttle too high, "

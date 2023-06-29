@@ -268,6 +268,11 @@ Connection::_cleanup()
 void
 Connection::apply_options(NetVCOptions const &opt)
 {
+
+  // 全てのデバッグタグを出力させてみたところ、表示された下記の2行だけはACCEPTスレッドで実行されていた。なお、下のログについてはこの関数で出力されているものです
+  // [Jun 25 06:23:42.065] [ACCEPT 0:8080] DEBUG: <Connection.cc:87 (accept)> (iocore_net_server) Connection accepted [Server]. 127.0.0.1:55234 -> 0.0.0.0:8080
+  // [Jun 25 06:23:42.066] [ACCEPT 0:8080] DEBUG: <UnixConnection.cc:276 (apply_options)> (socket) ::open: setsockopt() TCP_NODELAY on socket
+
   // Set options which can be changed after a connection is established
   // ignore other changes
   if (SOCK_STREAM == sock_type) {

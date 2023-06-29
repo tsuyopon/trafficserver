@@ -505,6 +505,7 @@ UrlRewrite::PerformACLFiltering(HttpTransact::State *s, url_mapping *map)
 mapping_type
 UrlRewrite::Remap_redirect(HTTPHdr *request_header, URL *redirect_url)
 {
+
   URL *request_url;
   mapping_type mappingType;
   const char *host = nullptr;
@@ -538,8 +539,11 @@ UrlRewrite::Remap_redirect(HTTPHdr *request_header, URL *redirect_url)
   if (host_len == 0 && reverse_proxy != 0) { // Server request.  Use the host header to figure out where
                                              // it goes.  Host header parsing is same as in ::Remap
     int host_hdr_len;
+
+    // Hostヘッダの値を取得する
     const char *host_hdr = request_header->value_get(MIME_FIELD_HOST, MIME_LEN_HOST, &host_hdr_len);
 
+    // Hostヘッダの値が空ならば
     if (!host_hdr) {
       host_hdr     = "";
       host_hdr_len = 0;

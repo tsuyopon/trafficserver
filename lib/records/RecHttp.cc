@@ -169,6 +169,8 @@ const char *const HttpProxyPort::PORTS_CONFIG_NAME = "proxy.config.http.server_p
 // Each has a corresponding _LEN value that is the length of the option text.
 // Options without _PREFIX are just flags with no additional data.
 
+// 「proxy.config.http.server_ports」に指定する値
+//  cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-server-ports
 const char *const HttpProxyPort::OPT_FD_PREFIX          = "fd";
 const char *const HttpProxyPort::OPT_OUTBOUND_IP_PREFIX = "ip-out";
 const char *const HttpProxyPort::OPT_INBOUND_IP_PREFIX  = "ip-in";
@@ -181,13 +183,13 @@ const char *const HttpProxyPort::OPT_TRANSPARENT_INBOUND     = "tr-in";
 const char *const HttpProxyPort::OPT_TRANSPARENT_OUTBOUND    = "tr-out";
 const char *const HttpProxyPort::OPT_TRANSPARENT_FULL        = "tr-full";
 const char *const HttpProxyPort::OPT_TRANSPARENT_PASSTHROUGH = "tr-pass";
-const char *const HttpProxyPort::OPT_SSL                     = "ssl";
-const char *const HttpProxyPort::OPT_PROXY_PROTO             = "pp";
+const char *const HttpProxyPort::OPT_SSL                     = "ssl";         // SSL terminated.
+const char *const HttpProxyPort::OPT_PROXY_PROTO             = "pp";          // Enable Proxy Protocol.
 const char *const HttpProxyPort::OPT_PLUGIN                  = "plugin";
-const char *const HttpProxyPort::OPT_BLIND_TUNNEL            = "blind";
+const char *const HttpProxyPort::OPT_BLIND_TUNNEL            = "blind";       // Blind (CONNECT) port.
 const char *const HttpProxyPort::OPT_COMPRESSED              = "compressed";
-const char *const HttpProxyPort::OPT_MPTCP                   = "mptcp";
-const char *const HttpProxyPort::OPT_QUIC                    = "quic";
+const char *const HttpProxyPort::OPT_MPTCP                   = "mptcp";       // Multipath TCP.
+const char *const HttpProxyPort::OPT_QUIC                    = "quic";        // QUIC terminated.
 
 // File local constants.
 namespace

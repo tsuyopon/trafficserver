@@ -313,19 +313,25 @@ HttpSM::get_server_active_timeout()
   return retval;
 }
 
+// オリジンサーバへの接続の際のタイムアウトを取得する
 ink_hrtime
 HttpSM::get_server_connect_timeout()
 {
+
   ink_hrtime retval = 0;
   if (t_state.api_txn_connect_timeout_value != -1) {
     retval = HRTIME_MSECONDS(t_state.api_txn_connect_timeout_value);
   } else {
     int connect_timeout;
     if (t_state.method == HTTP_WKSIDX_POST || t_state.method == HTTP_WKSIDX_PUT) {
+      // POSTやPUTメソッドの場合には通常のproxy.config.http.connect_attempts_timeoutとは異なる、proxy.config.http.post_connect_attempts_timeout設定を用いる(デフォルト: 1800)
+      // cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-post-connect-attempts-timeout
       connect_timeout = t_state.txn_conf->post_connect_attempts_timeout;
     } else if (t_state.current.server == &t_state.parent_info) {
       connect_timeout = t_state.txn_conf->parent_connect_timeout;
     } else {
+      // 一般的なメソッドの場合にはproxy.config.http.connect_attempts_timeout (デフォルト: 30秒)を用いる
+      // cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-connect-attempts-timeout
       connect_timeout = t_state.txn_conf->connect_attempts_timeout;
     }
     retval = HRTIME_SECONDS(connect_timeout);
@@ -1237,6 +1243,7 @@ HttpSM::state_read_push_response_header(int event, void *data)
 int
 HttpSM::state_raw_http_server_open(int event, void *data)
 {
+
   STATE_ENTER(&HttpSM::state_raw_http_server_open, event);
   ink_assert(server_entry == nullptr);
   milestones[TS_MILESTONE_SERVER_CONNECT_END] = Thread::get_hrtime();
@@ -1701,10 +1708,16 @@ HttpSM::handle_api_return()
 {
 
   switch (t_state.api_next_action) {
+
+  // 処理開始の最初はこのcaseを通ります
   case HttpTransact::SM_ACTION_API_SM_START: {
+
     NetVConnection *netvc     = ua_txn->get_netvc();
     SSLNetVConnection *ssl_vc = dynamic_cast<SSLNetVConnection *>(netvc);
     bool forward_dest         = ssl_vc != nullptr && ssl_vc->decrypt_tunnel();
+
+    // proxy.config.http.server_portsにblindが設定されているか、forward_destがtrueの場合
+    // https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-server-ports
     if (t_state.client_info.port_attribute == HttpProxyPort::TRANSPORT_BLIND_TUNNEL || forward_dest) {
       setup_blind_tunnel_port();
     } else {
@@ -1850,11 +1863,13 @@ HttpSM::handle_api_return()
 PoolableSession *
 HttpSM::create_server_session(NetVConnection *netvc)
 {
+
   HttpTransact::State &s  = this->t_state;
   PoolableSession *retval = httpServerSessionAllocator.alloc();
 
   retval->sharing_pool         = static_cast<TSServerSessionSharingPoolType>(s.http_config_param->server_session_sharing_pool);
   retval->sharing_match        = static_cast<TSServerSessionSharingMatchMask>(s.txn_conf->server_session_sharing_match);
+
   MIOBuffer *netvc_read_buffer = new_MIOBuffer(HTTP_SERVER_RESP_HDR_BUFFER_INDEX);
   IOBufferReader *netvc_reader = netvc_read_buffer->alloc_reader();
   retval->new_connection(netvc, netvc_read_buffer, netvc_reader);
@@ -2279,25 +2294,36 @@ HttpSM::state_send_server_request_header(int event, void *data)
   return 0;
 }
 
+// DNSのSRVレコードを扱う
 void
 HttpSM::process_srv_info(HostDBInfo *r)
 {
+
   SMDebug("dns_srv", "beginning process_srv_info");
   t_state.hostdb_entry = Ptr<HostDBInfo>(r);
 
   /* we didn't get any SRV records, continue w normal lookup */
   if (!r || !r->is_srv || !r->round_robin) {
+
+    // HostDBInfoにSRVが指定されなかった場合
+
     t_state.dns_info.srv_hostname[0]    = '\0';
     t_state.dns_info.srv_lookup_success = false;
     t_state.my_txn_conf().srv_enabled   = false;
     SMDebug("dns_srv", "No SRV records were available, continuing to lookup %s", t_state.dns_info.lookup_name);
+
   } else {
+
+    // HostDBInfoにSRVが指定された場合
+
     HostDBRoundRobin *rr = r->rr();
     HostDBInfo *srv      = nullptr;
     if (rr) {
       srv = rr->select_best_srv(t_state.dns_info.srv_hostname, &mutex->thread_holding->generator, ink_local_time(),
                                 static_cast<int>(t_state.txn_conf->down_server_timeout));
     }
+
+    // SRVが見つかったか、見つからなかったかで処理を分岐する
     if (!srv) {
       t_state.dns_info.srv_lookup_success = false;
       t_state.dns_info.srv_hostname[0]    = '\0';
@@ -2312,6 +2338,7 @@ HttpSM::process_srv_info(HostDBInfo *r)
       SMDebug("dns_srv", "select SRV records %s", t_state.dns_info.srv_hostname);
     }
   }
+
   return;
 }
 
@@ -3410,6 +3437,7 @@ HttpSM::is_bg_fill_necessary(HttpTunnelConsumer *c)
 int
 HttpSM::tunnel_handler_ua(int event, HttpTunnelConsumer *c)
 {
+
   bool close_connection     = true;
   HttpTunnelProducer *p     = nullptr;
   HttpTunnelConsumer *selfc = nullptr;
@@ -4219,6 +4247,8 @@ HttpSM::state_remap_request(int event, void * /* data ATS_UNUSED */)
 
 // This check must be called before remap.  Otherwise, the client_request host
 // name may be changed.
+// 
+// SM_ACTION_REMAP_REQUESTでの処理で行われる
 void
 HttpSM::check_sni_host()
 {
@@ -4268,6 +4298,7 @@ HttpSM::check_sni_host()
             SMDebug("ssl_sni", "SNI/hostname sucessfully match sni=%s host=%.*s", sni_value, host_len, host_name);
           }
         } else {
+          // 出力例 DEBUG: <HttpSM.cc:4204 (check_sni_host)> (ssl_sni) [0] No SNI/hostname check configured for host=test.co.jp
           SMDebug("ssl_sni", "No SNI/hostname check configured for host=%.*s", host_len, host_name);
         }
       }
@@ -4414,30 +4445,44 @@ HttpSM::do_hostdb_reverse_lookup()
   return;
 }
 
+// ポリシーとして設定されている値(proxy.config.http.connect.dead.policy)に応じて、コネクションをfailとして扱うかどうかを決定する
 bool
 HttpSM::track_connect_fail() const
 {
   bool retval = false;
+
+  // 接続先に対しての処理が失敗した場合には下記のコードパスに入ります
   if (t_state.current.server->had_connect_fail()) {
+
     // What does our policy say?
+    // t_state.txn_conf->connect_dead_policy については proxy.config.http.connect.dead.policy の値(デフォルト: 2)を表しています。
+    //   cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-connect-dead-policy
+    //      設定値(2): TCP、TLSどちらかのハンドシェイクでエラーの場合
+    //      設定値(1): TCPハンドシェイクでエラーの場合
+    //      設定値(0): コネクションfailureとして扱わない
     if (t_state.txn_conf->connect_dead_policy == 2) { // Any connection error through TLS handshake
       retval = true;
     } else if (t_state.txn_conf->connect_dead_policy == 1) { // Any connection error through TCP
       retval = t_state.current.server->connect_result != -ENET_SSL_CONNECT_FAILED;
     }
+    // ここには実はelseとして 0の何もしないポリシーケースがあることに注意
+
   }
+
   return retval;
 }
 
 void
 HttpSM::do_hostdb_update_if_necessary()
 {
+
   int issue_update = 0;
 
   if (t_state.current.server == nullptr || plugin_tunnel_type != HTTP_NO_PLUGIN_TUNNEL) {
     // No server, so update is not necessary
     return;
   }
+
   // If we failed back over to the origin server, we don't have our
   //   hostdb information anymore which means we shouldn't update the hostdb
   if (!ats_ip_addr_eq(&t_state.current.server->dst_addr.sa, t_state.host_db_info.ip())) {
@@ -4460,15 +4505,29 @@ HttpSM::do_hostdb_update_if_necessary()
 
     t_state.updated_server_version = HTTP_INVALID;
   }
+
   // Check to see if we need to report or clear a connection failure
-  if (track_connect_fail()) {
+  if (track_connect_fail()) {  // 外部への接続先に失敗して、ポリシー(設定)としてもhostdbにdownしたとして扱う場合にはこの遷移に入ります。
+
+    // issue_updateにフラグをセットして、hostdb更新を指示する
     issue_update |= 1;
+
+    // 失敗処理に対してhostdbにdownしたことを扱う
     mark_host_failure(&t_state.host_db_info, t_state.client_request_time);
-  } else {
+
+  } else {  // 外部への接続に成功した場合
+
+    // 前回失敗していないければ
     if (t_state.host_db_info.app.http_data.last_failure != 0) {
+
+      // 失敗カウントを0に戻しておく
       t_state.host_db_info.app.http_data.last_failure = 0;
       t_state.host_db_info.app.http_data.fail_count   = 0;
+
+      // issue_updateにフラグをセットして、hostdb更新を指示する
       issue_update |= 1;
+
+      // hostdbにIPアドレスが更新されたことを明示する
       char addrbuf[INET6_ADDRPORTSTRLEN];
       SMDebug("http", "hostdb update marking IP: %s as up",
               ats_ip_nptop(&t_state.current.server->dst_addr.sa, addrbuf, sizeof(addrbuf)));
@@ -4479,16 +4538,18 @@ HttpSM::do_hostdb_update_if_necessary()
       hostDBProcessor.setby_srv(t_state.dns_info.lookup_name, 0, t_state.dns_info.srv_hostname, &t_state.dns_info.srv_app);
       SMDebug("http", "hostdb update marking SRV: %s as up", t_state.dns_info.srv_hostname);
     }
+
   }
 
+  // 直前のロジックでissue_updateにフラグをセットされている場合には、hostdbへの設定処理を行う
   if (issue_update) {
-    hostDBProcessor.setby(t_state.current.server->name, strlen(t_state.current.server->name), &t_state.current.server->dst_addr.sa,
-                          &t_state.host_db_info.app);
+    hostDBProcessor.setby(t_state.current.server->name, strlen(t_state.current.server->name), &t_state.current.server->dst_addr.sa, &t_state.host_db_info.app);
   }
 
   char addrbuf[INET6_ADDRPORTSTRLEN];
   SMDebug("http", "server info = %s", ats_ip_nptop(&t_state.current.server->dst_addr.sa, addrbuf, sizeof(addrbuf)));
   return;
+
 }
 
 /*
@@ -5089,7 +5150,7 @@ HttpSM::get_outbound_sni() const
 //  HttpSM::do_http_server_open()
 //
 //////////////////////////////////////////////////////////////////////////
-// オリジンサーバに接続する
+// オリジンサーバに接続する(ReverseProxyでもForwardProxyでも通ることがある)
 void
 HttpSM::do_http_server_open(bool raw)
 {
@@ -5229,6 +5290,7 @@ HttpSM::do_http_server_open(bool raw)
     will_be_private_ss = true;
   }
 
+  // メソッドがPOSTかPUTならば
   if (t_state.method == HTTP_WKSIDX_POST || t_state.method == HTTP_WKSIDX_PUT) {
     // don't share the session if keep-alive for post is not on
     if (t_state.txn_conf->keep_alive_post_out == 0) {
@@ -5416,6 +5478,8 @@ HttpSM::do_http_server_open(bool raw)
 
       // ALPN on TLS Partial Blind Tunnel - set negotiated ALPN id
       int pid = SessionProtocolNameRegistry::INVALID;
+
+      // sni.yamlに「partial_blind_route」が指定されている場合
       if (ssl_vc->tunnel_type() == SNIRoutingType::PARTIAL_BLIND) {
         pid = ssl_vc->get_negotiated_protocol_id();
         if (pid != SessionProtocolNameRegistry::INVALID) {
@@ -5599,6 +5663,7 @@ HttpSM::do_api_callout_internal()
 VConnection *
 HttpSM::do_post_transform_open()
 {
+
   ink_assert(post_transform_info.vc == nullptr);
 
   if (is_action_tag_set("http_post_nullt")) {
@@ -5641,16 +5706,30 @@ HttpSM::do_transform_open()
   return transform_info.vc;
 }
 
+// time_downはリクエスト元をみると「リクエスト時刻」が指定されていると思われる
 void
 HttpSM::mark_host_failure(HostDBInfo *info, time_t time_down)
 {
+
   char addrbuf[INET6_ADDRPORTSTRLEN];
 
+  // TBD: time_downにはリクエストエラー時にしか値が入らないのかは未確認
   if (time_down) {
+
     // Increment the fail_count
+    // 次のif文で使う失敗カウント数はここでインクリメントされる。
     ++info->app.http_data.fail_count;
+
+    // proxy.config.http.connect_attempts_rr_retriesの設定値(デフォルト: 3)として指定されている回数以上失敗した場合に下記のパスを通る
+    // つまり、この関数へのリクエストがありinfo->app.http_data.fail_countが一定回数以上インクリメントされたら下記のコードパスを通ることになる。
+    //   cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-connect-attempts-rr-retries
     if (info->app.http_data.fail_count >= t_state.txn_conf->connect_attempts_rr_retries) {
+
+      // TBD: このifの遷移には失敗で入ってきているのに、下記のapp.http_data.last_failure == 0というのは何を意味しているのか不明。
+      // => この手前の関数HttpSM::do_hostdb_update_if_necessaryで前回app.http_data.last_failureに0以外の値が入っていたら、前回失敗とのことでhostdbを更新せずに再取得させるようになっている模様
       if (info->app.http_data.last_failure == 0) {
+
+        // クライアントのURL情報からHost名などを取得して、その対象をhostdbからmark downしたとしてエラーメッセージに表示する
         char *url_str = t_state.hdr_info.client_request.url_string_get(&t_state.arena, nullptr);
         int host_len;
         const char *host_name_ptr = t_state.unmapped_url.host_get(&host_len);
@@ -5664,13 +5743,19 @@ HttpSM::mark_host_failure(HostDBInfo *info, time_t time_down)
           t_state.arena.str_free(url_str);
         }
       }
+
+      // 直前でもifの判定に使われた「info->app.http_data.last_failure」にリクエスト時刻(time_down)をセットしておく
       info->app.http_data.last_failure = time_down;
+
       SMDebug("http", "hostdb update marking IP: %s as down",
               ats_ip_nptop(&t_state.current.server->dst_addr.sa, addrbuf, sizeof(addrbuf)));
     } else {
+
+      // info->app.http_data.fail_countが指定されたリトライ数を超過していないので、インクリメントだけしてログ出力して終了する
       SMDebug("http", "hostdb increment IP failcount %s to %d",
               ats_ip_nptop(&t_state.current.server->dst_addr.sa, addrbuf, sizeof(addrbuf)), info->app.http_data.fail_count);
     }
+
   } else { // Clear the failure
     info->app.http_data.fail_count   = 0;
     info->app.http_data.last_failure = time_down;
@@ -5679,6 +5764,7 @@ HttpSM::mark_host_failure(HostDBInfo *info, time_t time_down)
 #ifdef DEBUG
   ink_assert(ink_local_time() + t_state.txn_conf->down_server_timeout > time_down);
 #endif
+
 }
 
 void
@@ -5845,6 +5931,7 @@ HttpSM::handle_post_failure()
 void
 HttpSM::handle_http_server_open()
 {
+
   // The request is now not queued. This is important because server retries reuse the t_state.
   t_state.outbound_conn_track_state.dequeue();
 
@@ -5874,7 +5961,9 @@ HttpSM::handle_http_server_open()
   if (method != HTTP_WKSIDX_TRACE &&
       (t_state.hdr_info.request_content_length > 0 || t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING) &&
       do_post_transform_open()) {
+
     do_setup_post_tunnel(HTTP_TRANSFORM_VC); // Seems like we should be sending the request along this way too
+
   } else if (server_txn != nullptr) {
     setup_server_send_request_api();
   }
@@ -6048,7 +6137,7 @@ HttpSM::do_drain_request_body(HTTPHdr &response)
   int64_t content_length = t_state.hdr_info.client_request.get_content_length();
   int64_t avail          = ua_txn->get_remote_reader()->read_avail();
 
-  // クライアントからのリクエストが「Transfer-Encoding: chunked」の場合
+  // クライアントからのリクエストが「Transfer-Encoding: chunked」の場合には、
   if (t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING) {
     SMDebug("http", "Chunked body, setting the response to non-keepalive");
     goto close_connection;
@@ -6138,8 +6227,7 @@ HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
     HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::state_request_wait_for_transform_read);
     ink_assert(post_transform_info.entry != nullptr);
     ink_assert(post_transform_info.entry->vc == post_transform_info.vc);
-    tunnel.add_consumer(post_transform_info.entry->vc, ua_entry->vc, &HttpSM::tunnel_handler_transform_write, HT_TRANSFORM,
-                        "post transform");
+    tunnel.add_consumer(post_transform_info.entry->vc, ua_entry->vc, &HttpSM::tunnel_handler_transform_write, HT_TRANSFORM, "post transform");
     post_transform_info.entry->in_tunnel = true;
     break;
   case HTTP_SERVER_VC:
@@ -7418,6 +7506,7 @@ HttpSM::kill_this()
 void
 HttpSM::update_stats()
 {
+
   milestones[TS_MILESTONE_SM_FINISH] = Thread::get_hrtime();
 
   if (is_action_tag_set("bad_length_state_dump")) {
@@ -7509,11 +7598,13 @@ HttpSM::update_stats()
         fd = -1;
       }
     }
+
     // get the status code, lame that we have to check to see if it is valid or we will assert in the method call
     int status = 0;
     if (t_state.hdr_info.client_response.valid()) {
       status = t_state.hdr_info.client_response.status_get();
     }
+
     char client_ip[INET6_ADDRSTRLEN];
     ats_ip_ntop(&t_state.client_info.src_addr, client_ip, sizeof(client_ip));
     Error("[%" PRId64 "] Slow Request: "
@@ -8066,6 +8157,7 @@ HttpSM::set_next_state()
     break;
   }
 
+  // Forward Proxyでの接続にてこのケースが呼ばれます
   case HttpTransact::SM_ACTION_ORIGIN_SERVER_RAW_OPEN: {
     // Pre-emptively set a server connect failure that will be cleared once a WRITE_READY is received from origin or
     // bytes are received back

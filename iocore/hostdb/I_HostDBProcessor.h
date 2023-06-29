@@ -283,6 +283,7 @@ struct HostDBInfo : public RefCountObj {
   bool
   is_alive(ink_time_t now, int32_t fail_window)
   {
+
     unsigned int last_failure = app.http_data.last_failure;
 
     if (last_failure == 0 || (unsigned int)(now - fail_window) > last_failure) {

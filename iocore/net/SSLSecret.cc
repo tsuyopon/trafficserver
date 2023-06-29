@@ -71,24 +71,33 @@ SSLSecret::loadFile(const std::string &name, std::string &data_item)
   return true;
 }
 
+// X509のサーバ証明書に対応するパスワード情報が格納されます
 bool
 SSLSecret::setSecret(const std::string &name, const char *data, int data_len)
 {
+
   std::scoped_lock lock(secret_map_mutex);
   auto iter = secret_map.find(name);
   if (iter == secret_map.end()) {
     secret_map[name] = "";
     iter             = secret_map.find(name);
   }
+
+  // 指定された"name"の秘密情報がsecret_map中に存在しない場合にはfalseを返す
   if (iter == secret_map.end()) {
     return false;
   }
+
+  // ここでsecret_mapに秘密鍵情報を格納しています。
   iter->second.assign(data, data_len);
+
   // The full secret data can be sensitive. Print only the first 50 bytes.
   Debug("ssl_secret", "Set secret for %s to %.50s", name.c_str(), iter->second.c_str());
   return true;
 }
 
+// secret_map中からパスワード情報を取得します。
+// パスワード情報はSSLSecret::setSecretで格納されています。
 const std::string *
 SSLSecret::getSecretItem(const std::string &name) const
 {
@@ -100,6 +109,7 @@ SSLSecret::getSecretItem(const std::string &name) const
   return &iter->second;
 }
 
+// X509のサーバ証明書やそれに対応する秘密鍵ファイルがnameに指定されてきます。パスワード情報が設定されていたら、それをdataに格納します。
 bool
 SSLSecret::getSecret(const std::string &name, std::string_view &data) const
 {
@@ -109,6 +119,9 @@ SSLSecret::getSecret(const std::string &name, std::string_view &data) const
     Debug("ssl_secret", "Get secret for %s: %.50s", name.c_str(), data_item->c_str());
     data = *data_item;
   } else {
+    // パスワード情報が設定されていない場合には、trafficserver起動時に下記のようにサーバ証明書とサーバ秘密鍵それぞれが行に出力されます。
+    // (例) DEBUG: <SSLSecret.cc:112 (getSecret)> (ssl_secret) Get secret for /opt/trafficserver-9.2.0/etc/trafficserver/sample2.csr: not found
+    //      DEBUG: <SSLSecret.cc:112 (getSecret)> (ssl_secret) Get secret for /opt/trafficserver-9.2.0/etc/trafficserver/sample.key: not found
     Debug("ssl_secret", "Get secret for %s: not found", name.c_str());
     data = std::string_view{};
   }
@@ -118,6 +131,7 @@ SSLSecret::getSecret(const std::string &name, std::string_view &data) const
 bool
 SSLSecret::getOrLoadSecret(const std::string &name1, const std::string &name2, std::string_view &data1, std::string_view &data2)
 {
+
   Debug("ssl_secret", "lookup up secrets for %s and %s", name1.c_str(), name2.empty() ? "[empty]" : name2.c_str());
   std::scoped_lock lock(secret_map_mutex);
   bool found_secret1 = this->getSecret(name1, data1);

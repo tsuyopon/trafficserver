@@ -120,6 +120,7 @@ bypass_ok(HttpTransact::State *s)
 inline static bool
 is_api_result(HttpTransact::State *s)
 {
+
   bool r          = false;
   url_mapping *mp = s->url_map.getMapping();
 
@@ -159,6 +160,7 @@ numParents(HttpTransact::State *s)
 inline static bool
 parent_is_proxy(HttpTransact::State *s)
 {
+
   url_mapping *mp = s->url_map.getMapping();
   if (s->response_action.handled) {
     return s->response_action.action.parentIsProxy;
@@ -167,7 +169,9 @@ parent_is_proxy(HttpTransact::State *s)
   } else if (s->parent_params) {
     return s->parent_result.parent_is_proxy();
   }
+
   return false;
+
 }
 
 // wrapper to get the parent.config retry type.
@@ -186,8 +190,13 @@ retry_type(HttpTransact::State *s)
 inline static void
 findParent(HttpTransact::State *s)
 {
+
   url_mapping *mp = s->url_map.getMapping();
+
   if (s->response_action.handled) {
+
+    // TSHttpTxnResponseActionSet関数がセットされた場合にのみ、s->response_action.handled = trueとなるので、このロジックが呼ばれると思われる
+
     s->parent_result.hostname = s->response_action.action.hostname;
     s->parent_result.port     = s->response_action.action.port;
     s->parent_result.retry    = s->response_action.action.is_retry;
@@ -198,11 +207,13 @@ findParent(HttpTransact::State *s)
     } else {
       s->parent_result.result = PARENT_FAIL;
     }
-  } else if (mp && mp->strategy) {
+
+  } else if (mp && mp->strategy) {  // RemapConfig.cc::remap_parse_config_btiの「new_mapping->strategy = bti->rewrite->strategyFactory->strategyInstance(strategy);」の箇所でセットされると思われる。
+    // strategies.yamlの設定から探索します
     mp->strategy->findNextHop(reinterpret_cast<TSHttpTxn>(s->state_machine));
   } else if (s->parent_params) {
-    s->parent_params->findParent(&s->request_data, &s->parent_result, s->txn_conf->parent_fail_threshold,
-                                 s->txn_conf->parent_retry_time);
+    // parents.configの設定から探索します
+    s->parent_params->findParent(&s->request_data, &s->parent_result, s->txn_conf->parent_fail_threshold, s->txn_conf->parent_retry_time);
   }
 }
 
@@ -462,6 +473,7 @@ is_port_in_range(int port, HttpConfigPortRange *pr)
 inline static void
 update_cache_control_information_from_config(HttpTransact::State *s)
 {
+
   getCacheControl(&s->cache_control, &s->request_data, s->txn_conf);
 
   s->cache_info.directives.does_config_permit_lookup &= (s->cache_control.never_cache == false);
@@ -490,10 +502,13 @@ update_cache_control_information_from_config(HttpTransact::State *s)
 bool
 HttpTransact::is_server_negative_cached(State *s)
 {
+
   if (s->host_db_info.app.http_data.last_failure != 0 &&
       s->host_db_info.app.http_data.last_failure + s->txn_conf->down_server_timeout > s->client_request_time) {
     return true;
+
   } else {
+
     // Make sure some nasty clock skew has not happened
     //  Use the server timeout to set an upperbound as to how far in the
     //   future we should tolerate bogus last failure times.  This sets
@@ -505,6 +520,7 @@ HttpTransact::is_server_negative_cached(State *s)
       ink_assert(!"extreme clock skew");
       return true;
     }
+
     return false;
   }
 }
@@ -542,15 +558,24 @@ find_appropriate_cached_resp(HttpTransact::State *s)
 
 int response_cacheable_indicated_by_cc(HTTPHdr *response);
 
+// 設定値やサーバレスポンスの状態を確認して、ネガティブキャッシュをするかどうかを判定します。
 inline static bool
 is_negative_caching_appropriate(HttpTransact::State *s)
 {
+
+  // 以下の2つのいずれかをチェックします
+  //   1. proxy.config.http.negative_caching_enabled が無効かどうかをチェックします。
+  //     cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-negative-caching-enabled
+  //   2. サーバレスポンスに対してHttpHdrクラスのvalid()をチェックします。
   if (!s->txn_conf->negative_caching_enabled || !s->hdr_info.server_response.valid()) {
     return false;
   }
 
   int status  = s->hdr_info.server_response.status_get();
   auto params = s->http_config_param;
+
+  // ネガティブキャッシュとして許可されたレスポンスのステータスコードに合致するかどうかをチェックします。
+  //   cf. proxy.config.http.negative_caching_list
   if (params->negative_caching_list[status]) {
     TxnDebug("http_trans", "%d is eligible for negative caching", status);
     return true;
@@ -560,30 +585,52 @@ is_negative_caching_appropriate(HttpTransact::State *s)
   }
 }
 
+// これはおそらく、ForwardProxyの場合にのみ通る関数だと思われる
 inline static HttpTransact::LookingUp_t
 find_server_and_update_current_info(HttpTransact::State *s)
 {
+
   int host_len;
   const char *host = s->hdr_info.client_request.host_get(&host_len);
 
   if (is_localhost(host, host_len)) {
+
+    // 指定されたHost名が「127.0.0.1」に一致する場合の処理は、Parentを経由せずに直接オリジンへと接続させる
+
     // Do not forward requests to local_host onto a parent.
     // I just wanted to do this for cop heartbeats, someone else
     // wanted it for all requests to local_host.
     TxnDebug("http_trans", "request is from localhost, so bypass parent");
     s->parent_result.result = PARENT_DIRECT;
+
   } else if (s->method == HTTP_WKSIDX_CONNECT && s->http_config_param->disable_ssl_parenting) {
+
+    // メソッドがCONNECT かつ proxy.local.http.parent_proxy.disable_connect_tunnelingの値が1の場合 (デフォルトは0)
+    // Connectはhttpsのオリジンへのリクエストの場合に、クライアントからフォワードプロキシに指定されてくる
+
+    //  cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-local-http-parent-proxy-disable-connect-tunneling
     if (s->parent_result.result == PARENT_SPECIFIED) {
+      // 次のparentが指定されている場合
       nextParent(s);
     } else {
       findParent(s);
     }
+
     if (!s->parent_result.is_some() || is_api_result(s) || parent_is_proxy(s)) {
       TxnDebug("http_trans", "request not cacheable, so bypass parent");
       s->parent_result.result = PARENT_DIRECT;
     }
-  } else if (s->txn_conf->uncacheable_requests_bypass_parent && s->http_config_param->no_dns_forward_to_parent == 0 &&
-             !HttpTransact::is_request_cache_lookupable(s)) {
+
+  } else if (s->txn_conf->uncacheable_requests_bypass_parent && s->http_config_param->no_dns_forward_to_parent == 0 && !HttpTransact::is_request_cache_lookupable(s)) {
+
+    // キャッシュできない場合にはparentを経由しない かつ DNS解決せずにparentに流す かつ キャッシュ不可能
+
+    // uncacheable_requests_bypass_parent=1(proxy.config.http.uncacheable_requests_bypass_parent: デフォルト1)の場合には、キャッシュできないリクエストはparentを経由しない
+    //  cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-uncacheable-requests-bypass-parent
+    //
+    // no_dns_forward_to_parent=0 (proxy.config.http.no_dns_just_forward_to_parent: デフォルト0)の場合には、DNS解決を行わずに全てのリクエストをparentに流そうとする
+    //  cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-no-dns-just-forward-to-parent
+
     // request not lookupable and cacheable, so bypass parent if the parent is not an origin server.
     // Note that the configuration of the proxy as well as the request
     // itself affects the result of is_request_cache_lookupable();
@@ -595,11 +642,14 @@ find_server_and_update_current_info(HttpTransact::State *s)
     } else {
       findParent(s);
     }
+
     if (!s->parent_result.is_some() || is_api_result(s) || parent_is_proxy(s)) {
       TxnDebug("http_trans", "request not cacheable, so bypass parent");
       s->parent_result.result = PARENT_DIRECT;
     }
+
   } else {
+
     switch (s->parent_result.result) {
     case PARENT_UNDEFINED:
       findParent(s);
@@ -670,8 +720,12 @@ find_server_and_update_current_info(HttpTransact::State *s)
   }
 }
 
-// 関数に指定されたcookies_confフラグやリクエスト・レスポンス・キャッシュレスポンスの状態に基づき、キャッシュ可能かどうかを判断します。
+// 関数に指定された引数cookies_confやリクエスト・レスポンス・キャッシュレスポンスの状態に基づき、キャッシュ可能かどうかを判断します。
+// このcookies_confの値は呼び出し元からはproxy.config.http.cache.cache_responses_to_cookiesの値が指定されてくるようです。
+//   https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-cache-cache-responses-to-cookies
+// 
 // 戻り値が間違えやすいです。戻り値はfalseの場合にはキャッシュ可能、trueの場合にはキャッシュ不可を表します
+//
 inline static bool
 do_cookies_prevent_caching(int cookies_conf, HTTPHdr *request, HTTPHdr *response, HTTPHdr *cached_request = nullptr)
 {
@@ -679,7 +733,7 @@ do_cookies_prevent_caching(int cookies_conf, HTTPHdr *request, HTTPHdr *response
   // 以下の種別を表すフラグがこの関数の第１引数cookies_confに指定されます。
   // 引数に指定されたcookies_confの値に応じて処理が変化します。
   //
-  // このcookies_confの値はproxy.config.http.cache.cache_responses_to_cookiesの設定値が指定されてくることになります
+  // このcookies_confの値はproxy.config.http.cache.cache_responses_to_cookiesの設定値が指定されてくることになります (デフォルトは1)
   //   cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-cache-cache-responses-to-cookies
   enum CookiesConfig {
     COOKIES_CACHE_NONE             = 0, // do not cache any responses to cookies                            (cookieに対していかなるレスポンスもキャッシュしない)
@@ -722,11 +776,11 @@ do_cookies_prevent_caching(int cookies_conf, HTTPHdr *request, HTTPHdr *response
   // then cookies do not prevent caching.
 
   // レスポンスで下記の3条件を全て満たした場合にはキャッシュ可能と判断する
-  //   1. レスポンスにSet-Cookieヘッダが指定された場合
-  //   2. リクエストにCookieヘッダが存在する場合
+  //   1. レスポンスにSet-Cookieヘッダが指定されていない場合
+  //   2. リクエストにCookieヘッダが存在しない場合
   //   3. 以下のいずれかを満たす場合
-  //   3.1 キャッシュしたリクエストが存在しない場合
-  //   3.2 キャッシュしたリクエストにCookieヘッダが存在していない場合
+  //     3.1 キャッシュしたリクエストが存在しない場合
+  //     3.2 キャッシュしたリクエストにCookieヘッダが存在していない場合
   if (!response->presence(MIME_PRESENCE_SET_COOKIE) && !request->presence(MIME_PRESENCE_COOKIE) &&
       (cached_request == nullptr || !cached_request->presence(MIME_PRESENCE_COOKIE))) {
     // キャッシュ可能
@@ -807,6 +861,7 @@ does_method_effect_cache(int method)
 inline static HttpTransact::StateMachineAction_t
 how_to_open_connection(HttpTransact::State *s)
 {
+
   ink_assert((s->pending_work == nullptr) || (s->current.request_to == HttpTransact::PARENT_PROXY));
 
   // Originally we returned which type of server to open
@@ -837,8 +892,13 @@ how_to_open_connection(HttpTransact::State *s)
 
   // Setting up a direct CONNECT tunnel enters OriginServerRawOpen. We always do that if we
   // are not forwarding CONNECT and are not going to a parent proxy.
+  //
+  // Forward Proxyでtrafficserverを起動した際にTLSで接続しようとするとConnectメソッドになります。
+  //   (リクエスト例) curl -v https://xxxx.example.jp --proxy http://localhost:8080/
   if (s->method == HTTP_WKSIDX_CONNECT) {
+    // connectメソッドが指定されていない、かつ、次のリクエスト先としてparentが指定されていない場合
     if (s->txn_conf->forward_connect_method != 1 && s->parent_result.result != PARENT_SPECIFIED) {
+      // SM_ACTION_ORIGIN_SERVER_RAW_OPENはforward_proxy時に通り、オリジンに接続する場合を意味します
       connect_next_action = HttpTransact::SM_ACTION_ORIGIN_SERVER_RAW_OPEN;
     }
   }
@@ -1370,6 +1430,7 @@ HttpTransact::handle_upgrade_request(State *s)
   TRANSACT_RETURN_VAL(SM_ACTION_SEND_ERROR_CACHE_NOOP, nullptr, true);
 }
 
+// Web Socketの場合にはこの遷移に入る
 void
 HttpTransact::handle_websocket_upgrade_pre_remap(State *s)
 {
@@ -1597,8 +1658,12 @@ HttpTransact::HandleRequest(State *s)
     // The following chunk of code will limit the maximum number of websocket connections (TS-3659)
     // WebSocketの場合
     if (s->is_upgrade_request && s->is_websocket && s->http_config_param->max_websocket_connections >= 0) {
+
       int64_t val = 0;
       HTTP_READ_DYN_SUM(http_websocket_current_active_client_connections_stat, val);
+
+      // websocketの接続数として用意しているコネクション数を超過してしまった場合には、エラーレスポンスを応答する
+      //  cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-websocket-max-number-of-connections
       if (val >= s->http_config_param->max_websocket_connections) {
         s->is_websocket = false; // unset to avoid screwing up stats.
         TxnDebug("http_trans", "Rejecting websocket connection because the limit has been exceeded");
@@ -1671,12 +1736,15 @@ HttpTransact::HandleRequest(State *s)
   }
 
   // TSHttpTxnIntercept関数によりHTTP_PLUGIN_AS_INTERCEPTがセットされた場合にのみ通るパスです
+  // つまり、下記のifに入る場合にはオリジンへの接続が不要となります。
   if (s->state_machine->plugin_tunnel_type == HTTP_PLUGIN_AS_INTERCEPT) {
     setup_plugin_request_intercept(s);
     return;
   }
 
   // if ip in url or cop test page, not do srv lookup.
+  // proxy.config.srv_enabled (デフォルト: 0) 有効ならば、DNSの「SRV」レコードのチェックを行う
+  // https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-srv-enabled
   if (s->txn_conf->srv_enabled) {
     IpEndpoint addr;
     ats_ip_pton(s->server_info.name, &addr);
@@ -1759,6 +1827,7 @@ HttpTransact::HandleRequestBufferDone(State *s)
   TRANSACT_RETURN(SM_ACTION_REQUEST_BUFFER_READ_COMPLETE, HttpTransact::HandleRequest);
 }
 
+// オリジンにアクセスせずにTrafficserver内部でレスポンス生成処理を完結させてレスポンスを応答します
 void
 HttpTransact::setup_plugin_request_intercept(State *s)
 {
@@ -1780,6 +1849,7 @@ HttpTransact::setup_plugin_request_intercept(State *s)
   s->scheme = s->next_hop_scheme = URL_WKSIDX_HTTP;
 
   // Set up a "fake" server entry
+  // TBD: 第４引数のattemptsを0にしているので、オリジンにはアクセスされないのか?(要確認)
   update_current_info(&s->current, &s->server_info, HttpTransact::ORIGIN_SERVER, 0);
 
   // Also "fake" the info we'd normally get from
@@ -1923,7 +1993,10 @@ HttpTransact::PPDNSLookup(State *s)
   } else {
     // lookup succeeded, open connection to p.p.
     ats_ip_copy(&s->parent_info.dst_addr, s->host_db_info.ip());
+
+    // TBD: このコードは一体何? 関数に値を入れようとしている?
     s->parent_info.dst_addr.network_order_port() = htons(s->parent_result.port);
+
     get_ka_info_from_host_db(s, &s->parent_info, &s->client_info, &s->host_db_info);
 
     char addrbuf[INET6_ADDRSTRLEN];
@@ -1966,6 +2039,7 @@ HttpTransact::PPDNSLookup(State *s)
 void
 HttpTransact::ReDNSRoundRobin(State *s)
 {
+
   ink_assert(s->current.server == &s->server_info);
   ink_assert(s->current.server->had_connect_fail());
 
@@ -2119,6 +2193,7 @@ HttpTransact::OSDNSLookup(State *s)
   } else if (!s->api_server_addr_set) {
     s->server_info.dst_addr.network_order_port() = htons(s->hdr_info.client_request.port_get()); // now we can set the port.
   }
+
   ats_ip_copy(&s->request_data.dest_ip, &s->server_info.dst_addr);
   get_ka_info_from_host_db(s, &s->server_info, &s->client_info, &s->host_db_info);
 
@@ -2188,6 +2263,7 @@ HttpTransact::OSDNSLookup(State *s)
       StartAccessControl(s); // If skip_dns is enabled and no ip based rules in cache.config and parent.config
       // Access Control is called after DNS response
     } else {
+
       if ((s->cache_info.action == CACHE_DO_NO_ACTION) &&
           (((s->hdr_info.client_request.presence(MIME_PRESENCE_RANGE) && !s->txn_conf->cache_range_write) ||
             s->range_setup == RANGE_NOT_SATISFIABLE || s->range_setup == RANGE_NOT_HANDLED))) {
@@ -2242,6 +2318,7 @@ HttpTransact::HandleRequestAuthorized(State *s)
 void
 HttpTransact::DecideCacheLookup(State *s)
 {
+
   // Check if a client request is lookupable.
   if (s->redirect_info.redirect_in_process) {
     // for redirect, we want to skip cache lookup and write into
@@ -2310,6 +2387,7 @@ HttpTransact::DecideCacheLookup(State *s)
 
     TRANSACT_RETURN(SM_ACTION_CACHE_LOOKUP, nullptr);
   } else {
+
     ink_assert(s->cache_info.action != CACHE_DO_LOOKUP && s->cache_info.action != CACHE_DO_SERVE);
 
     TxnDebug("http_trans", "Will NOT do cache lookup.");
@@ -2320,6 +2398,7 @@ HttpTransact::DecideCacheLookup(State *s)
       HandlePushError(s, "Request Not Cacheable");
       return;
     }
+
     // for redirect, we skipped cache lookup to do the automatic redirection
     if (s->redirect_info.redirect_in_process) {
       // without calling out the CACHE_LOOKUP_COMPLETE_HOOK
@@ -2351,6 +2430,7 @@ HttpTransact::DecideCacheLookup(State *s)
 void
 HttpTransact::LookupSkipOpenServer(State *s)
 {
+
   // cache will not be looked up. open a connection
   // to a parent proxy or to the origin server.
   find_server_and_update_current_info(s);
@@ -2362,6 +2442,7 @@ HttpTransact::LookupSkipOpenServer(State *s)
     return;
   }
 
+  // オリジンサーバへのリクエストのケースの場合だけであることをassertする
   ink_assert(s->current.request_to == ORIGIN_SERVER);
   // ink_assert(s->current.server->ip != 0);
 
@@ -2369,9 +2450,12 @@ HttpTransact::LookupSkipOpenServer(State *s)
 
   StateMachineAction_t next = how_to_open_connection(s);
   s->next_action            = next;
+
+  // SM_ACTION_ORIGIN_SERVER_OPENはreverse_proxy時、SM_ACTION_ORIGIN_SERVER_RAW_OPENはforward_proxy時だと思われる。
   if (next == SM_ACTION_ORIGIN_SERVER_OPEN || next == SM_ACTION_ORIGIN_SERVER_RAW_OPEN) {
     TRANSACT_RETURN(next, HttpTransact::HandleResponse);
   }
+
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -2448,6 +2532,7 @@ HttpTransact::HandlePushResponseHdr(State *s)
 void
 HttpTransact::HandlePushCacheWrite(State *s)
 {
+
   switch (s->cache_info.write_lock_state) {
   case CACHE_WL_SUCCESS:
     // We were able to get the lock for the URL vector in the cache
@@ -2676,11 +2761,13 @@ HttpTransact::issue_revalidate(State *s)
   // do not conditionalize if the cached response is not a 200
   switch (c_resp->status_get()) {
   case HTTP_STATUS_OK: // 200
+
     // don't conditionalize if we are configured to repeat the clients
     //   conditionals
     if (s->txn_conf->cache_when_to_revalidate == 4) {
       break;
     }
+
     // ok, request is either a conditional or does not have a no-cache.
     //   (or is method that we don't conditionalize but lookup the
     //    cache on like DELETE)
@@ -2696,18 +2783,30 @@ HttpTransact::issue_revalidate(State *s)
       }
       DUMP_HEADER("http_hdrs", &s->hdr_info.server_request, s->state_machine_id, "Proxy's Request (Conditionalized)");
     }
+
     // if Etag exists, also add if-non-match header
     if (c_resp->presence(MIME_PRESENCE_ETAG) && (s->hdr_info.server_request.method_get_wksidx() == HTTP_WKSIDX_GET ||
                                                  s->hdr_info.server_request.method_get_wksidx() == HTTP_WKSIDX_HEAD)) {
+
       int length       = 0;
+
+      // ETagヘッダのオブジェクトを取得する
       const char *etag = c_resp->value_get(MIME_FIELD_ETAG, MIME_LEN_ETAG, &length);
+
+      // Etagが存在していたら下記コードパスを実行すr
       if (nullptr != etag) {
+
+        // ETagの最初の２文字が「W/」である場合の処理
         if ((length >= 2) && (etag[0] == 'W') && (etag[1] == '/')) {
+          // Etag文字列のポインタを２つ進めて、全体の長さから2減算する
           etag += 2;
           length -= 2;
         }
+
+        // サーバリクエストに対するIf-None-Matchの値にEtagで指定された値を設定する
         s->hdr_info.server_request.value_set(MIME_FIELD_IF_NONE_MATCH, MIME_LEN_IF_NONE_MATCH, etag, length);
       }
+
       DUMP_HEADER("http_hdrs", &s->hdr_info.server_request, s->state_machine_id, "Proxy's Request (Conditionalized)");
     }
     break;
@@ -2803,6 +2902,7 @@ HttpTransact::HandleCacheOpenReadHitFreshness(State *s)
 void
 HttpTransact::CallOSDNSLookup(State *s)
 {
+
   TxnDebug("http", "%s ", s->server_info.name);
   HostStatus &pstatus = HostStatus::instance();
   HostStatRec *hst    = pstatus.getHostStatus(s->server_info.name);
@@ -3103,6 +3203,7 @@ HttpTransact::HandleCacheOpenReadHit(State *s)
       s->next_action = how_to_open_connection(s);
 
       ink_release_assert(s->next_action != SM_ACTION_ORIGIN_SERVER_RAW_OPEN);
+
       return;
     } else { // server is down but stale response is returnable
       SET_VIA_STRING(VIA_DETAIL_CACHE_TYPE, VIA_DETAIL_CACHE);
@@ -3433,6 +3534,7 @@ HttpTransact::handle_cache_write_lock(State *s)
   } else {
     StateMachineAction_t next;
     next = how_to_open_connection(s);
+    // SM_ACTION_ORIGIN_SERVER_OPENはreverse_proxy時、SM_ACTION_ORIGIN_SERVER_RAW_OPENはforward_proxy時だと思われる。
     if (next == SM_ACTION_ORIGIN_SERVER_OPEN || next == SM_ACTION_ORIGIN_SERVER_RAW_OPEN) {
       s->next_action = next;
       TRANSACT_RETURN(next, nullptr);
@@ -3492,6 +3594,7 @@ HttpTransact::HandleCacheOpenReadMiss(State *s)
              s->range_setup == RANGE_NOT_HANDLED) {
     s->cache_info.action = CACHE_DO_NO_ACTION;
   } else if (s->api_server_response_no_store) { // plugin may have decided not to cache the response
+    //   TSHttpTxnCntlSeT関数でTS_HTTP_CNTL_SERVER_NO_STOREとして値を指定した場合、または、TSHttpTxnServerRespNoStoreSetの引数に0以外を指定した場合
     s->cache_info.action = CACHE_DO_NO_ACTION;
   } else {
     s->cache_info.action = CACHE_PREPARE_TO_WRITE;
@@ -3840,8 +3943,13 @@ HttpTransact::handle_response_from_parent(State *s)
     ink_assert(s->hdr_info.server_request.valid());
 
     s->current.server->connect_result = ENOTCONN;
+
     // only mark the parent down in hostdb if the configuration allows it and the parent,
     // is not congested, see proxy.config.http.parent_proxy.mark_down_hostdb in records.config.
+
+    // s->txn_conf->parent_failures_update_hostdbには proxy.config.http.parent_proxy.mark_down_hostdb の設定値(デフォルト: 0)が入ります。 この設定はここでしか参照されません
+    // この設定が1の場合には、コネクションエラーが検知された場合のケースにおいてhostdb中のparent proxyをダウン扱いにします
+    // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-parent-proxy-mark-down-hostdb
     if (s->txn_conf->parent_failures_update_hostdb && s->current.state != OUTBOUND_CONGESTION) {
       s->state_machine->do_hostdb_update_if_necessary();
     }
@@ -4596,6 +4704,7 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
          server_response_code == HTTP_STATUS_BAD_GATEWAY || server_response_code == HTTP_STATUS_SERVICE_UNAVAILABLE) &&
         s->cache_info.action == CACHE_DO_UPDATE && s->txn_conf->negative_revalidating_enabled &&
         is_stale_cache_response_returnable(s)) {
+
       HTTPStatus cached_response_code = s->cache_info.object_read->response_get()->status_get();
       if (!(cached_response_code == HTTP_STATUS_INTERNAL_SERVER_ERROR || cached_response_code == HTTP_STATUS_GATEWAY_TIMEOUT ||
             cached_response_code == HTTP_STATUS_BAD_GATEWAY || cached_response_code == HTTP_STATUS_SERVICE_UNAVAILABLE)) {
@@ -4661,6 +4770,7 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
     client_response_code = server_response_code;
     base_response        = &s->hdr_info.server_response;
 
+    // ネガティブキャッシュとして保持可能かどうか
     s->is_cacheable_due_to_negative_caching_configuration = cacheable && is_negative_caching_appropriate(s);
 
     // determine the correct cache action given the original cache action,
@@ -4669,9 +4779,17 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
     // CACHE_DO_UPDATE, CACHE_DO_WRITE, or CACHE_DO_DELETE
     int const server_request_method = s->hdr_info.server_request.method_get_wksidx();
     if (s->api_server_response_no_store) {
+
+      //   TSHttpTxnCntlSeT関数でTS_HTTP_CNTL_SERVER_NO_STOREとして値を指定した場合、または、TSHttpTxnServerRespNoStoreSetの引数に0以外を指定した場合  (プラグインAPI関数を指定した場合のみ)
       s->cache_info.action = CACHE_DO_NO_ACTION;
-    } else if (s->api_server_response_ignore && server_response_code == HTTP_STATUS_OK &&
-               server_request_method == HTTP_WKSIDX_HEAD) {
+
+    } else if (s->api_server_response_ignore && server_response_code == HTTP_STATUS_OK && server_request_method == HTTP_WKSIDX_HEAD) {
+
+      // 以下の3つの条件を全て満たす場合にこのコードパスに入る
+      //   1. s->api_server_response_ignore の値がtrue
+      //   2. サーバからのレスポンスのステータスコードが200 OKの場合である
+      //   3. サーバへのリクエストメソッドがHEADである
+
       s->api_server_response_ignore = false;
       ink_assert(s->cache_info.object_read);
       base_response        = s->cache_info.object_read->response_get();
@@ -4682,7 +4800,9 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
                HttpDebugNames::get_cache_action_name(s->cache_info.action));
       s->next_action       = SM_ACTION_SERVE_FROM_CACHE;
       client_response_code = base_response->status_get();
+
     } else if (s->cache_info.action == CACHE_DO_UPDATE) {
+
       if (s->www_auth_content == CACHE_AUTH_FRESH || s->api_server_response_ignore) {
         s->cache_info.action = CACHE_DO_NO_ACTION;
       } else if (s->www_auth_content == CACHE_AUTH_STALE && server_response_code == HTTP_STATUS_UNAUTHORIZED) {
@@ -4715,6 +4835,7 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
       }
 
     } else if (s->cache_info.action == CACHE_DO_WRITE) {
+
       if (!cacheable) {
         s->cache_info.action = CACHE_DO_NO_ACTION;
       } else if (s->method == HTTP_WKSIDX_HEAD) {
@@ -4757,7 +4878,11 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
     //   before issuing a 304
     if (s->cache_info.action == CACHE_DO_WRITE || s->cache_info.action == CACHE_DO_NO_ACTION ||
         s->cache_info.action == CACHE_DO_REPLACE) {
+
       if (s->is_cacheable_due_to_negative_caching_configuration) {
+
+        // ネガティブキャッシュで書込み可能な場合
+
         HTTPHdr *resp;
         s->cache_info.object_store.create();
         s->cache_info.object_store.request_set(&s->hdr_info.client_request);
@@ -4768,6 +4893,7 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
 
           resp->set_expires(exp_time);
         }
+
       } else if (is_request_conditional(&s->hdr_info.client_request) && server_response_code == HTTP_STATUS_OK) {
         client_response_code = HttpTransactCache::match_response_to_request_conditionals(
           &s->hdr_info.client_request, &s->hdr_info.server_response, s->response_received_time);
@@ -4794,6 +4920,7 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
         }
       }
     } else if (s->is_cacheable_due_to_negative_caching_configuration) {
+        // ネガティブキャッシュで書込み可能な場合だが、CACHE_DO_WRITE、CACHE_DO_NO_ACTION、CACHE_DO_REPLACEのいずれにもマッチしないのでis_cacheable_due_to_negative_caching_configurationをfalseにセットし直しておく
       s->is_cacheable_due_to_negative_caching_configuration = false;
     }
 
@@ -4861,6 +4988,7 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
   if ((s->cache_info.action == CACHE_DO_WRITE) || (s->cache_info.action == CACHE_DO_REPLACE)) {
     set_headers_for_cache_write(s, &s->cache_info.object_store, &s->hdr_info.server_request, &s->hdr_info.server_response);
   }
+
   // 304, 412, and 416 responses are handled here
   if ((client_response_code == HTTP_STATUS_NOT_MODIFIED) || (client_response_code == HTTP_STATUS_PRECONDITION_FAILED)) {
     // Because we are decoupling User-Agent validation from
@@ -5171,6 +5299,7 @@ HttpTransact::set_header_for_transform(State *s, HTTPHdr *base_header)
 void
 HttpTransact::set_headers_for_cache_write(State *s, HTTPInfo *cache_info, HTTPHdr *request, HTTPHdr *response)
 {
+
   URL *temp_url;
   ink_assert(request->type_get() == HTTP_TYPE_REQUEST);
   ink_assert(response->type_get() == HTTP_TYPE_RESPONSE);
@@ -5198,6 +5327,7 @@ HttpTransact::set_headers_for_cache_write(State *s, HTTPInfo *cache_info, HTTPHd
   } else if (request != &s->hdr_info.client_request) {
     request->url_set(s->hdr_info.client_request.url_get());
   }
+
   cache_info->request_set(request);
   /* Why do we check the negative caching case? No one knows. This used to assert if the cache_info
      response wasn't already valid, which broke negative caching when a transform is active. Why it
@@ -5205,10 +5335,12 @@ HttpTransact::set_headers_for_cache_write(State *s, HTTPInfo *cache_info, HTTPHd
      sites yields no insight. So the assert is removed and we keep the behavior that if the response
      in @a cache_info is already set, we don't override it.
   */
+  // ネガティブキャッシュで書込み可能ではない、または、キャッシュのレスポンス取得が正常ではない
   if (!s->is_cacheable_due_to_negative_caching_configuration || !cache_info->response_get()->valid()) {
     cache_info->response_set(response);
   }
 
+  // TSHttpTxnServerRequestBodySet関数がセットされた場合
   if (s->api_server_request_body_set) {
     cache_info->request_get()->method_set(HTTP_METHOD_GET, HTTP_LEN_GET);
   }
@@ -5237,6 +5369,7 @@ HttpTransact::set_headers_for_cache_write(State *s, HTTPInfo *cache_info, HTTPHd
 void
 HttpTransact::merge_response_header_with_cached_header(HTTPHdr *cached_header, HTTPHdr *response_header)
 {
+
   MIMEField *new_field;
   const char *name;
   bool dups_seen = false;
@@ -5555,6 +5688,10 @@ HttpTransact::add_client_ip_to_outgoing_request(State *s, HTTPHdr *request)
   }
 
   // Add or append to the X-Forwarded-For header
+  // 
+  // proxy.config.http.insert_squid_x_forwarded_forの値はデフォルト1
+  //   cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-insert-squid-x-forwarded-for
+  //
   if (s->txn_conf->insert_squid_x_forwarded_for) {
     // X-Forwarded-Forの追加
     request->value_append_or_set(MIME_FIELD_X_FORWARDED_FOR, MIME_LEN_X_FORWARDED_FOR, ip_string, ip_string_size);
@@ -5928,6 +6065,8 @@ HttpTransact::handle_trace_and_options_requests(State *s, HTTPHdr *incoming_hdr)
   return false;
 }
 
+// リクエストする際の最初に呼ばれる。これによって、必要な初期値の情報を保存しておく役割を持つ
+// この関数では「リクエスト時の時刻」、「指定されてきたHTTPバージョン」が保存されている
 void
 HttpTransact::bootstrap_state_variables_from_request(State *s, HTTPHdr *incoming_request)
 {
@@ -6007,12 +6146,13 @@ HttpTransact::initialize_state_variables_from_request(State *s, HTTPHdr *obsolet
   // I think this is required to properly establish outbound WSS connections,
   // you'll need to force the next hop to be https.
   if (s->is_websocket) {
-    if (s->next_hop_scheme == URL_WKSIDX_WS) {
+
+    if (s->next_hop_scheme == URL_WKSIDX_WS) {            // 次のリクエスト先が 「ws://」の場合
       TxnDebug("http_trans", "Switching WS next hop scheme to http.");
       s->next_hop_scheme = URL_WKSIDX_HTTP;
       s->scheme          = URL_WKSIDX_HTTP;
       // s->request_data.hdr->url_get()->scheme_set(URL_SCHEME_HTTP, URL_LEN_HTTP);
-    } else if (s->next_hop_scheme == URL_WKSIDX_WSS) {
+    } else if (s->next_hop_scheme == URL_WKSIDX_WSS) {    // 次のリクエスト先が「wss://」の場合
       TxnDebug("http_trans", "Switching WSS next hop scheme to https.");
       s->next_hop_scheme = URL_WKSIDX_HTTPS;
       s->scheme          = URL_WKSIDX_HTTPS;
@@ -6212,6 +6352,7 @@ HttpTransact::initialize_state_variables_from_response(State *s, HTTPHdr *incomi
 bool
 HttpTransact::is_cache_response_returnable(State *s)
 {
+
   if (s->cache_control.never_cache) {
     SET_VIA_STRING(VIA_DETAIL_CACHE_LOOKUP, VIA_DETAIL_MISS_CONFIG);
     return false;
@@ -6227,6 +6368,7 @@ HttpTransact::is_cache_response_returnable(State *s)
     SET_VIA_STRING(VIA_DETAIL_CACHE_LOOKUP, VIA_DETAIL_MISS_METHOD);
     return false;
   }
+
   // We may be caching responses to methods other than GET, such as POST. Make
   // sure that our cached resource has a method that matches the incoming
   // requests's method. If not, then we cannot reply with the cached resource.
@@ -6267,6 +6409,7 @@ HttpTransact::is_cache_response_returnable(State *s)
 bool
 HttpTransact::is_stale_cache_response_returnable(State *s)
 {
+
   HTTPHdr *cached_response = s->cache_info.object_read->response_get();
 
   // First check if client allows cached response
@@ -6276,6 +6419,7 @@ HttpTransact::is_stale_cache_response_returnable(State *s)
   if (!s->cache_info.directives.does_client_permit_lookup) {
     return false;
   }
+
   // Spec says that we can not serve a stale document with a
   //   "must-revalidate header"
   // How about "s-maxage" and "no-cache" directives?
@@ -6286,6 +6430,7 @@ HttpTransact::is_stale_cache_response_returnable(State *s)
     TxnDebug("http_trans", "document headers prevent serving stale");
     return false;
   }
+
   // See how old the document really is.  We don't want create a
   //   stale content museum of documents that are no longer available
   time_t current_age = HttpTransactHeaders::calculate_document_age(s->cache_info.object_read->request_sent_time_get(),
@@ -6296,6 +6441,7 @@ HttpTransact::is_stale_cache_response_returnable(State *s)
     TxnDebug("http_trans", "document age is too large %" PRId64, (int64_t)current_age);
     return false;
   }
+
   // If the stale document requires authorization, we can't return it either.
   Authentication_t auth_needed = AuthenticationNeeded(s->txn_conf, &s->hdr_info.client_request, cached_response);
 
@@ -6320,6 +6466,7 @@ HttpTransact::is_stale_cache_response_returnable(State *s)
 bool
 HttpTransact::url_looks_dynamic(URL *url)
 {
+
   const char *p_start, *p, *t;
   static const char *asp = ".asp";
   const char *part;
@@ -6339,6 +6486,7 @@ HttpTransact::url_looks_dynamic(URL *url)
   if (part != nullptr) {
     return true;
   }
+
   part = url->query_get(&part_length);
   if (part != nullptr) {
     return true;
@@ -6395,9 +6543,12 @@ HttpTransact::url_looks_dynamic(URL *url)
 //
 //
 ///////////////////////////////////////////////////////////////////////////////
+
+// リクエストがキャッシュ可能なのかどうかをチェックする
 bool
 HttpTransact::is_request_cache_lookupable(State *s)
 {
+
   // ummm, someone has already decided that proxy should tunnel
   if (s->current.mode == TUNNELLING_PROXY) {
     return false;
@@ -6420,6 +6571,7 @@ HttpTransact::is_request_cache_lookupable(State *s)
     SET_VIA_STRING(VIA_DETAIL_TUNNEL, VIA_DETAIL_TUNNEL_METHOD);
     return false;
   }
+
   // don't cache page if URL "looks dynamic" and this filter is enabled
   // We can do the check in is_response_cacheable() or here.
   // It may be more efficient if we are not going to cache dynamic looking urls
@@ -6436,6 +6588,8 @@ HttpTransact::is_request_cache_lookupable(State *s)
     // We do not want to forward the request for a dynamic URL onto the
     // origin server if the value of the Max-Forwards header is zero.
     int max_forwards = -1;
+
+    // クライアントリクエストにMax-Forwardsが存在していたら
     if (s->hdr_info.client_request.presence(MIME_PRESENCE_MAX_FORWARDS)) {
       MIMEField *max_forwards_f = s->hdr_info.client_request.field_find(MIME_FIELD_MAX_FORWARDS, MIME_LEN_MAX_FORWARDS);
 
@@ -6482,20 +6636,26 @@ HttpTransact::is_request_cache_lookupable(State *s)
 int
 response_cacheable_indicated_by_cc(HTTPHdr *response)
 {
+
   uint32_t cc_mask;
   // the following directives imply not cacheable
   cc_mask = (MIME_COOKED_MASK_CC_NO_STORE | MIME_COOKED_MASK_CC_PRIVATE);
   if (response->get_cooked_cc_mask() & cc_mask) {
+    // Cache-Controleの値として「no-store」、「private」のケースではキャッシュ不可
     return -1;
   }
+
   // the following directives imply cacheable
   cc_mask = (MIME_COOKED_MASK_CC_PUBLIC | MIME_COOKED_MASK_CC_MAX_AGE | MIME_COOKED_MASK_CC_S_MAXAGE |
              MIME_COOKED_MASK_CC_MUST_REVALIDATE | MIME_COOKED_MASK_CC_PROXY_REVALIDATE);
   if (response->get_cooked_cc_mask() & cc_mask) {
+    // Cache-Controleの値として「public」、「max-age」、「s-maxage」、「must-revalidate」、proxy-revalidate」のケースはキャッシュ可能
     return 1;
   }
+
   // otherwise, no indication
   return 0;
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -6511,6 +6671,7 @@ response_cacheable_indicated_by_cc(HTTPHdr *response)
 bool
 HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *response)
 {
+
   // If the use_client_target_addr is specified but the client
   // specified OS addr does not match any of trafficserver's looked up
   // host addresses, do not allow cache.  This may cause DNS cache poisoning
@@ -6525,6 +6686,7 @@ HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *respons
   if (s->api_server_response_no_store) {
     return false;
   }
+
   // if method is not GET or HEAD, do not cache.
   // Note: POST is also cacheable with Expires or Cache-control.
   // but due to INKqa11567, we are not caching POST responses.
@@ -6535,6 +6697,7 @@ HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *respons
     TxnDebug("http_trans", "only GET, and some HEAD and POST are cacheable");
     return false;
   }
+
   // TxnDebug("http_trans", "[is_response_cacheable] method is cacheable");
   // If the request was not looked up in the cache, the response
   // should not be cached (same subsequent requests will not be
@@ -6543,6 +6706,7 @@ HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *respons
     TxnDebug("http_trans", "request is not cache lookupable, response is not cacheable");
     return false;
   }
+
   // already has a fresh copy in the cache
   if (s->range_setup == RANGE_NOT_HANDLED) {
     return false;
@@ -6555,11 +6719,13 @@ HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *respons
     TxnDebug("http_trans", "response has uncachable cookies, response is not cacheable");
     return false;
   }
+
   // if server spits back a WWW-Authenticate
   if ((s->txn_conf->cache_ignore_auth) == 0 && response->presence(MIME_PRESENCE_WWW_AUTHENTICATE)) {
     TxnDebug("http_trans", "response has WWW-Authenticate, response is not cacheable");
     return false;
   }
+
   // does server explicitly forbid storing?
   // If OS forbids storing but a ttl is set, allow caching
   if (!s->cache_info.directives.does_server_permit_storing && (s->cache_control.ttl_in_cache <= 0)) {
@@ -6593,9 +6759,11 @@ HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *respons
   // only makes sense when the server sends back a
   // 200 and a document.
   if (response_code == HTTP_STATUS_OK) {
+
     // If a ttl is set: no header required for caching
     // otherwise: follow parameter http.cache.required_headers
     if (s->cache_control.ttl_in_cache <= 0) {
+
       uint32_t cc_mask = (MIME_COOKED_MASK_CC_MAX_AGE | MIME_COOKED_MASK_CC_S_MAXAGE);
       // server did not send expires header or last modified
       // and we are configured to not cache without them.
@@ -6626,6 +6794,7 @@ HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *respons
       }
     }
   }
+
   // do not cache partial content - Range response
   if (response_code == HTTP_STATUS_PARTIAL_CONTENT || response_code == HTTP_STATUS_RANGE_NOT_SATISFIABLE) {
     TxnDebug("http_trans", "response code %d - don't cache", response_code);
@@ -6635,12 +6804,19 @@ HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *respons
   // check if cache control overrides default cacheability
   int indicator;
   indicator = response_cacheable_indicated_by_cc(response);
+
   if (indicator > 0) { // cacheable indicated by cache control header
+
+    // Cache-Controlによりキャッシュ可能と判断された場合
+
     TxnDebug("http_trans", "YES by response cache control");
     // even if it is authenticated, this is cacheable based on regular rules
     s->www_auth_content = CACHE_AUTH_NONE;
     return true;
+
   } else if (indicator < 0) { // not cacheable indicated by cache control header
+
+    // Cache-Controlによりキャッシュ不可と判断された場合
 
     // If a ttl is set, allow caching even if response contains
     // Cache-Control headers to prevent caching
@@ -6651,19 +6827,25 @@ HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *respons
       return false;
     }
   }
+  // indicator = 0の場合が存在するが、ここにはロジックは記述されていないことに注意
   // else no indication by cache control header
   // continue to determine cacheability
 
+  // レスポンスにExpiresヘッダが存在していたら、キャッシュ可能と判断される
   if (response->presence(MIME_PRESENCE_EXPIRES)) {
     TxnDebug("http_trans", "YES response w/ Expires");
     return true;
   }
+
   // if it's a 302 or 307 and no positive indicator from cache-control, reject
+  // レスポンスのステータスコードが「302 Movied Temporarily」、「307 Temporary Redirect」の場合には、キャッシュ不可と判断される
   if (response_code == HTTP_STATUS_MOVED_TEMPORARILY || response_code == HTTP_STATUS_TEMPORARY_REDIRECT) {
     TxnDebug("http_trans", "cache-control or expires header is required for 302");
     return false;
   }
+
   // if it's a POST request and no positive indicator from cache-control
+  // リクエストメソッドがPOSTで、かつ、cache.configのttl_in_cacheが設定されていない場合にはキャッシュ不可
   if (req_method == HTTP_WKSIDX_POST) {
     // allow caching for a POST requests w/o Expires but with a ttl
     if (s->cache_control.ttl_in_cache > 0) {
@@ -6674,23 +6856,31 @@ HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *respons
     }
   }
 
+  // ステータスコードが、200、304、203、301、300、410のいずれかであれば、キャッシュ可能
   if ((response_code == HTTP_STATUS_OK) || (response_code == HTTP_STATUS_NOT_MODIFIED) ||
       (response_code == HTTP_STATUS_NON_AUTHORITATIVE_INFORMATION) || (response_code == HTTP_STATUS_MOVED_PERMANENTLY) ||
       (response_code == HTTP_STATUS_MULTIPLE_CHOICES) || (response_code == HTTP_STATUS_GONE)) {
     TxnDebug("http_trans", "YES response code seems fine");
     return true;
   }
+
   // Notice that the following are not overridable by negative caching.
+  // ステータスコードが、303、401、407のいずれかであれば、キャッシュ不可
   if (response_code == HTTP_STATUS_SEE_OTHER || response_code == HTTP_STATUS_UNAUTHORIZED ||
       response_code == HTTP_STATUS_PROXY_AUTHENTICATION_REQUIRED) {
     return false;
   }
+
   // The response code does not look appropriate for caching. Check, however,
   // whether the user has specified it should be cached via negative response
   // caching configuration.
+  //
+  // ネガティブキャッシュとしてキャッシュ可能かどうかをチェックする(設定とステータスコードのチェックを行う)
   if (is_negative_caching_appropriate(s)) {
     return true;
   }
+
+  // 以上に当てはまらなければ、キャッシュ不可
   return false;
   /* Since we weren't caching response obtained with
      Authorization (the cache control stuff was commented out previously)
@@ -6703,6 +6893,7 @@ HttpTransact::is_response_cacheable(State *s, HTTPHdr *request, HTTPHdr *respons
 bool
 HttpTransact::is_request_valid(State *s, HTTPHdr *incoming_request)
 {
+
   RequestError_t incoming_error;
   URL *url = nullptr;
 
@@ -6820,6 +7011,7 @@ HttpTransact::is_request_valid(State *s, HTTPHdr *incoming_request)
 bool
 HttpTransact::is_request_retryable(State *s)
 {
+
   // If safe requests are  retryable, it should be safe to retry safe requests irrespective of bytes sent or connection state
   // according to RFC the following methods are safe (https://tools.ietf.org/html/rfc7231#section-4.2.1)
   // Otherwise, if there was no error establishing the connection (and we sent bytes)-- we cannot retry
@@ -6875,15 +7067,19 @@ HttpTransact::process_quick_http_filter(State *s, int method)
         deny_request = !acl.isNonstandardMethodAllowed(std::string_view(method_str, method_str_len));
       }
     }
+
     if (deny_request) {
+
       if (is_debug_tag_set("ip-allow")) {
         ip_text_buffer ipb;
+
         if (method != -1) {
           method_str     = hdrtoken_index_to_wks(method);
           method_str_len = strlen(method_str);
         } else if (!method_str) {
           method_str = s->hdr_info.client_request.method_get(&method_str_len);
         }
+
         TxnDebug("ip-allow", "Line %d denial for '%.*s' from %s", acl.source_line(), method_str_len, method_str,
                  ats_ip_ntop(&s->client_info.src_addr.sa, ipb, sizeof(ipb)));
       }
@@ -6897,6 +7093,12 @@ HttpTransact::process_quick_http_filter(State *s, int method)
 bool
 HttpTransact::will_this_request_self_loop(State *s)
 {
+
+  // この関数で出力されるログのサンプル
+  //     DEBUG: <HttpTransact.cc:6733 (will_this_request_self_loop)> (http_transact) [0] max_proxy_cycles = 0
+  //     DEBUG: <HttpTransact.cc:6739 (will_this_request_self_loop)> (http_transact) [0] dst_port = 443 local_port = 8080
+  //     DEBUG: <HttpTransact.cc:6792 (will_this_request_self_loop)> (http_transact) [0] count = 0 <= max_proxy_cycles = 0 : allowing loop
+
 
   // The self-loop detection for this ATS node will allow up to max_proxy_cycles
   // (each time it sees it returns to itself it is one cycle) before declaring a self-looping condition detected.
@@ -6956,7 +7158,7 @@ HttpTransact::will_this_request_self_loop(State *s)
     // クライアントリクエストからViaヘッダのオブジェクトを取得する
     MIMEField *via_field = s->hdr_info.client_request.field_find(MIME_FIELD_VIA, MIME_LEN_VIA);
 
-    // 「Via: http/1.1 hostname[f6f5162d-5a02-4d10-ac6e-35aede508fe5] (ApacheTrafficServer/7.0.0)」のような出力になるらしい
+    // 「Via: http/1.1 hostname[f6f5162d-5a02-4d10-ac6e-35aede508fe5] (ApacheTrafficServer/7.0.0)」のような出力になるらしい (これはProxyされる場合だけUUIDが付与される模様)
     // https://github.com/apache/trafficserver/pull/804
     std::string_view uuid{Machine::instance()->uuid.getString()};
 
@@ -7093,6 +7295,7 @@ HttpTransact::handle_content_length_header(State *s, HTTPHdr *header, HTTPHdr *b
     if (s->source == SOURCE_CACHE ||
         (s->source == SOURCE_HTTP_ORIGIN_SERVER && s->hdr_info.server_response.status_get() == HTTP_STATUS_NOT_MODIFIED &&
          s->cache_info.object_read != nullptr)) {
+
       // If there is no content-length header, we can
       //   insert one since the cache knows definitely
       //   how long the object is unless we're in a
@@ -7115,7 +7318,9 @@ HttpTransact::handle_content_length_header(State *s, HTTPHdr *header, HTTPHdr *b
         header->set_content_length(cl);
         s->hdr_info.trust_response_cl = true;
       }
+
     } else {
+
       // Check to see if there is no content length
       //  header because the response precludes a
       // body
@@ -7130,6 +7335,7 @@ HttpTransact::handle_content_length_header(State *s, HTTPHdr *header, HTTPHdr *b
       header->field_delete(MIME_FIELD_CONTENT_LENGTH, MIME_LEN_CONTENT_LENGTH);
       ink_assert(s->range_setup != RANGE_NOT_TRANSFORM_REQUESTED);
     }
+
   }
   return;
 } /* End HttpTransact::handle_content_length_header */
@@ -7166,8 +7372,10 @@ HttpTransact::handle_request_keep_alive_headers(State *s, HTTPVersion ver, HTTPH
   } else if (ver.get_major() == 0) { /* No K-A for 0.9 apps */
     ka_action = KA_DISABLED;
   }
+
   // If preconditions are met, figure out what action to take
   if (ka_action == KA_UNKNOWN) {
+
     int method = heads->method_get_wksidx();
     if (method == HTTP_WKSIDX_GET || method == HTTP_WKSIDX_HEAD || method == HTTP_WKSIDX_OPTIONS || method == HTTP_WKSIDX_PURGE ||
         method == HTTP_WKSIDX_DELETE || method == HTTP_WKSIDX_TRACE) {
@@ -7274,6 +7482,7 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
 
   // Handle the upgrade cases
   if (s->is_upgrade_request && heads->status_get() == HTTP_STATUS_SWITCHING_PROTOCOL && s->source == SOURCE_HTTP_ORIGIN_SERVER) {
+
     s->client_info.keep_alive = HTTP_NO_KEEPALIVE;
     if (s->is_websocket) {
       TxnDebug("http_trans", "transaction successfully upgraded to websockets.");
@@ -7436,7 +7645,7 @@ bool
 HttpTransact::delete_all_document_alternates_and_return(State *s, bool cache_hit)
 {
 
-  // VIAヘッダの値をセットする
+  // キャッシュヒットしたらVIAヘッダの値をセットする
   if (cache_hit == true) {
     // ToDo: Should support other levels of cache hits here, but the cache does not support it (yet)
     if (SQUID_HIT_RAM == s->cache_info.hit_miss_code) {
@@ -7494,6 +7703,7 @@ HttpTransact::delete_all_document_alternates_and_return(State *s, bool cache_hit
         TxnDebug("http_trans", "Decrementing max_forwards to %d", max_forwards);
         s->hdr_info.client_request.value_set_int(MIME_FIELD_MAX_FORWARDS, MIME_LEN_MAX_FORWARDS, max_forwards);
       }
+
     }
   }
 
@@ -7588,6 +7798,7 @@ HttpTransact::get_max_age(HTTPHdr *response)
 int
 HttpTransact::calculate_document_freshness_limit(State *s, HTTPHdr *response, time_t response_date, bool *heuristic)
 {
+
   bool expires_set, date_set, last_modified_set;
   time_t date_value, expires_value, last_modified_value;
   MgmtInt min_freshness_bounds, max_freshness_bounds;
@@ -7676,10 +7887,12 @@ HttpTransact::calculate_document_freshness_limit(State *s, HTTPHdr *response, ti
     min_freshness_bounds = std::max(min_freshness_bounds, s->txn_conf->cache_heuristic_min_lifetime);
     max_freshness_bounds = std::min(max_freshness_bounds, s->txn_conf->cache_heuristic_max_lifetime);
   }
+
   // Now clip the freshness limit.
   if (freshness_limit > max_freshness_bounds) {
     freshness_limit = max_freshness_bounds;
   }
+
   if (freshness_limit < min_freshness_bounds) {
     freshness_limit = min_freshness_bounds;
   }
@@ -7705,6 +7918,7 @@ HttpTransact::calculate_document_freshness_limit(State *s, HTTPHdr *response, ti
 HttpTransact::Freshness_t
 HttpTransact::what_is_document_freshness(State *s, HTTPHdr *client_request, HTTPHdr *cached_obj_response)
 {
+
   bool heuristic, do_revalidate = false;
   int age_limit;
   int fresh_limit;
@@ -7812,10 +8026,12 @@ HttpTransact::what_is_document_freshness(State *s, HTTPHdr *client_request, HTTP
   cooked_cc_mask = client_request->get_cooked_cc_mask();
   cc_mask        = (MIME_COOKED_MASK_CC_MAX_STALE | MIME_COOKED_MASK_CC_MIN_FRESH | MIME_COOKED_MASK_CC_MAX_AGE);
   if (cooked_cc_mask & cc_mask) {
+
     /////////////////////////////////////////////////
     // if max-stale set, relax the freshness limit //
     /////////////////////////////////////////////////
     if (cooked_cc_mask & MIME_COOKED_MASK_CC_MAX_STALE) {
+
       if (os_specifies_revalidate) {
         TxnDebug("http_match", "OS specifies revalidation; ignoring client's max-stale request...");
       } else {
@@ -7915,30 +8131,44 @@ HttpTransact::what_is_document_freshness(State *s, HTTPHdr *client_request, HTTP
 HttpTransact::Authentication_t
 HttpTransact::AuthenticationNeeded(const OverridableHttpConfigParams *p, HTTPHdr *client_request, HTTPHdr *obj_response)
 {
+
   ///////////////////////////////////////////////////////////////////////
   // from RFC2068, sec 14.8, if a client request has the Authorization //
   // header set, we can't serve it unless the response is public, or   //
   // if it has a Cache-Control revalidate flag, and we do revalidate.  //
   ///////////////////////////////////////////////////////////////////////
 
+
+  // cache_ignore_auth(=proxy.config.http.cache.ignore_authentication)の設定値が無視しない(つまり、0)、かつ、Authorizationヘッダが存在していること
+  //  cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-cache-ignore-authentication
   if ((p->cache_ignore_auth == 0) && client_request->presence(MIME_PRESENCE_AUTHORIZATION)) {
 
-    if (obj_response->is_cache_control_set(HTTP_VALUE_MUST_REVALIDATE) ||
-        obj_response->is_cache_control_set(HTTP_VALUE_PROXY_REVALIDATE)) {
+    if (obj_response->is_cache_control_set(HTTP_VALUE_MUST_REVALIDATE) || obj_response->is_cache_control_set(HTTP_VALUE_PROXY_REVALIDATE)) {
+      // Cache-Controlヘッダに「must-revalidate」または「proxy-revalidate」が指定された場合
+      //   cf. https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control
       return AUTHENTICATION_MUST_REVALIDATE;
     } else if (obj_response->is_cache_control_set(HTTP_VALUE_PROXY_REVALIDATE)) {
+      // Cache-Controlヘッダに「proxy-revalidate」が指定された場合 (TBD: その手前のifでひっかりそうな気がするので、このコードパスに入らない気がする)
+      //   cf. https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control
       return AUTHENTICATION_MUST_REVALIDATE;
     } else if (obj_response->is_cache_control_set(HTTP_VALUE_PUBLIC)) {
+      // Cache-Controlヘッダに「public」が指定された場合
+      //   cf. https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control
       return AUTHENTICATION_SUCCESS;
     } else {
+
+      // オブジェクト中に「@WWW-Auth」が見つかって、クライアントリクエストがGETの場合
       if (obj_response->field_find("@WWW-Auth", 9) && client_request->method_get_wksidx() == HTTP_WKSIDX_GET) {
         return AUTHENTICATION_CACHE_AUTH;
       }
+
+      // これ以外のパターンについては必ずproxyをさせる
       return AUTHENTICATION_MUST_PROXY;
     }
 
   }
 
+  // オブジェクトのレスポンスに「WWW-Auth」が含まれていて、クライアントからのリクエストメソッドがGETメソッドの場合
   if (obj_response->field_find("@WWW-Auth", 9) && client_request->method_get_wksidx() == HTTP_WKSIDX_GET) {
     return AUTHENTICATION_CACHE_AUTH;
   }
@@ -7970,6 +8200,7 @@ HttpTransact::handle_parent_died(State *s)
 void
 HttpTransact::handle_server_died(State *s)
 {
+
   const char *reason    = nullptr;
   const char *body_type = "UNKNOWN";
   HTTPStatus status     = HTTP_STATUS_BAD_GATEWAY;
@@ -8174,6 +8405,7 @@ HttpTransact::build_request(State *s, HTTPHdr *base_request, HTTPHdr *outgoing_r
   // HttpTransactHeaders::convert_request(outgoing_version, outgoing_request); // commented out this idea
 
   URL *url = outgoing_request->url_get();
+
   // Remove fragment from upstream URL
   url->fragment_set(nullptr, 0);
 
@@ -8220,6 +8452,8 @@ HttpTransact::build_request(State *s, HTTPHdr *base_request, HTTPHdr *outgoing_r
   // from the O.S., we will save bandwidth between proxy and O.S.
   if (s->current.mode == GENERIC_PROXY) {
     if (is_request_likely_cacheable(s, base_request)) {
+
+      //   cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-cache-when-to-revalidate
       if (s->txn_conf->cache_when_to_revalidate != 4) {
         TxnDebug("http_trans", "request like cacheable and conditional headers removed");
         HttpTransactHeaders::remove_conditional_headers(outgoing_request);
@@ -8233,6 +8467,9 @@ HttpTransact::build_request(State *s, HTTPHdr *base_request, HTTPHdr *outgoing_r
     }
   }
 
+  // proxy.config.http.send_100_continue_response(デフォルト:0)
+  // 0だと、TrafficserverはPostを受け取るまで待って、受け取りが完了したらオリジンサーバにリクエストを出す
+  //  cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-send-100-continue-response
   if (s->http_config_param->send_100_continue_response) {
     HttpTransactHeaders::remove_100_continue_headers(s, outgoing_request);
     TxnDebug("http_trans", "request expect 100-continue headers removed");
@@ -8252,6 +8489,7 @@ HttpTransact::build_request(State *s, HTTPHdr *base_request, HTTPHdr *outgoing_r
   DUMP_HEADER("http_hdrs", outgoing_request, s->state_machine_id, "Proxy's Request");
 
   HTTP_INCREMENT_DYN_STAT(http_outgoing_requests_stat);
+
 }
 
 // build a (status_code) response based upon the given info
@@ -8277,6 +8515,7 @@ void
 HttpTransact::build_response(State *s, HTTPHdr *base_response, HTTPHdr *outgoing_response, HTTPVersion outgoing_version,
                              HTTPStatus status_code, const char *reason_phrase)
 {
+
   if (reason_phrase == nullptr) {
     reason_phrase = http_hdr_reason_lookup(status_code);
   }
@@ -8284,6 +8523,7 @@ HttpTransact::build_response(State *s, HTTPHdr *base_response, HTTPHdr *outgoing
   if (base_response == nullptr) {
     HttpTransactHeaders::build_base_response(outgoing_response, status_code, reason_phrase, strlen(reason_phrase), s->current.now);
   } else {
+
     if ((status_code == HTTP_STATUS_NONE) || (status_code == base_response->status_get())) {
       HttpTransactHeaders::copy_header_fields(base_response, outgoing_response, s->txn_conf->fwd_proxy_auth_to_parent);
 
@@ -8413,10 +8653,46 @@ HttpTransact::build_response(State *s, HTTPHdr *base_response, HTTPHdr *outgoing
 
   // 「http_hdrs」タグがセットされていた場合には、デバッグ情報を出力する
   if (is_debug_tag_set("http_hdrs")) {
+
+    // 下記に存在する2つの行で「Base Header for Building Response」や「Proxy's Response 2」をデバッグログに出力しています。
+    // 最初の「Base Header for Building Respons」の場合と比較して、「Server」ヘッダ書き換え、「Age」追加、「Connection」追加、「Via」追加が「Proxy's Response 2」では行われていることがわかります。
+    // 
+    // 以下は出力例です(最初の1行はここで出力していないデバッグログであることに注意)
+    //    [Jun 23 09:31:10.988] [ET_NET 3] DEBUG: <HttpTransactHeaders.cc:1178 (add_server_header_to_response)> (http_trans) Adding Server: ATS/9.2.0
+    //    +++++++++ Base Header for Building Response +++++++++
+    //    -- State Machine Id: 0
+    //    HTTP/1.1 200 OK
+    //    Date: Thu, 22 Jun 2023 22:49:37 GMT
+    //    Server: Apache/2.4.52 (Ubuntu)
+    //    Last-Modified: Fri, 01 Jul 2022 01:50:03 GMT
+    //    Accept-Ranges: bytes
+    //    Content-Length: 10671
+    //    Vary: Accept-Encoding
+    //    Content-Type: text/html
+    //    Etag: "29af-5e2b49ad71a9a"
+    //    
+    //    +++++++++ Proxy's Response 2 +++++++++
+    //    -- State Machine Id: 0
+    //    HTTP/1.1 200 OK
+    //    Date: Thu, 22 Jun 2023 22:49:37 GMT
+    //    Server: ATS/9.2.0
+    //    Last-Modified: Fri, 01 Jul 2022 01:50:03 GMT
+    //    Accept-Ranges: bytes
+    //    Content-Length: 10671
+    //    Vary: Accept-Encoding
+    //    Content-Type: text/html
+    //    Etag: "29af-5e2b49ad71a9a"
+    //    Age: 6093
+    //    Connection: keep-alive
+    //    Via: http/1.1 traffic_server (ApacheTrafficServer/9.2.0 [uScHs f p eN:t cCHp s ])
+    // 
+
     if (base_response) {
+      // 上にデバッグログサンプルを記載しているので参照すること
       DUMP_HEADER("http_hdrs", base_response, s->state_machine_id, "Base Header for Building Response");
     }
 
+    // 上にデバッグログサンプルを記載しているので参照すること
     DUMP_HEADER("http_hdrs", outgoing_response, s->state_machine_id, "Proxy's Response 2");
   }
 
@@ -8717,6 +8993,7 @@ HttpTransact::get_error_string(int erno)
   }
 }
 
+// キャッシュしている現在時刻を返す
 ink_time_t
 ink_local_time()
 {

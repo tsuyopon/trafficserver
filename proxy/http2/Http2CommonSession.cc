@@ -241,12 +241,14 @@ Http2CommonSession::state_start_frame_read(int event, void *edata)
 int
 Http2CommonSession::do_start_frame_read(Http2ErrorCode &ret_error)
 {
+
   ret_error = Http2ErrorCode::HTTP2_ERROR_NO_ERROR;
   ink_release_assert(this->_read_buffer_reader->read_avail() >= (int64_t)HTTP2_FRAME_HEADER_LEN);
 
   uint8_t buf[HTTP2_FRAME_HEADER_LEN];
   unsigned nbytes;
 
+  // フレームを受信すると呼ばれます
   Http2SsnDebug("receiving frame header");
   nbytes = copy_from_buffer_reader(buf, this->_read_buffer_reader, sizeof(buf));
 
@@ -263,6 +265,13 @@ Http2CommonSession::do_start_frame_read(Http2ErrorCode &ret_error)
     this->cur_frame_from_early_data = true;
   }
 
+
+  // 下記にログを示すます (間にrcv_window_update_frameも時系列として含まれますが記載しておきます)// 
+  // [Jun 23 09:31:10.956] [ET_NET 3] DEBUG: <Http2CommonSession.cc:250 (do_start_frame_read)> (http2_cs) [0] receiving frame header
+  // [Jun 23 09:31:10.956] [ET_NET 3] DEBUG: <Http2CommonSession.cc:266 (do_start_frame_read)> (http2_cs) [0] frame header length=4, type=8, flags=0x0, streamid=0
+  // [Jun 23 09:31:10.956] [ET_NET 3] DEBUG: <Http2ConnectionState.cc:803 (rcv_window_update_frame)> (http2_con) [0] [0] Received WINDOW_UPDATE frame - updated to: 33554432 delta: 33488897
+  // [Jun 23 09:31:10.956] [ET_NET 3] DEBUG: <Http2CommonSession.cc:250 (do_start_frame_read)> (http2_cs) [0] receiving frame header
+  // [Jun 23 09:31:10.956] [ET_NET 3] DEBUG: <Http2CommonSession.cc:266 (do_start_frame_read)> (http2_cs) [0] frame header length=27, type=1, flags=0x5, streamid=1
   Http2SsnDebug("frame header length=%u, type=%u, flags=0x%x, streamid=%u", (unsigned)this->current_hdr.length,
                 (unsigned)this->current_hdr.type, (unsigned)this->current_hdr.flags, this->current_hdr.streamid);
 

@@ -192,12 +192,17 @@ ticket_block_create(char *ticket_key_data, int ticket_key_len)
     Error("SSL session ticket key is too short (>= 48 bytes are required)");
     goto fail;
   }
+
+  // TS起動時にデフォルトで「ssl_ticket_enabled=1 ticket_key_name=ticket.key」などの設定を入れなかったとしても下記ログが出力されます。
+  //   DEBUG: <SSLCertLookup.cc:195 (ticket_block_create)> (ssl) Create 1 ticket key blocks
   Debug("ssl", "Create %d ticket key blocks", num_ticket_keys);
 
   keyblock = ticket_block_alloc(num_ticket_keys);
 
   // Slurp all the keys in the ticket key file. We will encrypt with the first key, and decrypt
   // with any key (for rotation purposes).
+  // 複数の鍵情報を登録することもできます。
+  // セッションチケットで使われている
   for (unsigned i = 0; i < num_ticket_keys; ++i) {
     const char *data = (const char *)ticket_key_data + (i * sizeof(ssl_ticket_key_t));
 
@@ -354,6 +359,7 @@ SSLCertLookup::find(const IpEndpoint &address) const
 int
 SSLCertLookup::insert(const char *name, SSLCertContext const &cc)
 {
+
 #ifdef OPENSSL_IS_BORINGSSL
   switch (cc.ctx_type) {
   case SSLCertContextType::GENERIC:
@@ -389,6 +395,7 @@ SSLCertLookup::insert(const IpEndpoint &address, SSLCertContext const &cc)
 #else
   return this->ssl_storage->insert(key.get(), cc);
 #endif
+
 }
 
 unsigned
@@ -453,15 +460,21 @@ SSLContextStorage::insert(const char *name, SSLCertContext const &cc)
   return idx;
 }
 
+// X509サーバ証明書中のSAN情報を取得して、ワイルドカードかそれ以外かで判断してクラス変数wilddomainsやhostnamesに登録を行う関数
+// TS起動時に呼ばれる。
 int
 SSLContextStorage::insert(const char *name, int idx)
 {
+
   ats_wildcard_matcher wildcard;
   char lower_case_name[TS_MAX_HOST_NAME_LEN + 1];
   transform_lower(name, lower_case_name);
 
   shared_SSL_CTX ctx = this->ctx_store[idx].getCtx();
   if (wildcard.match(lower_case_name)) {
+
+    // サーバ証明書中のSANがワイルドカードにマッチした場合
+
     // Strip the wildcard and store the subdomain
     const char *subdomain = index(lower_case_name, '*');
     if (subdomain && subdomain[1] == '.') {
@@ -469,6 +482,7 @@ SSLContextStorage::insert(const char *name, int idx)
     } else {
       subdomain = nullptr;
     }
+
     if (subdomain) {
       if (auto it = this->wilddomains.find(subdomain); it != this->wilddomains.end()) {
         Debug("ssl", "previously indexed '%s' with SSL_CTX #%d, cannot index it with SSL_CTX #%d now", lower_case_name, it->second,
@@ -476,16 +490,29 @@ SSLContextStorage::insert(const char *name, int idx)
         idx = -1;
       } else {
         this->wilddomains.emplace(subdomain, idx);
+
+        // TS起動時にサーバ証明書のSAN中にワイルドカードドメインがあればここで表示される
+        //   DEBUG: <SSLCertLookup.cc:479 (insert)> (ssl) indexed '*.example.com' with SSL_CTX 0x55fd239ede00 [1]
         Debug("ssl", "indexed '%s' with SSL_CTX %p [%d]", lower_case_name, ctx.get(), idx);
       }
     }
   } else {
+
+    // サーバ証明書中のSANがワイルドカードにマッチしなかった場合
+
     if (auto it = this->hostnames.find(lower_case_name); it != this->hostnames.end() && idx != it->second) {
       Debug("ssl", "previously indexed '%s' with SSL_CTX %d, cannot index it with SSL_CTX #%d now", lower_case_name, it->second,
             idx);
       idx = -1;
     } else {
       this->hostnames.emplace(lower_case_name, idx);
+
+      // TS起動時にサーバ証明書のSAN中にワイルドカード以外のドメインがあればこちらで表示する。
+      //
+      // 以下は起動時に出力されているログの例。「*」はX509証明書中のSANに含まれているものではないが出力されているので、デフォルトで入るもの?
+      //   DEBUG: <SSLCertLookup.cc:489 (insert)> (ssl) indexed '*' with SSL_CTX 0x55fd239ede00 [0]
+      //   DEBUG: <SSLCertLookup.cc:489 (insert)> (ssl) indexed 'bar.com' with SSL_CTX 0x55fd239ede00 [2]
+      //   DEBUG: <SSLCertLookup.cc:489 (insert)> (ssl) indexed 'test.co.jp' with SSL_CTX 0x55fd239ede00 [3]
       Debug("ssl", "indexed '%s' with SSL_CTX %p [%d]", lower_case_name, ctx.get(), idx);
     }
   }
@@ -503,10 +530,12 @@ SSLContextStorage::printWildDomains() const
 SSLCertContext *
 SSLContextStorage::lookup(const std::string &name)
 {
+
   // First look for an exact name match
   if (auto it = this->hostnames.find(name); it != this->hostnames.end()) {
     return &(this->ctx_store[it->second]);
   }
+
   // Try lower casing it
   char lower_case_name[TS_MAX_HOST_NAME_LEN + 1];
   transform_lower(name, lower_case_name);

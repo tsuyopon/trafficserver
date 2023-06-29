@@ -41,11 +41,19 @@
 
 using namespace std::literals;
 
+// キャッシュ可能なメソッドの判断を行います
 bool
 HttpTransactHeaders::is_method_cacheable(const HttpConfigParams *http_config_param, const int method)
 {
+
+  // キャッシュ可能なのはメソッドが以下のいずれかの場合のみです。
+  //   1. GET
+  //   2. HEAD
+  //   3. POST (ただし、proxy.config.http.cache.post_methodの値が1であること)
+  //        cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-cache-post-method
   return (method == HTTP_WKSIDX_GET || method == HTTP_WKSIDX_HEAD ||
           (http_config_param->cache_post_method == 1 && method == HTTP_WKSIDX_POST));
+
 }
 
 // cf. https://docs.trafficserver.apache.org/en/latest/developer-guide/cache-architecture/architecture.en.html#cacheability
@@ -61,14 +69,17 @@ HttpTransactHeaders::is_method_cache_lookupable(int method)
 bool
 HttpTransactHeaders::is_this_a_hop_by_hop_header(const char *field_name)
 {
+
   if (!hdrtoken_is_wks(field_name)) {
     return (false);
   }
+
   if ((hdrtoken_wks_to_flags(field_name) & HTIF_HOPBYHOP) && (field_name != MIME_FIELD_KEEP_ALIVE)) {
     return (true);
   } else {
     return (false);
   }
+
 }
 
 bool
@@ -99,6 +110,8 @@ HttpTransactHeaders::is_status_an_error_response(HTTPStatus response_code)
   return (comparable_response_code >= 400) && (comparable_response_code <= 599);
 }
 
+// 冪等性があるとされている下記メソッドであればtrueを返す
+//   CONNECT, DELETE, GET, HEAD, PUT, OPTIONS, TRACE
 bool
 HttpTransactHeaders::is_method_idempotent(int method)
 {
@@ -187,6 +200,7 @@ void
 HttpTransactHeaders::build_base_response(HTTPHdr *outgoing_response, HTTPStatus status, const char *reason_phrase,
                                          int reason_phrase_len, ink_time_t date)
 {
+
   if (!outgoing_response->valid()) {
     outgoing_response->create(HTTP_TYPE_RESPONSE);
   }
@@ -197,15 +211,20 @@ HttpTransactHeaders::build_base_response(HTTPHdr *outgoing_response, HTTPStatus 
   outgoing_response->status_set(status);
   outgoing_response->reason_set(reason_phrase, reason_phrase_len);
   outgoing_response->set_date(date);
+
 }
 
 ////////////////////////////////////////////////////////////////////////
 // Copy all non hop-by-hop header fields from src_hdr to new_hdr.
 // If header Date: is not present or invalid in src_hdr,
 // then the given date will be used.
+
+// 呼び出し元をみると第３引数のretain_proxy_auth_hdrsにはproxy.config.http.forward.proxy_auth_to_parentの設定値が入るようになっています。認証ヘッダのプロキシを維持するかどうかの設定
+//    https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy.config.http.forward.proxy_auth_to_parent
 void
 HttpTransactHeaders::copy_header_fields(HTTPHdr *src_hdr, HTTPHdr *new_hdr, bool retain_proxy_auth_hdrs, ink_time_t date)
 {
+
   ink_assert(src_hdr->valid());
   ink_assert(!new_hdr->valid());
 
@@ -230,17 +249,27 @@ HttpTransactHeaders::copy_header_fields(HTTPHdr *src_hdr, HTTPHdr *new_hdr, bool
   //         should be modified when the decision is made to dechunk it
 
   for (auto &field : *new_hdr) {
+
     if (field.m_wks_idx == -1) {
       continue;
     }
 
     int field_flags = hdrtoken_index_to_flags(field.m_wks_idx);
 
+    // ヘッダにはフラグが付与されていて、それにHTIF_HOPBYHOPが付与されている場合にはヘッダが通過することを基本的に許可しない
+    //   HTIF_HOPBYHOPフラグが設定されているのは、Connection、Keep-Alive、Proxy-Authenticate、Proxy-Authorization、Proxy-Connection、TE、Upgrade、X-ID のヘッダのみ
     if (field_flags & HTIF_HOPBYHOP) {
+
       // Delete header if not in special proxy_auth retention mode
+      //
+      // retain_proxy_auth_hdrs(proxy.config.http.forward.proxy_auth_to_parent)の設定値が0、または、ヘッダにHTIF_PROXYAUTHフラグが定義されていない場合にはフィールドを削除する。
+      // 補足
+      //   - HTIF_PROXYAUTHフラグが設定されているのは、Proxy-Authenticate, Proxy-Authorization
       if ((!retain_proxy_auth_hdrs) || (!(field_flags & HTIF_PROXYAUTH))) {
         new_hdr->field_delete(&field);
       }
+
+    // DATEヘッダが存在する場合には date_hdr フラグをセット
     } else if (field.m_wks_idx == MIME_WKSIDX_DATE) {
       date_hdr = true;
     }
@@ -250,6 +279,7 @@ HttpTransactHeaders::copy_header_fields(HTTPHdr *src_hdr, HTTPHdr *new_hdr, bool
   if ((date_hdr == false) && (date > 0)) {
     new_hdr->set_date(date);
   }
+
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -257,6 +287,7 @@ HttpTransactHeaders::copy_header_fields(HTTPHdr *src_hdr, HTTPHdr *new_hdr, bool
 void
 HttpTransactHeaders::convert_request(HTTPVersion outgoing_ver, HTTPHdr *outgoing_request)
 {
+
   if (outgoing_ver == HTTPVersion(1, 0)) {
     convert_to_1_0_request_header(outgoing_request);
   } else if (outgoing_ver == HTTPVersion(1, 1)) {
@@ -265,6 +296,7 @@ HttpTransactHeaders::convert_request(HTTPVersion outgoing_ver, HTTPHdr *outgoing
     Debug("http_trans", "[HttpTransactHeaders::convert_request]"
                         "Unsupported Version - passing through");
   }
+
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -273,6 +305,7 @@ HttpTransactHeaders::convert_request(HTTPVersion outgoing_ver, HTTPHdr *outgoing
 void
 HttpTransactHeaders::convert_response(HTTPVersion outgoing_ver, HTTPHdr *outgoing_response)
 {
+
   if (outgoing_ver == HTTPVersion(1, 0)) {
     // HTTP/1.0
     convert_to_1_0_response_header(outgoing_response);
@@ -291,6 +324,7 @@ HttpTransactHeaders::convert_response(HTTPVersion outgoing_ver, HTTPHdr *outgoin
 void
 HttpTransactHeaders::convert_to_1_0_request_header(HTTPHdr *outgoing_request)
 {
+
   // These are required
   ink_assert(outgoing_request->url_get()->valid());
 
@@ -307,6 +341,7 @@ HttpTransactHeaders::convert_to_1_0_request_header(HTTPHdr *outgoing_request)
   // so specify that response should use identity transfer coding.
   // outgoing_request->value_insert(MIME_FIELD_TE, "identity;q=1.0");
   // outgoing_request->value_insert(MIME_FIELD_TE, "chunked;q=0.0");
+
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -314,6 +349,7 @@ HttpTransactHeaders::convert_to_1_0_request_header(HTTPHdr *outgoing_request)
 void
 HttpTransactHeaders::convert_to_1_1_request_header(HTTPHdr *outgoing_request)
 {
+
   // These are required
   ink_assert(outgoing_request->url_get()->valid());
   ink_assert(outgoing_request->version_get() == HTTPVersion(1, 1));
@@ -325,6 +361,7 @@ HttpTransactHeaders::convert_to_1_1_request_header(HTTPHdr *outgoing_request)
   // so specify that response should use identity transfer coding.
   // outgoing_request->value_insert(MIME_FIELD_TE, "identity;q=1.0");
   // outgoing_request->value_insert(MIME_FIELD_TE, "chunked;q=0.0");
+
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -332,6 +369,7 @@ HttpTransactHeaders::convert_to_1_1_request_header(HTTPHdr *outgoing_request)
 void
 HttpTransactHeaders::convert_to_1_0_response_header(HTTPHdr *outgoing_response)
 {
+
   //     // These are required
   //     ink_assert(outgoing_response->status_get());
   //     ink_assert(outgoing_response->reason_get());
@@ -349,12 +387,14 @@ HttpTransactHeaders::convert_to_1_0_response_header(HTTPHdr *outgoing_response)
 void
 HttpTransactHeaders::convert_to_1_1_response_header(HTTPHdr *outgoing_response)
 {
+
   // These are required
   ink_assert(outgoing_response->status_get());
 
   // Set HTTP version to 1.1
   //    ink_assert(outgoing_response->version_get() == HTTPVersion (1, 1));
   outgoing_response->version_set(HTTPVersion(1, 1));
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -904,9 +944,12 @@ HttpTransactHeaders::insert_via_header_in_response(HttpTransact::State *s, HTTPH
   header->value_append(MIME_FIELD_VIA, MIME_LEN_VIA, new_via_string, via_string - new_via_string, true);
 }
 
+// outgoingで指定されるのはオリジンサーバのヘッダです
 void
 HttpTransactHeaders::remove_conditional_headers(HTTPHdr *outgoing)
 {
+
+  // If-Modified-Since, If-Unmodified-Since, If-Match, If-None-Matchがオリジンへのリクエストヘッダに存在していたら、それらは削除する。
   if (outgoing->presence(MIME_PRESENCE_IF_MODIFIED_SINCE | MIME_PRESENCE_IF_UNMODIFIED_SINCE | MIME_PRESENCE_IF_MATCH |
                          MIME_PRESENCE_IF_NONE_MATCH)) {
     outgoing->field_delete(MIME_FIELD_IF_MODIFIED_SINCE, MIME_LEN_IF_MODIFIED_SINCE);
@@ -923,6 +966,7 @@ HttpTransactHeaders::remove_100_continue_headers(HttpTransact::State *s, HTTPHdr
   int len            = 0;
   const char *expect = s->hdr_info.client_request.value_get(MIME_FIELD_EXPECT, MIME_LEN_EXPECT, &len);
 
+  // Expectヘッダが「100-Continue」と一致したら、オリジンへのリクエストヘッダからExpectヘッダを削除します
   if ((len == HTTP_LEN_100_CONTINUE) && (strncasecmp(expect, HTTP_VALUE_100_CONTINUE, HTTP_LEN_100_CONTINUE) == 0)) {
     outgoing->field_delete(MIME_FIELD_EXPECT, MIME_LEN_EXPECT);
   }
@@ -972,12 +1016,16 @@ HttpTransactHeaders::add_global_user_agent_header_to_request(const OverridableHt
 void
 HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTPHdr *request)
 {
+
+  // proxy.config.http.insert_forwardedの値によって下記では取得されるフラグが分かれてきます。
+  //  cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-insert-forwarded
   HttpForwarded::OptionBitSet optSet = s->txn_conf->insert_forwarded;
 
   if (optSet.any()) { // One or more Forwarded parameters enabled, so insert/append to Forwarded header.
 
     ts::LocalBufferWriter<1024> hdr;
 
+    // 設定値が「for」の場合
     if (optSet[HttpForwarded::FOR] and ats_is_ip(&s->client_info.src_addr.sa)) {
       // NOTE:  The logic within this if statement assumes that hdr is empty at this point.
 
@@ -1004,6 +1052,7 @@ HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTP
       }
     }
 
+    // 設定値が「by=unknown」の場合
     if (optSet[HttpForwarded::BY_UNKNOWN]) {
       if (hdr.size()) {
         hdr << ';';
@@ -1012,6 +1061,7 @@ HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTP
       hdr << "by=unknown";
     }
 
+    // 設定値が「by=servername」の場合
     if (optSet[HttpForwarded::BY_SERVER_NAME]) {
       if (hdr.size()) {
         hdr << ';';
@@ -1022,6 +1072,7 @@ HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTP
 
     const Machine &m = *Machine::instance();
 
+    // 設定値が「by=uuid」の場合
     if (optSet[HttpForwarded::BY_UUID] and m.uuid.valid()) {
       if (hdr.size()) {
         hdr << ';';
@@ -1030,6 +1081,7 @@ HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTP
       hdr << "by=_" << m.uuid.getString();
     }
 
+    // 設定値が「by=ip」の場合
     if (optSet[HttpForwarded::BY_IP] and m.ip.isValid()) {
       if (hdr.size()) {
         hdr << ';';
@@ -1071,6 +1123,7 @@ HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTP
       n_proto = s->state_machine->populate_client_protocol(protoBuf.data(), protoBuf.size());
     }
 
+    // 設定値が「proto」の場合
     if (optSet[HttpForwarded::PROTO] and (n_proto > 0)) {
       if (hdr.size()) {
         hdr << ';';
@@ -1085,6 +1138,7 @@ HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTP
       }
     }
 
+    // 設定値が「host」の場合
     if (optSet[HttpForwarded::HOST]) {
       const MIMEField *hostField = s->hdr_info.client_request.field_find(MIME_FIELD_HOST, MIME_LEN_HOST);
 
@@ -1127,8 +1181,13 @@ HttpTransactHeaders::add_forwarded_field_to_request(HttpTransact::State *s, HTTP
         }
       };
 
+      // 設定値が「connection=compact」の場合
       Conn(HttpForwarded::CONNECTION_COMPACT, HttpTransactHeaders::ProtocolStackDetail::Compact);
+
+      // 設定値が「connection=std」の場合
       Conn(HttpForwarded::CONNECTION_STD, HttpTransactHeaders::ProtocolStackDetail::Standard);
+
+      // 設定値が「connection=full」の場合
       Conn(HttpForwarded::CONNECTION_FULL, HttpTransactHeaders::ProtocolStackDetail::Full);
     }
 

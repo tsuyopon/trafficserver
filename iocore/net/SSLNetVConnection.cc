@@ -259,6 +259,7 @@ debug_certificate_name(const char *msg, X509_NAME *name)
 int
 SSLNetVConnection::_ssl_read_from_net(EThread *lthread, int64_t &ret)
 {
+
   NetState *s            = &this->read;
   MIOBufferAccessor &buf = s->vio.buffer;
   int event              = SSL_READ_ERROR_NONE;
@@ -273,6 +274,7 @@ SSLNetVConnection::_ssl_read_from_net(EThread *lthread, int64_t &ret)
 
   bytes_read = 0;
   while (sslErr == SSL_ERROR_NONE && bytes_read < toread) {
+
     int64_t nread             = 0;
     int64_t block_write_avail = buf.writer()->block_write_avail();
     ink_release_assert(block_write_avail > 0);
@@ -280,6 +282,32 @@ SSLNetVConnection::_ssl_read_from_net(EThread *lthread, int64_t &ret)
     if (amount_to_read > block_write_avail) {
       amount_to_read = block_write_avail;
     }
+
+    // 以下はHTTP/2のリクエスト時に出力されたこの関数のデバッグログサンプル
+    //    [Jun 24 09:04:55.036] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:284 (_ssl_read_from_net)> (ssl) amount_to_read=4096
+    //    [Jun 24 09:04:55.036] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:289 (_ssl_read_from_net)> (ssl) nread=24
+    //    SSL Read
+    //    PRI * HTTP/2.0
+    //    
+    //    SM
+    //    
+    //    
+    //    [Jun 24 09:04:55.036] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:284 (_ssl_read_from_net)> (ssl) amount_to_read=4072
+    //    [Jun 24 09:04:55.036] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:289 (_ssl_read_from_net)> (ssl) nread=27
+    //    SSL Read
+    //    d
+    //    [Jun 24 09:04:55.036] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:284 (_ssl_read_from_net)> (ssl) amount_to_read=4045
+    //    [Jun 24 09:04:55.036] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:289 (_ssl_read_from_net)> (ssl) nread=13
+    //    SSL Read
+    //    ?
+    //    [Jun 24 09:04:55.036] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:284 (_ssl_read_from_net)> (ssl) amount_to_read=4032
+    //    [Jun 24 09:04:55.036] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:289 (_ssl_read_from_net)> (ssl) nread=45
+    //    SSL Read
+    //    $??bt???S??A????	z?%?Pë??S*/*
+    //    [Jun 24 09:04:55.036] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:284 (_ssl_read_from_net)> (ssl) amount_to_read=3987
+    //    [Jun 24 09:04:55.037] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:289 (_ssl_read_from_net)> (ssl) nread=0
+    //    [Jun 24 09:04:55.037] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:310 (_ssl_read_from_net)> (ssl.error) SSL_ERROR_WOULD_BLOCK(read)
+    //    [Jun 24 09:04:55.037] [ET_NET 1] DEBUG: <SSLNetVConnection.cc:351 (_ssl_read_from_net)> (ssl) bytes_read=109
 
     Debug("ssl", "amount_to_read=%" PRId64, amount_to_read);
     char *current_block = buf.writer()->end();

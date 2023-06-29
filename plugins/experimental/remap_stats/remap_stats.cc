@@ -19,6 +19,9 @@
   limitations under the License.
  */
 
+// プラグイン仕様書
+//   https://docs.trafficserver.apache.org/ja/latest/admin-guide/plugins/remap_stats.en.html
+
 #include "tscore/ink_config.h"
 #include "tscore/ink_defs.h"
 #include "tscore/BufferWriter.h"

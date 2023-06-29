@@ -1737,7 +1737,11 @@ mime_hdr_prepare_for_value_set(HdrHeap *heap, MIMEHdrImpl *mh, const char *name,
   } else if (field->m_next_dup) // list of more than 1 field
   {
     wks_idx = field->m_wks_idx;
+
+    // 重複していたら登録済みのヘッダフィールドを削除する
     mime_hdr_field_delete(heap, mh, field, true);
+
+    // 登録処理を行う
     field = mime_field_create(heap, mh);
     mime_field_name_set(heap, mh, field, wks_idx, name, name_length, true);
     mime_hdr_field_attach(mh, field, 0, nullptr);
@@ -1770,6 +1774,7 @@ mime_field_name_set(HdrHeap *heap, MIMEHdrImpl * /* mh ATS_UNUSED */, MIMEField 
   field->m_wks_idx = name_wks_idx_or_neg1;
   mime_str_u16_set(heap, name, length, &(field->m_ptr_name), &(field->m_len_name), must_copy_string);
 
+  // Cache-ControlかPragmaヘッダの場合にはMIME_FIELD_SLOT_FLAGS_COOKEDのフラグをセットする
   if ((name_wks_idx_or_neg1 == MIME_WKSIDX_CACHE_CONTROL) || (name_wks_idx_or_neg1 == MIME_WKSIDX_PRAGMA)) {
     field->m_flags |= MIME_FIELD_SLOT_FLAGS_COOKED;
   }
@@ -2676,6 +2681,24 @@ mime_field_block_describe(HdrHeapObjImpl *raw, bool /* recurse ATS_UNUSED */)
   static const char *readiness_names[] = {"EMPTY", "DETACHED", "LIVE", "DELETED"};
 
   MIMEFieldBlockImpl *obj = (MIMEFieldBlockImpl *)raw;
+
+  // 下記コードにて、デバッグ時に出力されるログサンプルです
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2658 (mime_field_block_describe)> (http) [FREETOP: 3, NEXTBLK: (nil)]
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2662 (mime_field_block_describe)> (http) 	SLOT # 0 (0x55fd242a1908), LIVE    
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2670 (mime_field_block_describe)> (http) [N: "User-Agent", N_LEN: 10, N_IDX: 64, 
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2672 (mime_field_block_describe)> (http) V: "curl/7.81.0", V_LEN: 11, 
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2673 (mime_field_block_describe)> (http) NEXTDUP: (nil), RAW: 1, RAWLEN: 25, F: 1]
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2677 (mime_field_block_describe)> (http) 
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2662 (mime_field_block_describe)> (http) 	SLOT # 1 (0x55fd242a1928), LIVE    
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2670 (mime_field_block_describe)> (http) [N: "Accept", N_LEN: 6, N_IDX: 4, 
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2672 (mime_field_block_describe)> (http) V: "*/*", V_LEN: 3, 
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2673 (mime_field_block_describe)> (http) NEXTDUP: (nil), RAW: 1, RAWLEN: 13, F: 1]
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2677 (mime_field_block_describe)> (http) 
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2662 (mime_field_block_describe)> (http) 	SLOT # 2 (0x55fd242a1948), LIVE    
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2670 (mime_field_block_describe)> (http) [N: "Host", N_LEN: 4, N_IDX: 30, 
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2672 (mime_field_block_describe)> (http) V: "localhost:88", V_LEN: 12, 
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2673 (mime_field_block_describe)> (http) NEXTDUP: (nil), RAW: 0, RAWLEN: 16, F: 1]
+  //    [Jun 23 09:31:10.968] [ET_NET 3] DEBUG: <MIME.cc:2677 (mime_field_block_describe)> (http) 
 
   Debug("http", "[FREETOP: %d, NEXTBLK: %p]", obj->m_freetop, obj->m_next);
 
@@ -3927,12 +3950,14 @@ MIMEHdrImpl::recompute_cooked_stuff(MIMEField *changing_field_or_null)
       }
     }
   }
+
   ///////////////////////////////////////////
   // (2) cook the Pragma header if present //
   ///////////////////////////////////////////
 
   if ((changing_field_or_null == nullptr) || (changing_field_or_null->m_wks_idx != MIME_WKSIDX_CACHE_CONTROL)) {
     field = mime_hdr_field_find(this, MIME_FIELD_PRAGMA, MIME_LEN_PRAGMA);
+
     if (field) {
       if (!field->has_dups()) { // try fastpath first
         s = field->value_get(&len);

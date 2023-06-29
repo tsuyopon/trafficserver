@@ -172,6 +172,7 @@ NextHopStrategyFactory::strategyInstance(const char *name)
   std::shared_ptr<NextHopSelectionStrategy> ps_strategy;
 
   if (!strategies_loaded) {
+    // strategies.yamlが存在しなかったり、yamlとして値を取得できなかったり、フォーマットが改ざんされている場合にはこの遷移に入ります
     NH_Error("no strategy configurations were defined, see definitions in '%s' file", fn.c_str());
     return nullptr;
   } else {

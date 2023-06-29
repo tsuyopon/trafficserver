@@ -258,17 +258,19 @@ validate_rww(int new_value)
 
     REC_ReadConfigFloat(http_bg_fill, "proxy.config.http.background_fill_completed_threshold");
     if (http_bg_fill > 0.0) {
-      Note("to enable reading while writing a document, %s should be 0.0: read while writing disabled",
-           "proxy.config.http.background_fill_completed_threshold");
+      Note("to enable reading while writing a document, %s should be 0.0: read while writing disabled", "proxy.config.http.background_fill_completed_threshold");
       return 0;
     }
+
+    // proxy.config.cache.max_doc_sizeを0よりも大きい値にすることで、Read While Writerが無効になる
     if (cache_config_max_doc_size > 0) {
-      Note("to enable reading while writing a document, %s should be 0: read while writing disabled",
-           "proxy.config.cache.max_doc_size");
+      Note("to enable reading while writing a document, %s should be 0: read while writing disabled", "proxy.config.cache.max_doc_size");
       return 0;
     }
+
     return new_value;
   }
+
   return 0;
 }
 
@@ -276,6 +278,8 @@ static int
 update_cache_config(const char * /* name ATS_UNUSED */, RecDataT /* data_type ATS_UNUSED */, RecData data,
                     void * /* cookie ATS_UNUSED */)
 {
+
+  // 設定値からread_while_wrierが有効かどうかを判定して、その結果をcache_config_read_while_writerに格納します。
   int new_value                  = validate_rww(data.rec_int);
   cache_config_read_while_writer = new_value;
 

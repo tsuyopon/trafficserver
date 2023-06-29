@@ -538,9 +538,15 @@ SSLNetVConnection::tunnel_prewarm() const
 /**
    Returns true if this vc was configured for forward_route or partial_blind_route
  */
+// sni.yamlで「forward_route」と「partial_blind_route」のどちらかが設定されている場合にはtrueとして、設定されていなければfalseとする
+//   「forward_route」はdecreptして、接続先もdecreptしたtrafficをそのまま送付する
+//   「partial_blind_route」はdecreptして、接続先にはTLSで暗号化したデータを送付する
 inline bool
 SSLNetVConnection::decrypt_tunnel() const
 {
+  // sni.yamlの「forward_route」と「partial_blind_route」のどちらかが設定されている場合にはtunnelとして扱う
+  // cf. https://docs.trafficserver.apache.org/en/9.0.x/release-notes/whats-new.en.html#sni
+  // https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/files/sni.yaml.en.html#std-configfile-sni.yaml
   return _tunnel_type == SNIRoutingType::FORWARD || _tunnel_type == SNIRoutingType::PARTIAL_BLIND;
 }
 

@@ -415,6 +415,8 @@ enum ThrottleType {
 TS_INLINE int
 net_connections_to_throttle(ThrottleType t)
 {
+
+  // NET_THROTTLE_ACCEPT_HEADROOMなら1.1 (10%上乗せ)、NET_THROTTLE_CONNECT_HEADROOMなら1.0(上乗せしない)
   double headroom = t == ACCEPT ? NET_THROTTLE_ACCEPT_HEADROOM : NET_THROTTLE_CONNECT_HEADROOM;
   int64_t sval    = 0;
 
@@ -436,11 +438,15 @@ check_shedding_warning()
   }
 }
 
+// 戻り値がtrueの場合、接続数が設定数(proxy.config.net.connections_throttle)を超過していることを表す。呼び出し元では、エラーにしている
 TS_INLINE bool
 check_net_throttle(ThrottleType t)
 {
   int connections = net_connections_to_throttle(t);
 
+  // 接続しているコネクション数が設定数(proxy.config.net.connections_throttle)を超過してしまっている
+  // 0でないのは、0は「If this is set to 0, the throttling logic is disabled.」として特別判定しているから
+  //   cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-net-connections-throttle
   if (net_connections_throttle != 0 && connections >= net_connections_throttle)
     return true;
 

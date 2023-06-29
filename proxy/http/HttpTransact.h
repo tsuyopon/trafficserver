@@ -552,16 +552,20 @@ public:
     ProxyError rx_error_code;
     ProxyError tx_error_code;
 
+    // 接続先へのコネクションが失敗したかどうかを判定する
     bool
     had_connect_fail() const
     {
+      // 下記のconnect_result変数の値は、基本的にこの関数内に定義される set_connect_fail() が呼ばれた際にセットされます。
       return 0 != connect_result;
     }
+
     void
     clear_connect_fail()
     {
       connect_result = 0;
     }
+
     ConnectionAttributes() { clear(); }
 
     void

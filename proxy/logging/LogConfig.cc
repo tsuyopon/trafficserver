@@ -127,6 +127,7 @@ LogConfig::read_configuration_variables()
   int val;
   char *ptr;
 
+  // proxy.config.log.log_buffer_size (デフォルト: 9216)
   // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-log-log-buffer-size
   val = static_cast<int>(REC_ConfigReadInteger("proxy.config.log.log_buffer_size"));
   if (val > 0) {

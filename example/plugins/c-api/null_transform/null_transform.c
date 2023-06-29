@@ -182,6 +182,7 @@ handle_transform(TSCont contp)
   }
 }
 
+// TS_HTTP_RESPONSE_TRANSFORM_HOOKの場合に下記関数がhookされる
 static int
 null_transform(TSCont contp, TSEvent event, void *edata)
 {
@@ -196,6 +197,10 @@ null_transform(TSCont contp, TSEvent event, void *edata)
     TSContDestroy(contp);
     return 0;
   } else {
+
+    // When the write is initiated, the transformation expects to receive WRITE_READY, WRITE_COMPLETE, or ERROR events from the output vconnection. 
+    // 下記の6を参考に
+    //   cf. https://docs.trafficserver.apache.org/en/latest/developer-guide/plugins/http-transformations/sample-null-transformation-plugin.en.html
     switch (event) {
     case TS_EVENT_ERROR: {
       TSVIO input_vio;
@@ -211,6 +216,7 @@ null_transform(TSCont contp, TSEvent event, void *edata)
        * have completed the write operation.
        */
       TSContCall(TSVIOContGet(input_vio), TS_EVENT_ERROR, input_vio);
+
     } break;
     case TS_EVENT_VCONN_WRITE_COMPLETE:
       TSDebug(PLUGIN_NAME, "\tEvent is TS_EVENT_VCONN_WRITE_COMPLETE");

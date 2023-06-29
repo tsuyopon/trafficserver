@@ -171,21 +171,26 @@ static Action *register_ShowHostDB(Continuation *c, HTTPHdr *h);
 HostDBHash &
 HostDBHash::set_host(const char *name, int len)
 {
+
+  // host_nameやhost_lenはクラス定数であるので関数内スコープでないことに注意。HostDBHash::refresh()が呼ばれるとhashを生成する
   host_name = name;
   host_len  = len;
 
   if (host_name && SplitDNSConfig::isSplitDNSEnabled()) {
+
     const char *scan;
     // I think this is checking for a hostname that is just an address.
     for (scan = host_name; *scan != '\0' && (ParseRules::is_digit(*scan) || '.' == *scan || ':' == *scan); ++scan) {
       ;
     }
+
     if ('\0' != *scan) {
       // config is released in the destructor, because we must make sure values we
       // get out of it don't evaporate while @a this is still around.
       if (!pSD) {
         pSD = SplitDNSConfig::acquire();
       }
+
       if (pSD) {
         dns_server = static_cast<DNSServer *>(pSD->getDNSRecord(host_name));
       }
@@ -197,12 +202,14 @@ HostDBHash::set_host(const char *name, int len)
   return *this;
 }
 
+// この中でハッシュ値に変換します
 void
 HostDBHash::refresh()
 {
   CryptoContext ctx;
 
   if (host_name) {
+
     const char *server_line = dns_server ? dns_server->x_dns_ip_line : nullptr;
     uint8_t m               = static_cast<uint8_t>(db_mark); // be sure of the type.
 
@@ -212,7 +219,9 @@ HostDBHash::refresh()
     if (server_line) {
       ctx.update(server_line, strlen(server_line));
     }
+
   } else {
+
     // CryptoHash the ip, pad on both sizes with 0's
     // so that it does not intersect the string space
     //
@@ -222,8 +231,11 @@ HostDBHash::refresh()
     memcpy(buff + 2, ip._addr._byte, n);
     memset(buff + 2 + n, 0, 2);
     ctx.update(buff, n + 4);
+
   }
+
   ctx.finalize(hash);
+
 }
 
 HostDBHash::HostDBHash() {}
@@ -880,6 +892,7 @@ do_setby(HostDBInfo *r, HostDBApplicationInfo *app, const char *hostname, IpAddr
 void
 HostDBProcessor::setby(const char *hostname, int len, sockaddr const *ip, HostDBApplicationInfo *app)
 {
+
   if (!hostdb_enable) {
     return;
   }
@@ -984,20 +997,23 @@ HostDBContinuation::lookup_done(IpAddr const &ip, const char *aname, bool around
     return r;
 
   } else {
+
+    // proxy.config.hostdb.ttl_modeの値はデフォルト0
+    //  cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-hostdb-ttl-mode
     switch (hostdb_ttl_mode) {
     default:
       ink_assert(!"bad TTL mode");
-    case TTL_OBEY:
+    case TTL_OBEY:    // The TTL from the DNS response.
       break;
-    case TTL_IGNORE:
+    case TTL_IGNORE:  // The internal timeout value.
       ttl_seconds = hostdb_ip_timeout_interval;
       break;
-    case TTL_MIN:
+    case TTL_MIN:     // The smaller of the DNS and internal TTL values. The internal timeout value becomes a maximum TTL.
       if (hostdb_ip_timeout_interval < ttl_seconds) {
         ttl_seconds = hostdb_ip_timeout_interval;
       }
       break;
-    case TTL_MAX:
+    case TTL_MAX:     // The larger of the DNS and internal TTL values. The internal timeout value become a minimum TTL.
       if (hostdb_ip_timeout_interval > ttl_seconds) {
         ttl_seconds = hostdb_ip_timeout_interval;
       }

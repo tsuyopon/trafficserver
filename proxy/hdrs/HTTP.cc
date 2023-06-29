@@ -880,6 +880,7 @@ http_parser_parse_req(HTTPParser *parser, HdrHeap *heap, HTTPHdrImpl *hh, const 
                       bool must_copy_strings, bool eof, int strict_uri_parsing, size_t max_request_line_size,
                       size_t max_hdr_field_size)
 {
+
   if (parser->m_parsing_http) {
     MIMEScanner *scanner = &parser->m_mime_parser.m_scanner;
     URLImpl *url;
@@ -914,6 +915,7 @@ http_parser_parse_req(HTTPParser *parser, HdrHeap *heap, HTTPHdrImpl *hh, const 
     if (err < 0) {
       return err;
     }
+
     // We have to get a request line.  If we get parse done here,
     //   that meas we got an empty request
     if (err == PARSE_RESULT_DONE) {
@@ -939,10 +941,12 @@ http_parser_parse_req(HTTPParser *parser, HdrHeap *heap, HTTPHdrImpl *hh, const 
       if (((cur[0] ^ 'G') | (cur[1] ^ 'E') | (cur[2] ^ 'T')) != 0) {
         goto slow_case;
       }
+
       if (((end[-10] ^ 'H') | (end[-9] ^ 'T') | (end[-8] ^ 'T') | (end[-7] ^ 'P') | (end[-6] ^ '/') | (end[-4] ^ '.') |
            (end[-2] ^ '\r') | (end[-1] ^ '\n')) != 0) {
         goto slow_case;
       }
+
       if (!(isdigit(end[-5]) && isdigit(end[-3]))) {
         goto slow_case;
       }
@@ -964,6 +968,7 @@ http_parser_parse_req(HTTPParser *parser, HdrHeap *heap, HTTPHdrImpl *hh, const 
       if (err < 0) {
         return err;
       }
+
       if (!http_hdr_version_set(hh, version)) {
         return PARSE_RESULT_ERROR;
       }

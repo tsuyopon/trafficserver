@@ -631,6 +631,7 @@ XScanRequestHeaders(TSCont /* contp */, TSEvent event, void *edata)
     return TS_EVENT_NONE;
   }
 
+  // 「DIAG: (xdebug) scanning for X-Debug header values」としてログに出力されます
   TSDebug("xdebug", "scanning for %s header values", xDebugHeader.str);
 
   // Walk the X-Debug header values and determine what to inject into the response.

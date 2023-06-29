@@ -261,6 +261,7 @@ SNIConfig::startup()
 int
 SNIConfig::reconfigure()
 {
+
   Debug("ssl", "Reload SNI file");
   SNIConfigParams *params = new SNIConfigParams;
 

@@ -360,16 +360,20 @@ start_HttpProxyServer()
   for (int i = 0, n = proxy_ports.size(); i < n; ++i) {
     HttpProxyAcceptor &acceptor = HttpProxyAcceptors[i];
     HttpProxyPort &port         = proxy_ports[i];
+
     if (port.isSSL()) {
+
       if (nullptr == sslNetProcessor.main_accept(acceptor._accept, port.m_fd, acceptor._net_opt)) {
         return;
       }
+
 #if TS_USE_QUIC == 1
     } else if (port.isQUIC()) {
       if (nullptr == quic_NetProcessor.main_accept(acceptor._accept, port.m_fd, acceptor._net_opt)) {
         return;
       }
 #endif
+
     } else if (!port.isPlugin()) {
       if (nullptr == netProcessor.main_accept(acceptor._accept, port.m_fd, acceptor._net_opt)) {
         return;
@@ -391,6 +395,7 @@ start_HttpProxyServer()
   }
 
   prewarmManager.start();
+
 }
 
 void

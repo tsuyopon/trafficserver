@@ -1046,11 +1046,13 @@ SSLPrivateKeyHandler(SSL_CTX *ctx, const SSLConfigParams *params, const char *ke
 
    @static
  */
+// サーバ証明書の「Not Before」、「Not After」と現在時刻を比較して問題ないことをチェックする
 int
 SSLMultiCertConfigLoader::check_server_cert_now(X509 *cert, const char *certname)
 {
   int timeCmpValue;
 
+  // 正当な証明書ではない場合
   if (!cert) {
     // a truncated certificate would fall into here
     Error("invalid certificate %s: file is truncated or corrupted", certname);
@@ -1059,6 +1061,7 @@ SSLMultiCertConfigLoader::check_server_cert_now(X509 *cert, const char *certname
 
   // XXX we should log the notBefore and notAfter dates in the errors ...
 
+  // X509証明書中に含まれる「Not Before」の値が、現在時刻と比較して問題ないかを検証する
   timeCmpValue = X509_cmp_current_time(X509_get_notBefore(cert));
   if (timeCmpValue == 0) {
     // an error occurred parsing the time, which we'll call a bogosity
@@ -1070,6 +1073,7 @@ SSLMultiCertConfigLoader::check_server_cert_now(X509 *cert, const char *certname
     return -4;
   }
 
+  // X509証明書中に含まれる「Not After」の値が、現在時刻と比較して問題ないかを検証する
   timeCmpValue = X509_cmp_current_time(X509_get_notAfter(cert));
   if (timeCmpValue == 0) {
     // an error occurred parsing the time, which we'll call a bogosity
@@ -1081,6 +1085,8 @@ SSLMultiCertConfigLoader::check_server_cert_now(X509 *cert, const char *certname
     return -5;
   }
 
+  // TS起動時に下記のような情報が表示されます。
+  // DEBUG: <SSLUtils.cc:1082 (check_server_cert_now)> (ssl_load) server certificate /opt/trafficserver-9.2.0/etc/trafficserver/sample2.csr passed accessibility and date checks
   Debug("ssl_load", "server certificate %s passed accessibility and date checks", certname);
   return 0; // all good
 
@@ -1254,6 +1260,7 @@ std::vector<SSLLoadingContext>
 SSLMultiCertConfigLoader::init_server_ssl_ctx(CertLoadData const &data, const SSLMultiCertConfigParams *sslMultCertSettings,
                                               std::set<std::string> &names)
 {
+
   std::vector<std::vector<std::string>> cert_names;
   std::vector<std::vector<std::string>> key_names;
   std::vector<std::string> key_names_list;
@@ -1295,6 +1302,8 @@ SSLMultiCertConfigLoader::init_server_ssl_ctx(CertLoadData const &data, const SS
 
     ctx_type = (!generate_default_ctx && i < data.cert_type_list.size()) ? data.cert_type_list[i] : SSLCertContextType::GENERIC;
 
+    // TS起動時に下記を表示します
+    // DEBUG: <SSLUtils.cc:1296 (init_server_ssl_ctx)> (ssl_load) Creating new context 0x55fd239ede00 cert_count=1 initial: /opt/trafficserver-9.2.0/etc/trafficserver/sample2.csr
     Debug("ssl_load", "Creating new context %p cert_count=%ld initial: %s", ctx, cert_names_list.size(),
           cert_names_list[0].c_str());
 
@@ -1404,6 +1413,7 @@ SSLMultiCertConfigLoader::_setup_session_cache(SSL_CTX *ctx)
 {
   const SSLConfigParams *params = this->_params;
 
+  // (出力例) DEBUG: <SSLUtils.cc:1405 (_setup_session_cache)> (ssl.session_cache) ssl context=0x55fd239ede00: using session cache options, enabled=2, size=102400, num_buckets=256, skip_on_contention=0, timeout=0, auto_clear=1
   Debug("ssl.session_cache",
         "ssl context=%p: using session cache options, enabled=%d, size=%d, num_buckets=%d, "
         "skip_on_contention=%d, timeout=%d, auto_clear=%d",
@@ -1417,6 +1427,15 @@ SSLMultiCertConfigLoader::_setup_session_cache(SSL_CTX *ctx)
   int additional_cache_flags = 0;
   additional_cache_flags |= (params->ssl_session_cache_auto_clear == 0) ? SSL_SESS_CACHE_NO_AUTO_CLEAR : 0;
 
+
+  // proxy.config.ssl.session_cacheの値によって処理を分岐します。
+  // https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-ssl-session-cache
+  //
+  // 以下の3つに処理がわかれます。
+  // 1. セッションキャッシュを完全に無効化する
+  // 2. OpenSSL実装のセッションキャッシュを有効にする
+  // 3. Trafficserver独自で持っているセッションキャッシュを有効にする
+  //
   switch (params->ssl_session_cache) {
   case SSLConfigParams::SSL_SESSION_CACHE_MODE_OFF:
     Debug("ssl.session_cache", "disabling SSL session cache");
@@ -1430,6 +1449,8 @@ SSLMultiCertConfigLoader::_setup_session_cache(SSL_CTX *ctx)
     SSL_CTX_sess_set_cache_size(ctx, params->ssl_session_cache_size);
     break;
   case SSLConfigParams::SSL_SESSION_CACHE_MODE_SERVER_ATS_IMPL: {
+    // デフォルトの設定だとこれになります。下記の出力が表示されます。
+    // DEBUG: <SSLUtils.cc:1431 (_setup_session_cache)> (ssl.session_cache) enabling SSL session cache with ATS implementation
     Debug("ssl.session_cache", "enabling SSL session cache with ATS implementation");
     /* Add all the OpenSSL callbacks */
     SSL_CTX_sess_set_new_cb(ctx, ssl_new_cached_session);
@@ -1507,16 +1528,26 @@ SSLMultiCertConfigLoader::_set_verify_path(SSL_CTX *ctx, const SSLMultiCertConfi
 bool
 SSLMultiCertConfigLoader::_setup_session_ticket(SSL_CTX *ctx, const SSLMultiCertConfigParams *sslMultCertSettings)
 {
+
 #if defined(SSL_OP_NO_TICKET)
+
   // Session tickets are enabled by default. Disable if explicitly requested.
+  // ssl_multicert.configが「ssl_ticket_enabled=0」に設定されていた場合の処理
   if (sslMultCertSettings->session_ticket_enabled == 0) {
+    // セッションチケットを無効化するOpenSSLオプションをセットする
     SSL_CTX_set_options(ctx, SSL_OP_NO_TICKET);
     Debug("ssl_load", "ssl session ticket is disabled");
   }
+
 #endif
 #if defined(TLS1_3_VERSION) && !defined(LIBRESSL_VERSION_NUMBER) && !defined(OPENSSL_IS_BORINGSSL)
   if (!(this->_params->ssl_ctx_options & SSL_OP_NO_TLSv1_3)) {
+
+    // 何枚のセッションチケットを発行するかをOpenSSLのAPIに指定する
     SSL_CTX_set_num_tickets(ctx, sslMultCertSettings->session_ticket_number);
+
+    // TS起動時にはデフォルトで2枚セットされる旨のログが出力されます。
+    //   DEBUG: <SSLUtils.cc:1518 (_setup_session_ticket)> (ssl_load) ssl session ticket number set to 2
     Debug("ssl_load", "ssl session ticket number set to %d", sslMultCertSettings->session_ticket_number);
   }
 #endif
@@ -1848,29 +1879,49 @@ SSLMultiCertConfigLoader::update_ssl_ctx(const std::string &secret_name)
   return retval;
 }
 
+// ssl_multicert.config周りの処理です。
+//
+// ssl_multicert.configのdest_ipやssl_ticket_enabledについての説明は下記を参考のこと
+//   cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/ssl_multicert.config.en.html
 bool
 SSLMultiCertConfigLoader::_store_single_ssl_ctx(SSLCertLookup *lookup, const shared_SSLMultiCertConfigParams &sslMultCertSettings,
                                                 shared_SSL_CTX ctx, SSLCertContextType ctx_type, std::set<std::string> &names)
 {
+
   bool inserted                        = false;
   shared_ssl_ticket_key_block keyblock = nullptr;
+
   // Load the session ticket key if session tickets are not disabled
+  // ssl_multicert.configの「ssl_ticket_enabled」に0以外の値が指定された場合
   if (sslMultCertSettings->session_ticket_enabled != 0) {
     keyblock = shared_ssl_ticket_key_block(ssl_context_enable_tickets(ctx.get(), nullptr), ticket_block_free);
   }
 
   // Index this certificate by the specified IP(v6) address. If the address is "*", make it the default context.
+  // ssl_multicert.configの「dest_ip」に値が指定された場合に入ります
   if (sslMultCertSettings->addr) {
+
+    // ssl_multicert.configに「dest_ip=* 」を指定するとif文のコードパスに入ります
     if (strcmp(sslMultCertSettings->addr, "*") == 0) {
+
+      // 起動時に下記のようなログが出力されます。
+      // 以下のログ出力例ではSANが「subjectAltName = DNS:test.co.jp, DNS:*.example.com, DNS:bar.com, IP:192.16.3.3」で発行した証明書でこのパスを通ります
+      //   DEBUG: <SSLUtils.cc:1863 (_store_single_ssl_ctx)> (ssl_load) Addr is '*'; setting 0x55fd239ede00 to default
       Debug("ssl_load", "Addr is '*'; setting %p to default", ctx.get());
+
       if (lookup->insert(sslMultCertSettings->addr, SSLCertContext(ctx, ctx_type, sslMultCertSettings, keyblock)) >= 0) {
         inserted            = true;
         lookup->ssl_default = ctx;
         this->_set_handshake_callbacks(ctx.get());
       }
+
     } else {
+
+      // ssl_multicert.configに「dest_ip=* 」以外が指定された場合のコードパス
+
       IpEndpoint ep;
 
+      // 「dest_ip」に指定された値が正当なIPアドレスの範囲に存在するものであるかどうかを確認します
       if (ats_ip_pton(sslMultCertSettings->addr, &ep) == 0) {
         if (lookup->insert(ep, SSLCertContext(ctx, ctx_type, sslMultCertSettings, keyblock)) >= 0) {
           inserted = true;
@@ -1940,6 +1991,10 @@ ssl_extract_certificate(const matcher_line *line_info, SSLMultiCertConfigParams 
       continue;
     }
 
+    // TS起動時に下記のようなログが出力されます。下記ログが出力された際にはssl_multicert.configは「dest_ip=*   ssl_cert_name=sample2.csr ssl_key_name=sample.key」となっています。
+    //   DEBUG: <SSLUtils.cc:1918 (ssl_extract_certificate)> (ssl_load) Extracting certificate label: dest_ip, value: *
+    //   DEBUG: <SSLUtils.cc:1918 (ssl_extract_certificate)> (ssl_load) Extracting certificate label: ssl_cert_name, value: sample2.csr
+    //   DEBUG: <SSLUtils.cc:1918 (ssl_extract_certificate)> (ssl_load) Extracting certificate label: ssl_key_name, value: sample.key
     Debug("ssl_load", "Extracting certificate label: %s, value: %s", label, value);
 
     // 下記ではsslMultCertSettingsに設定された値を格納していっています。
@@ -2056,7 +2111,7 @@ SSLMultiCertConfigLoader::load(SSLCertLookup *lookup)
       line++;
     }
 
-    // 空行やコメント行でなければ
+    // 空行やコメント行でなければ処理を行います
     if (*line != '\0' && *line != '#') {
 
       shared_SSLMultiCertConfigParams sslMultiCertSettings = std::make_shared<SSLMultiCertConfigParams>();
@@ -2066,6 +2121,7 @@ SSLMultiCertConfigLoader::load(SSLCertLookup *lookup)
       errPtr = parseConfigLine(line, &line_info, &sslCertTags);
 
       // 現在ssl_multicert.configの何行目をparseしているかのデバッグ情報を表示する
+      // (出力例) DEBUG: <SSLUtils.cc:2025 (load)> (ssl_load) currently parsing dest_ip at line 67 from config file: /opt/trafficserver-9.2.0/etc/trafficserver/ssl_multicert.config
       Debug("ssl_load", "currently parsing %s at line %d from config file: %s", line, line_num, params->configFilePath);
 
       if (errPtr != nullptr) {
@@ -2346,9 +2402,12 @@ SSLMultiCertConfigLoader::load_certs_and_cross_reference_names(
         ASN1_STRING *cn    = X509_NAME_ENTRY_get_data(e);
         subj_name          = asn1_strdup(cn);
 
+        // TS起動時に下記のサーバ証明書の設定が読み込まれたことを表示します。
+        // DEBUG: <SSLUtils.cc:2302 (load_certs_and_cross_reference_names)> (ssl_load) subj 'test.co.jp' in certificate /opt/trafficserver-9.2.0/etc/trafficserver/sample2.csr 0x55fd239de250
         Debug("ssl_load", "subj '%s' in certificate %s %p", subj_name.get(), data.cert_names_list[i].c_str(), cert);
         name_set.insert(subj_name.get());
       }
+
       if (name_set.empty()) {
         Debug("ssl_load", "no subj name in certificate %s", data.cert_names_list[i].c_str());
       }
@@ -2362,8 +2421,16 @@ SSLMultiCertConfigLoader::load_certs_and_cross_reference_names(
         GENERAL_NAME *name;
 
         name = sk_GENERAL_NAME_value(names, i);
+
+        // SANに含まれるtypeとしてはDNS、IPなどの種類があります。
         if (name->type == GEN_DNS) {
           ats_scoped_str dns(asn1_strdup(name->d.dNSName));
+
+          // TS起動時にX509証明書のSANに含まれている情報がここで登録されています。
+          // サーバ証明書中に3件含まれている場合には、下記のようにログに出力されていました。
+          //    DEBUG: <SSLUtils.cc:2320 (load_certs_and_cross_reference_names)> (ssl_load) inserting dns 'test.co.jp' in certificate
+          //    DEBUG: <SSLUtils.cc:2320 (load_certs_and_cross_reference_names)> (ssl_load) inserting dns '*.example.com' in certificate
+          //    DEBUG: <SSLUtils.cc:2320 (load_certs_and_cross_reference_names)> (ssl_load) inserting dns 'bar.com' in certificate
           Debug("ssl_load", "inserting dns '%s' in certificate", dns.get());
           name_set.insert(dns.get());
         }
@@ -2466,7 +2533,11 @@ SSLMultiCertConfigLoader::load_certs(SSL_CTX *ctx, const std::vector<std::string
       return false;
     }
 
+    // 下記にログの例を出力します
+    //   DEBUG: <SSLUtils.cc:2419 (load_certs)> (ssl_load) for ctx=0x55fd239ede00, using certificate /opt/trafficserver-9.2.0/etc/trafficserver/sample2.csr
     Debug("ssl_load", "for ctx=%p, using certificate %s", ctx, cert_names_list[i].c_str());
+
+    // サーバ証明書を下記で設定します
     if (!SSL_CTX_use_certificate(ctx, cert)) {
       SSLError("Failed to assign cert from %s to SSL_CTX", cert_names_list[i].c_str());
       X509_free(cert);
@@ -2584,7 +2655,11 @@ SSLMultiCertConfigLoader::set_session_id_context(SSL_CTX *ctx, const SSLConfigPa
   }
 
   if (nullptr != setting_cert) {
+
+    // TS起動時にサーバ証明書の下記のログが表示されます
+    //    DEBUG: <SSLUtils.cc:2516 (set_session_id_context)> (ssl_load) Using 'sample2.csr' in hash for session id context
     Debug("ssl_load", "Using '%s' in hash for session id context", sslMultCertSettings->cert.get());
+
     if (EVP_DigestUpdate(digest, sslMultCertSettings->cert, strlen(setting_cert)) == 0) {
       SSLError("EVP_DigestUpdate failed using '%s' in hash for session id context", sslMultCertSettings->cert.get());
       goto fail;

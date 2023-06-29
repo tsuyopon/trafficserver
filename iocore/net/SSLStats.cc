@@ -257,6 +257,9 @@ SSLInitializeStatistics()
       RecRegisterRawStat(ssl_rsb, RECT_PROCESS, statName.c_str(), RECD_INT, RECP_NON_PERSISTENT,
                          (int)ssl_cipher_stats_start + index, RecRawStatSyncSum);
       SSL_CLEAR_DYN_STAT((int)ssl_cipher_stats_start + index);
+
+      // TS起動時にsslタグを指定して出力すると、下記のようなログが何十行も出力されます
+      // DEBUG: <SSLStats.cc:260 (SSLInitializeStatistics)> (ssl) registering SSL cipher metric 'proxy.process.ssl.cipher.user_agent.TLS_AES_256_GCM_SHA384'
       Debug("ssl", "registering SSL cipher metric '%s'", statName.c_str());
     }
   }

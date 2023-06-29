@@ -171,6 +171,7 @@ NetAccept::init_accept_loop()
   SET_CONTINUATION_HANDLER(this, &NetAccept::acceptLoopEvent);
 
   n = opt.accept_threads;
+
   // Fill in accept thread from configuration if necessary.
   if (n < 0) {
     REC_ReadConfigInteger(n, "proxy.config.accept_threads");
@@ -178,6 +179,10 @@ NetAccept::init_accept_loop()
 
   for (i = 0; i < n; i++) {
     NetAccept *a = (i < n - 1) ? clone() : this;
+
+    // 下記のように [ACCEPT 0:8080]のようなログ出力表示となります。
+    //    [ACCEPT 0:8080] DEBUG: <Connection.cc:87 (accept)> (iocore_net_server) Connection accepted [Server]. 127.0.0.1:55234 -> 0.0.0.0:8080
+    //    [ACCEPT 0:8080] DEBUG: <UnixConnection.cc:276 (apply_options)> (socket) ::open: setsockopt() TCP_NODELAY on socket
     snprintf(thr_name, MAX_THREAD_NAME_LENGTH, "[ACCEPT %d:%d]", i, ats_ip_port_host_order(&server.accept_addr));
     eventProcessor.spawn_thread(a, thr_name, stacksize);
     Debug("iocore_net_accept_start", "Created accept thread #%d for port %d", i + 1, ats_ip_port_host_order(&server.accept_addr));
@@ -335,7 +340,9 @@ NetAccept::do_blocking_accept(EThread *t)
         return -1;
       }
     }
+
     // check for throttle
+    // 利用しているfd数が超過していないかどうかを確認する
     if (check_net_throttle(ACCEPT)) {
       check_throttle_warning(ACCEPT);
       // close the connection as we are in throttle state
@@ -454,7 +461,9 @@ NetAccept::acceptFastEvent(int event, void *ep)
     con.fd       = fd;
 
     if (likely(fd >= 0)) {
+
       // check for throttle
+      // 利用しているfd数が超過していないかどうかを確認する
       if (check_net_throttle(ACCEPT)) {
         // close the connection as we are in throttle state
         con.close();

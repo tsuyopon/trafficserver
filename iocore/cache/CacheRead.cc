@@ -239,9 +239,11 @@ CacheVC::openReadChooseWriter(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSE
       if (w->start_time > start_time || w->closed < 0) {
         continue;
       }
+
       if (!w->closed && !cache_config_read_while_writer) {
         return -err;
       }
+
       if (w->alternate_index != CACHE_ALT_INDEX_DEFAULT) {
         continue;
       }

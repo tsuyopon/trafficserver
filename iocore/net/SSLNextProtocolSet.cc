@@ -65,7 +65,13 @@ SSLNextProtocolSet::create_npn_advertisement(const SessionProtocolSet &enabled, 
 
   for (ep = endpoints.head; ep != nullptr; ep = endpoints.next(ep)) {
     if (enabled.contains(globalSessionProtocolNameRegistry.toIndex(ts::TextView{ep->protocol, strlen(ep->protocol)}))) {
+
+      // リクエストを受信すると下記のようにALPNに含まれる値を各行それぞれで表示します
+      //   DEBUG: <SSLNextProtocolSet.cc:68 (create_npn_advertisement)> (ssl) advertising protocol h2, 0x55fd2426cf40
+      //   DEBUG: <SSLNextProtocolSet.cc:68 (create_npn_advertisement)> (ssl) advertising protocol http/1.1, 0x55fd2426cdb0
+      //   DEBUG: <SSLNextProtocolSet.cc:68 (create_npn_advertisement)> (ssl) advertising protocol http/1.0, 0x55fd2426cdb0
       Debug("ssl", "advertising protocol %s, %p", ep->protocol, ep->endpoint);
+
       advertised = append_protocol(ep->protocol, advertised);
     }
   }

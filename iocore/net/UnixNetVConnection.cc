@@ -1242,6 +1242,7 @@ UnixNetVConnection::connectUp(EThread *t, int fd)
 
   // Setup a timeout callback handler.
   SET_HANDLER(&UnixNetVConnection::mainEvent);
+
   // Send this netvc to InactivityCop.
   nh->startCop(this);
 

@@ -6297,9 +6297,11 @@ private:
 };
 
 //----------------------------------------------------------------------------
+// 引き続き、イベント処理を実行する
 void
 TSHttpTxnReenable(TSHttpTxn txnp, TSEvent event)
 {
+
   sdk_assert(sdk_sanity_check_txn(txnp) == TS_SUCCESS);
 
   HttpSM *sm   = (HttpSM *)txnp;
@@ -6311,6 +6313,8 @@ TSHttpTxnReenable(TSHttpTxn txnp, TSEvent event)
   //
   // If we are not coming from the thread associated with the state machine,
   // reschedule.  Also reschedule if we cannot get the state machine lock.
+
+  // この関数がATSのEthread APIを使って作られなかった場合において、ethはNULLとなる。この場合には、REGULARスレッドでContinuationが呼ばれるべき
   if (eth != nullptr && sm->getThreadAffinity() == eth) {
     MUTEX_TRY_LOCK(trylock, sm->mutex, eth);
     if (trylock.is_locked()) {
@@ -6319,10 +6323,13 @@ TSHttpTxnReenable(TSHttpTxn txnp, TSEvent event)
       return;
     }
   }
+
   // Couldn't call the handler directly, schedule to the original SM thread
+  // ハンドラを直接呼び出せないケースなのでスケジューリングさせる
   TSHttpSMCallback *cb = new TSHttpSMCallback(sm, event);
   cb->setThreadAffinity(sm->getThreadAffinity());
   eventProcessor.schedule_imm(cb, ET_NET);
+
 }
 
 TSReturnCode TSUserArgIndexNameLookup(TSUserArgType type, const char *name, int *arg_idx, const char **description);

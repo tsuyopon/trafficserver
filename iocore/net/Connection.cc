@@ -84,6 +84,10 @@ Server::accept(Connection *c)
   c->fd = res;
   if (is_debug_tag_set("iocore_net_server")) {
     ip_port_text_buffer ipb1, ipb2;
+
+    // 全てのデバッグタグを出力させてみたところ、表示された下記の2行だけはACCEPTスレッドで実行されていた。下記のDebugで指定されているのは上の方のログです
+    // [Jun 25 06:23:42.065] [ACCEPT 0:8080] DEBUG: <Connection.cc:87 (accept)> (iocore_net_server) Connection accepted [Server]. 127.0.0.1:55234 -> 0.0.0.0:8080
+    // [Jun 25 06:23:42.066] [ACCEPT 0:8080] DEBUG: <UnixConnection.cc:276 (apply_options)> (socket) ::open: setsockopt() TCP_NODELAY on socket
     Debug("iocore_net_server", "Connection accepted [Server]. %s -> %s", ats_ip_nptop(&c->addr, ipb2, sizeof(ipb2)),
           ats_ip_nptop(&addr, ipb1, sizeof(ipb1)));
   }

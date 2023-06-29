@@ -985,11 +985,14 @@ DNSHandler::check_and_reset_tcp_conn()
 int
 DNSHandler::mainEvent(int event, Event *e)
 {
+
   recv_dns(event, e);
   if (dns_ns_rr) {
+
     if (DNS_CONN_MODE::TCP_RETRY == dns_conn_mode) {
       check_and_reset_tcp_conn();
     }
+
     ink_hrtime t = Thread::get_hrtime();
     if (t - last_primary_retry > DNS_PRIMARY_RETRY_PERIOD) {
       for (int i = 0; i < n_con; i++) {
@@ -1000,6 +1003,7 @@ DNSHandler::mainEvent(int event, Event *e)
       }
       last_primary_retry = t;
     }
+
     for (int i = 0; i < n_con; i++) {
       if (!ns_down[i] && failover_soon(i)) {
         Debug("dns", "mainEvent: nameserver = %d failover soon", name_server);
@@ -1013,6 +1017,7 @@ DNSHandler::mainEvent(int event, Event *e)
       }
     }
   } else {
+
     if (failover_soon(name_server)) {
       Debug("dns", "mainEvent: will failover soon");
       if (failover_now(name_server)) {
@@ -1538,6 +1543,13 @@ static bool
 dns_process(DNSHandler *handler, HostEnt *buf, int len)
 {
 
+  // この関数で出力されるログサンプルを表示しておきます
+  //   [Jun 25 06:23:42.127] [ET_NET 0] DEBUG: <DNS.cc:1602 (dns_process)> (dns) Got 2 DNS records for [www.yahoo.co.jp]
+  //   [Jun 25 06:23:42.127] [ET_NET 0] DEBUG: <DNS.cc:1733 (dns_process)> (dns) received cname = edge12.g.yimg.jp
+  //   [Jun 25 06:23:42.127] [ET_NET 0] DEBUG: <DNS.cc:1816 (dns_process)> (dns) received A name = edge12.g.yimg.jp
+  //   [Jun 25 06:23:42.127] [ET_NET 0] DEBUG: <DNS.cc:1832 (dns_process)> (dns) received A = 183.79.250.251
+  //   [Jun 25 06:23:42.127] [ET_NET 0] DEBUG: <DNS.cc:1854 (dns_process)> (dns) Returning 1 DNS records for [www.yahoo.co.jp]
+
   ProxyMutex *mutex = handler->mutex.get();
   HEADER *h         = reinterpret_cast<HEADER *>(buf->buf);
   DNSEntry *e       = get_dns(handler, static_cast<uint16_t>(ntohs(h->id)));
@@ -1617,7 +1629,10 @@ dns_process(DNSHandler *handler, HostEnt *buf, int len)
     buf->srv_hosts.srv_hosts_length = 0;
     int rname_len                   = -1;
 
+    // 以下はサンプル
+    //   DEBUG: <DNS.cc:1602 (dns_process)> (dns) Got 2 DNS records for [www.yahoo.co.jp]
     Debug("dns", "Got %d DNS records for [%s]", ancount, e->qname);
+
     //
     // Expand name
     //

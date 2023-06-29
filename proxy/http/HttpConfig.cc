@@ -272,10 +272,14 @@ http_insert_forwarded_cb(const char *name, RecDataT dtype, RecData data, void *c
   bool valid_p        = false;
   HttpConfigParams *c = static_cast<HttpConfigParams *>(cookie);
 
+  // cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-insert-forwarded
   if (0 == strcasecmp("proxy.config.http.insert_forwarded", name)) {
+    // records.configに指定されたTypeが「STRING」であれば
     if (RECD_STRING == dtype) {
+
       ts::LocalBufferWriter<1024> error;
       HttpForwarded::OptionBitSet bs = HttpForwarded::optStrToBitset(std::string_view(data.rec_string), error);
+      // エラーでなければ
       if (!error.size()) {
         c->oride.insert_forwarded = bs;
         valid_p                   = true;
@@ -1207,8 +1211,11 @@ HttpConfig::startup()
   {
     char str[512];
 
+    // cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-insert-forwarded
     if (REC_ERR_OKAY == RecGetRecordString("proxy.config.http.insert_forwarded", str, sizeof(str))) {
       ts::LocalBufferWriter<1024> error;
+
+      // HttpForwarded::optStrToBitsetでは、proxy.config.http.insert_forwardedに設定された値によって、設定されるフラグが分岐します。
       HttpForwarded::OptionBitSet bs = HttpForwarded::optStrToBitset(std::string_view(str), error);
       if (!error.size()) {
         c.oride.insert_forwarded = bs;

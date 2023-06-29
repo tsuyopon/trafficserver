@@ -76,5 +76,6 @@ Http1Transaction::set_reader(IOBufferReader *reader)
 inline void
 Http1Transaction::set_close_connection(HTTPHdr &hdr) const
 {
+  // 「Connection: close」をセットする
   hdr.value_set(MIME_FIELD_CONNECTION, MIME_LEN_CONNECTION, "close", 5);
 }

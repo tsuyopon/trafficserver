@@ -17,6 +17,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
  */
 
+
+// プラグインドキュメント
+// https://docs.trafficserver.apache.org/en/9.1.x/admin-guide/plugins/healthchecks.en.html
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
@@ -283,9 +287,11 @@ gen_header(char *status_str, char *mime, int *header_len)
   return buf;
 }
 
+// plugin.configで指定された設定ファイルのパース処理を行う
 static HCFileInfo *
 parse_configs(const char *fname)
 {
+
   FILE *fd;
   char buf[2 * 1024];
   HCFileInfo *head_finfo = NULL, *finfo = NULL, *prev_finfo = NULL;
@@ -294,6 +300,8 @@ parse_configs(const char *fname)
     return NULL;
   }
 
+  
+  // 絶対パスか相対パスかを判定して、設定ファイルをopenする
   if ('/' == *fname) {
     fd = fopen(fname, "r");
   } else {
@@ -315,33 +323,36 @@ parse_configs(const char *fname)
     finfo = TSmalloc(sizeof(HCFileInfo));
     memset(finfo, 0, sizeof(HCFileInfo));
 
+    // 各行毎に処理する。
+    // 設定ファイルには下記のような行が入ります。
+    //   (例)  /__hc  /var/run/ts-alive  text/plain 200  403
     if (fgets(buf, sizeof(buf) - 1, fd)) {
       str       = strtok_r(buf, SEPARATORS, &save);
       int state = 0;
       while (NULL != str) {
         if (strlen(str) > 0) {
           switch (state) {
-          case 0:
+          case 0:     // ヘルスチェックのエンドポイントのパス
             if ('/' == *str) {
               ++str;
             }
             strncpy(finfo->path, str, PATH_NAME_MAX - 1);
             finfo->p_len = strlen(finfo->path);
             break;
-          case 1:
+          case 1:     // ヘルスチェックが返すボディ情報が記載されたファイル
             strncpy(finfo->fname, str, MAX_PATH_LEN - 1);
             finfo->basename = strrchr(finfo->fname, '/');
             if (finfo->basename) {
               ++(finfo->basename);
             }
             break;
-          case 2:
+          case 2:     // 「text/plain」などの応答時のMIME情報
             mime = str;
             break;
-          case 3:
+          case 3:     // 正常時に返すレスポンスコード
             ok = str;
             break;
-          case 4:
+          case 4:     // 異常時に返すレスポンスコード
             miss = str;
             break;
           }
@@ -549,6 +560,8 @@ TSPluginInit(int argc, const char *argv[])
 {
   TSPluginRegistrationInfo info;
 
+  // plugin.configには下記のように2つのargcしか指定されません
+  // healthchecks.so <healthcheck-configuration-file>
   if (2 != argc) {
     TSError("[healthchecks] Must specify a configuration file");
     return;
@@ -565,6 +578,8 @@ TSPluginInit(int argc, const char *argv[])
 
   /* This will update the global configuration file, and is not reloaded at run time */
   /* ToDo: Support reloading with traffic_ctl config reload ? */
+
+  // argv[1]はplugin.configで指定される設定ファイル
   if (NULL == (g_config = parse_configs(argv[1]))) {
     TSError("[healthchecks] Unable to read / parse %s config file", argv[1]);
     return;

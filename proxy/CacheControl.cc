@@ -281,6 +281,8 @@ CacheControlRecord::Init(matcher_line *line_info)
       continue;
     }
 
+    // cache.config設定ファイルの仕様を参照のこと
+    //   cf. https://docs.trafficserver.apache.org/admin-guide/files/cache.config.en.html#actions
     if (strcasecmp(label, "action") == 0) {
       if (strcasecmp(val, "never-cache") == 0) {
         directive = CC_NEVER_CACHE;

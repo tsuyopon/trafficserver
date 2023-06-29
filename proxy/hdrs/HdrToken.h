@@ -77,12 +77,14 @@ struct HdrTokenHeapPrefix {
   HdrTokenTypeSpecific wks_type_specific;
 };
 
+// 下記のフラグはHdrToken.ccの中でヘッダ毎に設定されています。
+// 「static HdrTokenFieldInfo _hdrtoken_strs_field_initializers[]」への設定内容を確認すること
 enum HdrTokenInfoFlags {
-  HTIF_NONE      = 0,
-  HTIF_COMMAS    = 1 << 0,
-  HTIF_MULTVALS  = 1 << 1,
-  HTIF_HOPBYHOP  = 1 << 2,
-  HTIF_PROXYAUTH = 1 << 3
+  HTIF_NONE      = 0,        // 0
+  HTIF_COMMAS    = 1 << 0,   // 1
+  HTIF_MULTVALS  = 1 << 1,   // 2
+  HTIF_HOPBYHOP  = 1 << 2,   // 4   ホップを超えてプロキシを通過するかどうかを表すフラグ
+  HTIF_PROXYAUTH = 1 << 3    // 8   認証ヘッダを表すフラグ
 };
 
 extern DFA *hdrtoken_strs_dfa;

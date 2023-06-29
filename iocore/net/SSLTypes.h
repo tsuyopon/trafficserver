@@ -23,9 +23,11 @@
 
 #pragma once
 
+// sni.yamlの設定値によって選択が変化する
+// cf. https://docs.trafficserver.apache.org/en/9.0.x/admin-guide/files/sni.yaml.en.html#std-configfile-sni.yaml
 enum class SNIRoutingType {
   NONE = 0,
-  BLIND,
-  FORWARD,
-  PARTIAL_BLIND,
+  BLIND,           // tunnel_routeが設定された場合
+  FORWARD,         // forward_routeが設定された場合
+  PARTIAL_BLIND,   // partial_blind_routeが設定された場合
 };
