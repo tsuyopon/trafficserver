@@ -161,6 +161,7 @@ Http2ClientSession::do_io_close(int alerrno)
 int
 Http2ClientSession::main_event_handler(int event, void *edata)
 {
+
   ink_assert(this->mutex->thread_holding == this_ethread());
   int retval;
 

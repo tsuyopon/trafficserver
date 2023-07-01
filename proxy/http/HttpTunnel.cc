@@ -1684,6 +1684,7 @@ HttpTunnel::close_vc(HttpTunnelConsumer *c)
 int
 HttpTunnel::main_handler(int event, void *data)
 {
+
   if (event == HTTP_TUNNEL_EVENT_ACTIVITY_CHECK) {
     if (!_is_tls_tunnel_active()) {
       mark_tls_tunnel_inactive();

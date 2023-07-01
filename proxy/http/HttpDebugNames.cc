@@ -220,6 +220,8 @@ HttpDebugNames::get_event_name(int event)
   case HTTP_TUNNEL_EVENT_CONSUMER_DETACH:
     return "HTTP_TUNNEL_EVENT_CONSUMER_DETACH";
 
+  // TODO: HTTP_TUNNEL_EVENT_ACTIVITY_CHECKのケースがない
+
   /////////////////////////////
   //  Plugin Events
   /////////////////////////////

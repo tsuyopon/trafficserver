@@ -25,6 +25,11 @@
 // TS_HTTP_POST_REMAP_HOOK to perform the initial authorization, and
 // the TS_HTTP_SEND_RESPONSE_HDR_HOOK to send an error response if necessary.
 
+// プラグインのドキュメント
+//    https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/plugins/authproxy.en.html
+// 特徴
+//    globalプラグインでもremapプラグインでも利用可能
+
 #include "utils.h"
 #include <string>
 #include <memory> // placement new
