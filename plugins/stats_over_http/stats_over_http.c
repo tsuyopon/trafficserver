@@ -24,6 +24,13 @@
 /* stats.c:  expose traffic server stats over http
  */
 
+/*
+ * ドキュメント
+ *  https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/plugins/stats_over_http.en.html
+ *
+ * このプラグインではHTTPエンドポイントとしてTrafficserverの統計情報を取得するための仕組みを提供します。
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -51,6 +58,7 @@
 #define PLUGIN_NAME "stats_over_http"
 #define FREE_TMOUT 300000
 #define STR_BUFFER_SIZE 1024
+
 
 #define SYSTEM_RECORD_TYPE (0x100)
 #define DEFAULT_RECORD_TYPES (SYSTEM_RECORD_TYPE | TS_RECORDTYPE_PROCESS | TS_RECORDTYPE_PLUGIN)
@@ -262,6 +270,7 @@ static const char RESP_HEADER_CSV_BR[] =
 static int
 stats_add_resp_header(stats_state *my_state)
 {
+
   switch (my_state->output) {
   case JSON_OUTPUT:
     if (my_state->encoding == GZIP) {
@@ -295,6 +304,7 @@ stats_add_resp_header(stats_state *my_state)
 static void
 stats_process_read(TSCont contp, TSEvent event, stats_state *my_state)
 {
+
   TSDebug(PLUGIN_NAME, "stats_process_read(%d)", event);
   if (event == TS_EVENT_VCONN_READ_READY) {
     my_state->output_bytes = stats_add_resp_header(my_state);
@@ -360,6 +370,7 @@ wrap_unsigned_counter(uint64_t value)
   }
 }
 
+// JSONに関する出力を行う
 static void
 json_out_stat(TSRecordType rec_type ATS_UNUSED, void *edata, int registered ATS_UNUSED, const char *name,
               TSRecordDataType data_type, TSRecordData *datum)
@@ -385,10 +396,13 @@ json_out_stat(TSRecordType rec_type ATS_UNUSED, void *edata, int registered ATS_
   }
 }
 
+// CSVに関する出力を行う
 static void
 csv_out_stat(TSRecordType rec_type ATS_UNUSED, void *edata, int registered ATS_UNUSED, const char *name, TSRecordDataType data_type,
              TSRecordData *datum)
 {
+
+  // 出力する型がCOUNTER、INT、FLOAT、STRINGにより処理を分岐する
   stats_state *my_state = edata;
   switch (data_type) {
   case TS_RECORDDATATYPE_COUNTER:
@@ -413,9 +427,14 @@ static void
 json_out_stats(stats_state *my_state)
 {
   const char *version;
+
+  // レスポンスとして応答するJSON文字列の最初に下記の文字列を追加します
   APPEND("{ \"global\": {\n");
 
+  // InkAPIを呼び出します
   TSRecordDump((TSRecordType)(TS_RECORDTYPE_PLUGIN | TS_RECORDTYPE_NODE | TS_RECORDTYPE_PROCESS), json_out_stat, my_state);
+
+  // レスポンスとして応答するJSON文字列の最後に情報としてtrafficserverのバージョン情報を付加します
   version = TSTrafficServerVersionGet();
   APPEND("\"server\": \"");
   APPEND(version);
@@ -500,6 +519,7 @@ csv_out_stats(stats_state *my_state)
 static void
 stats_process_write(TSCont contp, TSEvent event, stats_state *my_state)
 {
+
   if (event == TS_EVENT_VCONN_WRITE_READY) {
     if (my_state->body_written == 0) {
       my_state->body_written = 1;
@@ -599,12 +619,16 @@ stats_origin(TSCont contp ATS_UNUSED, TSEvent event ATS_UNUSED, void *edata)
 
   accept_field     = TSMimeHdrFieldFind(reqp, hdr_loc, TS_MIME_FIELD_ACCEPT, TS_MIME_LEN_ACCEPT);
   my_state->output = JSON_OUTPUT; // default to json output
+
   // accept header exists, use it to determine response type
+  // 「Accept」ヘッダのフィールドが存在した場合に下記ifを通り、csvでレスポンスを応答するか、jsonでレスポンスを応答するかを決定します。
   if (accept_field != TS_NULL_MLOC) {
+
     int len         = -1;
     const char *str = TSMimeHdrFieldValueStringGet(reqp, hdr_loc, accept_field, -1, &len);
 
     // Parse the Accept header, default to JSON output unless its another supported format
+    // 文字列が「text/csv」であればCSV出力で、それ以外はJSON出力として扱います
     if (!strncasecmp(str, "text/csv", len)) {
       my_state->output = CSV_OUTPUT;
     } else {
@@ -615,30 +639,46 @@ stats_origin(TSCont contp ATS_UNUSED, TSEvent event ATS_UNUSED, void *edata)
   // Check for Accept Encoding and init
   accept_encoding_field = TSMimeHdrFieldFind(reqp, hdr_loc, TS_MIME_FIELD_ACCEPT_ENCODING, TS_MIME_LEN_ACCEPT_ENCODING);
   my_state->encoding    = NONE;
+
+  // 「Accept-Encoding」ヘッダフィールドが存在した場合の処理
   if (accept_encoding_field != TS_NULL_MLOC) {
+
     int len         = -1;
+
+    // 「Accept-Encoding」オブジェクトを取得する
     const char *str = TSMimeHdrFieldValueStringGet(reqp, hdr_loc, accept_encoding_field, -1, &len);
     if (len >= TS_HTTP_LEN_DEFLATE && strstr(str, TS_HTTP_VALUE_DEFLATE) != NULL) {
+      // 「Accept-Encoding」に「deflate」が指定された場合
       TSDebug(PLUGIN_NAME, "Saw deflate in accept encoding");
       my_state->encoding = init_gzip(my_state, DEFLATE_MODE);
     } else if (len >= TS_HTTP_LEN_GZIP && strstr(str, TS_HTTP_VALUE_GZIP) != NULL) {
+      // 「Accept-Encoding」に「gzip」が指定された場合
       TSDebug(PLUGIN_NAME, "Saw gzip in accept encoding");
       my_state->encoding = init_gzip(my_state, GZIP_MODE);
     }
+
 #if HAVE_BROTLI_ENCODE_H
     else if (len >= TS_HTTP_LEN_BROTLI && strstr(str, TS_HTTP_VALUE_BROTLI) != NULL) {
+      // 「Accept-Encoding」に「br」が指定された場合
       TSDebug(PLUGIN_NAME, "Saw br in accept encoding");
       my_state->encoding = init_br(my_state);
     }
 #endif
     else {
+      // 「Accept-Encoding」が、deflate、gzip、brのいずれにもマッチしない場合
       my_state->encoding = NONE;
     }
   }
+
+  // Accept-Encodingのチェックが完了したことを通知
   TSDebug(PLUGIN_NAME, "Finished AE check");
 
+  // my_stateは出力情報(output)やエンコーディング情報(encoding)が含まれているので、フック時にデータとしてTSContDataGetで取得できるようにTSContDataSetしておく
   TSContDataSet(icontp, my_state);
+
+  // リクエストがこの後にオリジンへに対する処理を行わないようにトランザクション処理がinterceptされたことを通知します
   TSHttpTxnIntercept(icontp, txnp);
+
   goto cleanup;
 
 notforme:
@@ -681,6 +721,7 @@ TSPluginInit(int argc, const char *argv[])
     goto done;
   }
 
+  // plugin.configに指定されたオプションi, w を解析する
   for (;;) {
     switch (getopt_long(argc, (char *const *)argv, "iw", longopts, NULL)) {
     case 'i':
@@ -705,24 +746,31 @@ init:
   /* Path was not set during load, so the param was not a config file, we also
     have an argument so it must be the path, set it here.  Otherwise if no argument
     then use the default _stats path */
-  if ((config_holder->config != NULL) && (config_holder->config->stats_path == 0) && (argc > 0) &&
-      (config_holder->config_path == NULL)) {
+  if ((config_holder->config != NULL) && (config_holder->config->stats_path == 0) && (argc > 0) && (config_holder->config_path == NULL)) {
+
     config_holder->config->stats_path     = TSstrdup(argv[0] + ('/' == argv[0][0] ? 1 : 0));
     config_holder->config->stats_path_len = strlen(config_holder->config->stats_path);
+
   } else if ((config_holder->config != NULL) && (config_holder->config->stats_path == 0)) {
+
     config_holder->config->stats_path     = nstr(DEFAULT_URL_PATH);
     config_holder->config->stats_path_len = strlen(config_holder->config->stats_path);
+
   }
 
   /* Create a continuation with a mutex as there is a shared global structure
      containing the headers to add */
   main_cont = TSContCreate(stats_origin, NULL);
   TSContDataSet(main_cont, (void *)config_holder);
+
+  // READ_REQUEST_HDR_HOOK (最初のフック)に処理を登録する
   TSHttpHookAdd(TS_HTTP_READ_REQUEST_HDR_HOOK, main_cont);
 
   /* Create continuation for management updates to re-read config file */
   config_cont = TSContCreate(config_handler, TSMutexCreate());
   TSContDataSet(config_cont, (void *)config_holder);
+
+  // 設定ファイルを再起動せずに更新されたら読み込むようにTrafficManagerに更新処理として登録する
   TSMgmtUpdateRegister(config_cont, PLUGIN_NAME);
   TSDebug(PLUGIN_NAME, "stats module registered with path %s", config_holder->config->stats_path);
 
@@ -912,42 +960,57 @@ new_config(TSFile fh)
   config->ipCount        = 0;
   config->allowIps6      = 0;
   config->ip6Count       = 0;
-  config->recordTypes    = DEFAULT_RECORD_TYPES;
+  config->recordTypes    = DEFAULT_RECORD_TYPES;  // この値は統計情報として取得する値に影響するフラグ情報です。ファイル中のrecord_typesによって設定変更ができます
 
+
+  // fhがnullだったら設定ファイルがないとして、直前で設定されたデフォルト設定を利用します
   if (!fh) {
     TSDebug(PLUGIN_NAME, "No config file, using defaults");
     return config;
   }
 
+  // ファイルを1行ずつ取得します
   while (TSfgets(fh, buffer, STR_BUFFER_SIZE - 1)) {
+
+    // 先頭行が「#」ならばコメントなのでcontinueします。
     if (*buffer == '#') {
       continue; /* # Comments, only at line beginning */
     }
+
     char *p = 0;
+
     if ((p = strstr(buffer, "path="))) {
+      // 「path」が指定された場合
       p += strlen("path=");
       if (p[0] == '/') {
         p++;
       }
+
       config->stats_path     = nstr(strtok_r(p, " \n", &p));
       config->stats_path_len = strlen(config->stats_path);
     } else if ((p = strstr(buffer, "record_types="))) {
+      // 「record_types」が指定された場合
       p += strlen("record_types=");
       config->recordTypes = strtol(strtok_r(p, " \n", &p), NULL, 16);
     } else if ((p = strstr(buffer, "allow_ip="))) {
+      // 「allow_ip」が指定された場合
       p += strlen("allow_ip=");
       parseIps(config, p);
     } else if ((p = strstr(buffer, "allow_ip6="))) {
+      // 「allow_ip6」が指定された場合
       p += strlen("allow_ip6=");
       parseIps6(config, p);
     }
   }
+
   if (!config->ipCount) {
     parseIps(config, NULL);
   }
+
   if (!config->ip6Count) {
     parseIps6(config, NULL);
   }
+
   TSDebug(PLUGIN_NAME, "config path=%s", config->stats_path);
 
   return config;
@@ -1054,6 +1117,7 @@ new_config_holder(const char *path)
 static int
 free_handler(TSCont cont, TSEvent event, void *edata)
 {
+  // 設定情報オブジェクトがメモリ上に残らないようにfreeさせます
   config_t *config;
   config = (config_t *)TSContDataGet(cont);
   delete_config(config);
@@ -1071,7 +1135,11 @@ config_handler(TSCont cont, TSEvent event, void *edata)
   /* We received a reload, check if the path value was removed since it was not set after load.
      If unset, then we'll use the default */
   if (config_holder->config->stats_path == 0) {
+
+    // エンドポイントパスをデフォルトの「_stats」にする
     config_holder->config->stats_path     = nstr(DEFAULT_URL_PATH);
+
+    // 「_stats」の文字数(つまり、6文字)をセットする
     config_holder->config->stats_path_len = strlen(config_holder->config->stats_path);
   }
   return 0;

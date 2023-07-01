@@ -680,6 +680,10 @@ private:
 inline int
 HTTPHdr::valid() const
 {
+  // 3つのオブジェクトが全て生成されていること
+  //   m_http: HTTP用オブジェクト
+  //   m_mime: MIMEオブジェクト
+  //   m_heap: HDRヒープオブジェクト
   return (m_http && m_mime && m_heap);
 }
 

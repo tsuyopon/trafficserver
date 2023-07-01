@@ -1057,6 +1057,7 @@ debug_record_callback(RecT /* rec_type */, void * /* edata */, int registered, c
 void
 RecDumpRecords(RecT rec_type, RecDumpEntryCb callback, void *edata)
 {
+
   int i, num_records;
 
   num_records = g_num_records;

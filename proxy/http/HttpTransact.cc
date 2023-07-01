@@ -103,6 +103,8 @@ extern HttpBodyFactory *body_factory;
 inline static bool
 bypass_ok(HttpTransact::State *s)
 {
+
+  // InkAPIによる設定、strategy.yamlによる設定、parent.configによる設定かで処理が分岐する
   url_mapping *mp = s->url_map.getMapping();
   if (s->response_action.handled) {
     return s->response_action.action.goDirect;
@@ -124,6 +126,7 @@ is_api_result(HttpTransact::State *s)
   bool r          = false;
   url_mapping *mp = s->url_map.getMapping();
 
+  // strategy.yamlによる設定、parent.configによる設定かで処理が分岐する
   if (mp && mp->strategy) {
     // remap strategies do not support the TSHttpTxnParentProxySet API.
     r = false;
@@ -138,6 +141,7 @@ is_api_result(HttpTransact::State *s)
 inline static unsigned
 max_retries(HttpTransact::State *s, ParentRetry_t method)
 {
+  // parent.configから取得
   if (s->parent_params) {
     return s->parent_result.max_retries(method);
   }
@@ -146,9 +150,12 @@ max_retries(HttpTransact::State *s, ParentRetry_t method)
 
 // wrapper to get the numParents.
 // Does NOT check the strategy; if strategy exists, strategy->responseIsRetryable should be called instead.
+//
+// parentの数を返す
 inline static uint32_t
 numParents(HttpTransact::State *s)
 {
+  // parent.configから取得
   if (s->parent_params) {
     return s->parent_params->numParents(&s->parent_result);
   }
@@ -160,9 +167,12 @@ numParents(HttpTransact::State *s)
 inline static bool
 parent_is_proxy(HttpTransact::State *s)
 {
+  // parent.configにあるproxy設定
 
+  // InkAPIによる設定、strategy.yamlによる設定、parent.configによる設定かで処理が分岐する
   url_mapping *mp = s->url_map.getMapping();
   if (s->response_action.handled) {
+    // TSHttpTxnResponseActionSet関数がセットされた場合にのみ、s->response_action.handled = trueとなり、このロジックが呼ばれます。
     return s->response_action.action.parentIsProxy;
   } else if (mp && mp->strategy) {
     return mp->strategy->parent_is_proxy;
@@ -191,11 +201,12 @@ inline static void
 findParent(HttpTransact::State *s)
 {
 
+  // InkAPIによる設定、strategy.yamlによる設定、parent.configによる設定かで処理が分岐する
   url_mapping *mp = s->url_map.getMapping();
 
   if (s->response_action.handled) {
 
-    // TSHttpTxnResponseActionSet関数がセットされた場合にのみ、s->response_action.handled = trueとなるので、このロジックが呼ばれると思われる
+    // TSHttpTxnResponseActionSet関数がセットされた場合にのみ、s->response_action.handled = trueとなり、このロジックが呼ばれます。
 
     s->parent_result.hostname = s->response_action.action.hostname;
     s->parent_result.port     = s->response_action.action.port;
@@ -237,9 +248,11 @@ markParentDown(HttpTransact::State *s)
     return;
   }
 
+  // InkAPIによる設定、strategy.yamlによる設定、parent.configによる設定かで処理が分岐する
   if (s->response_action.handled) {
+    // TSHttpTxnResponseActionSet関数がセットされた場合にのみ、s->response_action.handled = trueとなり、このロジックが呼ばれます。
     // Do nothing. If a plugin handled the response, let it handle markdown.
-  } else if (mp && mp->strategy) {
+  } else if (mp && mp->strategy) {   // RemapConfig.cc::remap_parse_config_btiの「new_mapping->strategy = bti->rewrite->strategyFactory->strategyInstance(strategy);」の箇所でセットされると思われる。
     mp->strategy->markNextHop(reinterpret_cast<TSHttpTxn>(s->state_machine), s->parent_result.hostname, s->parent_result.port,
                               NH_MARK_DOWN);
   } else if (s->parent_params) {
@@ -252,6 +265,8 @@ markParentDown(HttpTransact::State *s)
 inline static void
 markParentUp(HttpTransact::State *s)
 {
+
+  // InkAPIによる設定、strategy.yamlによる設定、parent.configによる設定かで処理が分岐する
   url_mapping *mp = s->url_map.getMapping();
   if (s->response_action.handled) {
     // Do nothing. If a plugin handled the response, let it handle markdown
@@ -268,10 +283,13 @@ markParentUp(HttpTransact::State *s)
 inline static bool
 parentExists(HttpTransact::State *s)
 {
+
+  // InkAPIによる設定、strategy.yamlによる設定、parent.configによる設定かで処理が分岐する
   url_mapping *mp = s->url_map.getMapping();
   if (s->response_action.handled) {
+    // TSHttpTxnResponseActionSet関数がセットされた場合にのみ、s->response_action.handled = trueとなり、このロジックが呼ばれます。
     return s->response_action.action.nextHopExists;
-  } else if (mp && mp->strategy) {
+  } else if (mp && mp->strategy) {   // RemapConfig.cc::remap_parse_config_btiの「new_mapping->strategy = bti->rewrite->strategyFactory->strategyInstance(strategy);」の箇所でセットされると思われる。
     return mp->strategy->nextHopExists(reinterpret_cast<TSHttpTxn>(s->state_machine));
   } else if (s->parent_params) {
     return s->parent_params->parentExists(&s->request_data);
@@ -282,13 +300,21 @@ parentExists(HttpTransact::State *s)
 
 // wrapper to choose between a remap next hop strategy or use parent.config
 // remap next hop strategy is preferred
+// 
+// 呼び出し元をみると、HttpTransact.ccの同一ファイル内部からこのnextParentが呼び出されていて、かつ「PARENT_SPECIFIED」の場合(InkAPIからのセット)にのみこの関数が呼ばれているケースな気がする
 inline static void
 nextParent(HttpTransact::State *s)
 {
+
   TxnDebug("parent_down", "connection to parent %s failed, conn_state: %s, request to origin: %s", s->parent_result.hostname,
            HttpDebugNames::get_server_state_name(s->current.state), s->request_data.get_host());
+
+  // InkAPIによる設定、strategy.yamlによる設定、parent.configによる設定かで処理が分岐する
   url_mapping *mp = s->url_map.getMapping();
   if (s->response_action.handled) {
+
+    // TSHttpTxnResponseActionSet関数がセットされた場合にのみ、s->response_action.handled = trueとなり、このロジックが呼ばれます。
+
     s->parent_result.hostname = s->response_action.action.hostname;
     s->parent_result.port     = s->response_action.action.port;
     s->parent_result.retry    = s->response_action.action.is_retry;
@@ -299,13 +325,20 @@ nextParent(HttpTransact::State *s)
     } else {
       s->parent_result.result = PARENT_FAIL;
     }
-  } else if (mp && mp->strategy) {
+
+  } else if (mp && mp->strategy) {   // RemapConfig.cc::remap_parse_config_btiの「new_mapping->strategy = bti->rewrite->strategyFactory->strategyInstance(strategy);」の箇所でセットされると思われる。
+
+    // strategies.yamlの設定から探索します
     // NextHop only has a findNextHop() function.
     mp->strategy->findNextHop(reinterpret_cast<TSHttpTxn>(s->state_machine));
+
   } else if (s->parent_params) {
-    s->parent_params->nextParent(&s->request_data, &s->parent_result, s->txn_conf->parent_fail_threshold,
-                                 s->txn_conf->parent_retry_time);
+
+    // parents.configの設定から探索します (ParentConfigParams::nextParentが呼ばれると思われる)
+    s->parent_params->nextParent(&s->request_data, &s->parent_result, s->txn_conf->parent_fail_threshold, s->txn_conf->parent_retry_time);
+
   }
+
 }
 
 inline static bool
@@ -610,12 +643,14 @@ find_server_and_update_current_info(HttpTransact::State *s)
 
     //  cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-local-http-parent-proxy-disable-connect-tunneling
     if (s->parent_result.result == PARENT_SPECIFIED) {
-      // 次のparentが指定されている場合
+      // InkAPI経由でparentが指定された場合にPARENT_SPECIFIEDとなる
       nextParent(s);
     } else {
+      // strategy.yamlやparent.configの場合にはfindParentとなる
       findParent(s);
     }
 
+    // リクエストがキャッシュできないケースの場合には、PARENT_DIRECTがセットされることでParentを経由せずに直接アクセスがoriginへと迂回します。
     if (!s->parent_result.is_some() || is_api_result(s) || parent_is_proxy(s)) {
       TxnDebug("http_trans", "request not cacheable, so bypass parent");
       s->parent_result.result = PARENT_DIRECT;
@@ -672,8 +707,14 @@ find_server_and_update_current_info(HttpTransact::State *s)
       //   1) the config permitted us to dns the origin server
       //   2) the config permits us
       //   3) the parent was not set from API
-      if (s->http_config_param->no_dns_forward_to_parent == 0 && bypass_ok(s) && parent_is_proxy(s) &&
-          !s->parent_params->apiParentExists(&s->request_data)) {
+      // 
+      // 下記全てにマッチしたケースはPARENT_FAILからPARENT_DIRECTへと変更し、parentを経由させずにオリジンに直接アクセスさせる
+      //   1. proxy.config.http.no_dns_just_forward_to_parentの値が0 (デフォルト0) つまり、DNSのresolveをせずに全てparentへと送る場合
+      //       cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-no-dns-just-forward-to-parent
+      //   2. go_direct設定が有効なっている場合 (bypass_ok)
+      //   3. parent.configにproxy設定が存在する
+      //   4. InkAPIによりparentが指定されていない場合
+      if (s->http_config_param->no_dns_forward_to_parent == 0 && bypass_ok(s) && parent_is_proxy(s) && !s->parent_params->apiParentExists(&s->request_data)) {
         s->parent_result.result = PARENT_DIRECT;
       }
       break;
@@ -1055,8 +1096,10 @@ void
 HttpTransact::StartRemapRequest(State *s)
 {
 
-  // このフラグはTSAPIからTSSkipRemappingSet関数が呼ばれた場合にtrueがセットされる。それが呼ばれない限りデフォルトはfalseである
+  // このフラグはInkAPIのTSSkipRemappingSet関数やTSHttpTxnCntlSet関数(case: TS_HTTP_CNTL_SKIP_REMAPPING)が呼ばれた場合にtrueがセットされる。それが呼ばれない限りデフォルトはfalseである
+  // stats over httpプラグインがセットされると下記のif分を通ります
   if (s->api_skip_all_remapping) {
+
     TxnDebug("http_trans", "API request to skip remapping");
 
     s->hdr_info.client_request.set_url_target_from_host_field();
@@ -1070,6 +1113,7 @@ HttpTransact::StartRemapRequest(State *s)
       TRANSACT_RETURN(SM_ACTION_POST_REMAP_SKIP, s->post_remap_upgrade_return_point);
     }
 
+    // プラグイン内部でremap処理をskipを明示的に指定しているので、SM_ACTION_POST_REMAP_SKIPへと遷移します。(stats over httpプラグインだと、SM_ACTION_READ_REQUEST_HDR -> SM_ACTION_POST_REMAP_SKIP)と遷移しています。
     TRANSACT_RETURN(SM_ACTION_POST_REMAP_SKIP, HttpTransact::HandleRequest);
   }
 
@@ -4534,6 +4578,7 @@ HttpTransact::build_response_copy(State *s, HTTPHdr *base_response, HTTPHdr *out
 void
 HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
 {
+
   TxnDebug("http_trans", "(hcoofsr)");
   TxnDebug("http_seq", "Entering handle_cache_operation_on_forward_server_response");
 
@@ -4566,6 +4611,7 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
       s->next_action       = SM_ACTION_SERVE_FROM_CACHE;
       client_response_code = base_response->status_get();
     } else if ((s->cache_info.action == CACHE_DO_DELETE) || ((s->cache_info.action == CACHE_DO_UPDATE) && !cacheable)) {
+
       if (is_request_conditional(&s->hdr_info.client_request)) {
         client_response_code = HttpTransactCache::match_response_to_request_conditionals(
           &s->hdr_info.client_request, s->cache_info.object_read->response_get(), s->response_received_time);
@@ -4826,9 +4872,11 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
       } else if (s->method == HTTP_WKSIDX_HEAD) {
         s->cache_info.action = CACHE_DO_DELETE;
       } else {
+
         ink_assert(s->cache_info.object_read != nullptr);
         s->cache_info.action = CACHE_DO_REPLACE;
 
+        // クライアントリクエストに「Range」ヘッダがセットされていた場合
         if (s->hdr_info.client_request.presence(MIME_PRESENCE_RANGE)) {
           s->state_machine->do_range_setup_if_necessary();
         }
@@ -4865,6 +4913,7 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
     } else {
       ink_assert(!("cache action inconsistent with current state"));
     }
+
     // postcondition: s->cache_info.action is one of the following
     // CACHE_DO_REPLACE, CACHE_DO_WRITE, CACHE_DO_DELETE, or
     // CACHE_DO_NO_ACTION
@@ -4991,6 +5040,7 @@ HttpTransact::handle_cache_operation_on_forward_server_response(State *s)
 
   // 304, 412, and 416 responses are handled here
   if ((client_response_code == HTTP_STATUS_NOT_MODIFIED) || (client_response_code == HTTP_STATUS_PRECONDITION_FAILED)) {
+
     // Because we are decoupling User-Agent validation from
     //  Traffic Server validation just build a regular 304
     //  if the exception of adding prepending the VIA
@@ -5363,6 +5413,7 @@ HttpTransact::set_headers_for_cache_write(State *s, HTTPInfo *cache_info, HTTPHd
     cache_info->response_get()->field_delete(MIME_FIELD_WWW_AUTHENTICATE, MIME_LEN_WWW_AUTHENTICATE);
   }
 
+  // キャッシュに書き込む際の情報をセットする
   DUMP_HEADER("http_hdrs", cache_info->request_get(), s->state_machine_id, "Cached Request Hdr");
 }
 
@@ -5769,23 +5820,33 @@ HttpTransact::check_request_validity(State *s, HTTPHdr *incoming_hdr)
     }
 
     // Require Content-Length/Transfer-Encoding for POST/PUSH/PUT
+    // 以下の3条件を全て満たす場合に下記のコードパスを通ります。
+    //  1. schemeがHTTPかHTTPSのいずれかの場合
+    //  2. メソッドがPOST、PUSH、PUTのいずれかの場合
+    //  3. クライアントリクエスト時に「Transfer-Encoding: chunked」が指定されていない場合
     if ((scheme == URL_WKSIDX_HTTP || scheme == URL_WKSIDX_HTTPS) &&
         (method == HTTP_WKSIDX_POST || method == HTTP_WKSIDX_PUSH || method == HTTP_WKSIDX_PUT) &&
         s->client_info.transfer_encoding != CHUNKED_ENCODING) {
+
       // In normal operation there will always be a ua_txn at this point, but in one of the -R1  regression tests a request is
       // createdindependent of a transaction and this method is called, so we must null check
       if (!s->state_machine->ua_txn || s->state_machine->ua_txn->is_chunked_encoding_supported()) {
+
         // See if we need to insert a chunked header
+        // 入力時に「Content-Length」ヘッダが存在しない場合
         if (!incoming_hdr->presence(MIME_PRESENCE_CONTENT_LENGTH)) {
+
+          // s->txn_conf->post_check_content_length_enabledは設定値でデフォルトで1となっている。これが有効だとPOST時などはContent-Lengthを必要とし、指定されていないとエラーを表示する
+          //   cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-post-check-content-length-enabled
           if (s->txn_conf->post_check_content_length_enabled) {
             return NO_POST_CONTENT_LENGTH;
           } else {
             // Stuff in a TE setting so we treat this as chunked, sort of.
             s->client_info.transfer_encoding = HttpTransact::CHUNKED_ENCODING;
-            incoming_hdr->value_append(MIME_FIELD_TRANSFER_ENCODING, MIME_LEN_TRANSFER_ENCODING, HTTP_VALUE_CHUNKED,
-                                       HTTP_LEN_CHUNKED, true);
+            incoming_hdr->value_append(MIME_FIELD_TRANSFER_ENCODING, MIME_LEN_TRANSFER_ENCODING, HTTP_VALUE_CHUNKED, HTTP_LEN_CHUNKED, true);
           }
         }
+
         if (HTTP_UNDEFINED_CL == s->hdr_info.request_content_length) {
           return INVALID_POST_CONTENT_LENGTH;
         }
@@ -5828,9 +5889,11 @@ HttpTransact::check_request_validity(State *s, HTTPHdr *incoming_hdr)
   return NO_REQUEST_HEADER_ERROR;
 }
 
+// クライアントリクエストの「Transfer-Encoding」や「Content-Length」ヘッダをチェックする
 void
 HttpTransact::set_client_request_state(State *s, HTTPHdr *incoming_hdr)
 {
+
   if (incoming_hdr == nullptr) {
     return;
   }
@@ -5871,6 +5934,7 @@ HttpTransact::set_client_request_state(State *s, HTTPHdr *incoming_hdr)
   // s->hdr_info.request_content_length here rather  //
   // than in initialize_state_variables_from_request //
   /////////////////////////////////////////////////////
+  // 入力ヘッダとして、Content-Lengthヘッダが存在するかをチェックし、取得する
   if (incoming_hdr->presence(MIME_PRESENCE_CONTENT_LENGTH)) {
     s->hdr_info.request_content_length = incoming_hdr->get_content_length();
   } else {
@@ -6196,8 +6260,10 @@ HttpTransact::initialize_state_variables_from_request(State *s, HTTPHdr *obsolet
 
   // if transfer encoding is chunked content length is undefined
   if (s->client_info.transfer_encoding == CHUNKED_ENCODING) {
+    // 「Transfer-Encoding: chunked」の場合には、「Content-Length」はundefinedとして定義されます(HTTP_UNDEFINED_CL)
     s->hdr_info.request_content_length = HTTP_UNDEFINED_CL;
   }
+
   s->request_data.hdr = &s->hdr_info.client_request;
 
   s->request_data.hostname_str = s->arena.str_store(host_name, host_len);
@@ -6970,10 +7036,15 @@ HttpTransact::is_request_valid(State *s, HTTPHdr *incoming_request)
   case NO_POST_CONTENT_LENGTH: {
     TxnDebug("http_trans", "post request without content length");
     SET_VIA_STRING(VIA_DETAIL_TUNNEL, VIA_DETAIL_TUNNEL_NO_FORWARD);
+    // 下記のリクエストでは「Content-Length」がPOSTで指定されません、この場合にはこの遷移に入ります
+    //    curl -v -X POST http://localhost:8080/httpbin/anything/xxxx2 -H "accept: application/json" 
+    //    なお下記のように「-d ""」を指定することで、「Content-Length: 0」が含まれるようになり、この遷移には入らなくなります。
+    //    curl -v -X POST http://localhost:8080/httpbin/anything/xxxx2 -H "accept: application/json" -d ""
     build_error_response(s, HTTP_STATUS_LENGTH_REQUIRED, "Content Length Required", "request#no_content_length");
     return false;
   }
   case UNACCEPTABLE_TE_REQUIRED: {
+    // TE: Transfer-Encoding
     TxnDebug("http_trans", "TE required is unacceptable.");
     SET_VIA_STRING(VIA_DETAIL_TUNNEL, VIA_DETAIL_TUNNEL_NO_FORWARD);
     build_error_response(s, HTTP_STATUS_NOT_ACCEPTABLE, "Transcoding Not Available", "transcoding#unsupported");
@@ -7229,14 +7300,21 @@ HttpTransact::handle_content_length_header(State *s, HTTPHdr *header, HTTPHdr *b
 
   int64_t cl = HTTP_UNDEFINED_CL;
   ink_assert(header->type_get() == HTTP_TYPE_RESPONSE);
+
+  // Content-Lengthヘッダが存在した場合
   if (base->presence(MIME_PRESENCE_CONTENT_LENGTH)) {
     cl = base->get_content_length();
+
+    // Content-Lengthが0byte以上存在した場合にだけ処理を行う
     if (cl >= 0) {
+
       // header->set_content_length(cl);
       ink_assert(header->get_content_length() == cl);
 
+      // 対象となるソース元(オリジン、キャッシュ、Transformによって処理を分岐する)
       switch (s->source) {
       case SOURCE_HTTP_ORIGIN_SERVER:
+
         // We made our decision about whether to trust the
         //   response content length in init_state_vars_from_response()
         if (s->range_setup != HttpTransact::RANGE_NOT_TRANSFORM_REQUESTED) {
@@ -7245,6 +7323,7 @@ HttpTransact::handle_content_length_header(State *s, HTTPHdr *header, HTTPHdr *b
         // fallthrough
 
       case SOURCE_CACHE:
+
         // if we are doing a single Range: request, calculate the new
         // C-L: header
         if (s->range_setup == HttpTransact::RANGE_NOT_TRANSFORM_REQUESTED) {
@@ -7541,6 +7620,23 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
 
     // check that the client protocol is HTTP/1.1 and the conf allows chunking or
     // the client protocol doesn't support chunked transfer coding (i.e. HTTP/1.0, HTTP/2, and HTTP/3)
+
+    // Traffic Serverが「Transfer-Encoding: chunked」で応答可能かどうかの条件を確認する
+    // 具体的な条件は以下を全て満たす必要がある
+    //   1. Proxyでのトランザクションである (s->state_machine->ua_txn)
+    //   2. HTTP1系である (s->state_machine->ua_txn->is_chunked_encoding_supported())
+    //   3. HTTPのバージョンが1.1である
+    //   4. proxy.config.http.chunking_enabled(chunkedを有効にする)の設定値が1である(デフォルト: 1) 
+    //        cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-chunking-enabled
+    //   5. 下記の3つのうちいずれかのケースを満たす場合
+    //     5.1 以下の4条件を全て満たした場合  (このケースはオリジンからの取得する場合のケース)
+    //        5.1.1 レスポンス元がオリジンサーバからの取得(SOURCE_HTTP_ORIGIN_SERVER)、または、Transformをしての取得(SOURCE_TRANSFORM)
+    //        5.1.2 サーバレスポンスとして正常にオブジェクトが生成されている
+    //        5.1.3 サーバレスポンスが「304 Not Modified」以外であること
+    //        5.1.4 「Transfer-Encoding: chunked」の値がサーバ情報に存在する、または、Content-Lengthがレスポンスに存在しない場合
+    //     5.2. キャッシュからのレスポンス適用、かつ、Content-Lengthがレスポンスに存在しない場合   (このケースはキャッシュから取得する場合のケース)
+    //     5.3. Transformをしてボディの書き換えをおこなった、かつ、Content-Lengthがレスポンスに存在しない場合   (このケースはTransform利用の場合のケース)
+    //      
     if (s->state_machine->ua_txn && s->state_machine->ua_txn->is_chunked_encoding_supported() &&
         s->client_info.http_version == HTTP_1_1 && s->txn_conf->chunking_enabled == 1 &&
         s->state_machine->ua_txn->is_chunked_encoding_supported() &&
@@ -7561,20 +7657,30 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
          // any transform will potentially alter the content length. try chunking if possible
          (s->source == SOURCE_TRANSFORM && s->hdr_info.trust_response_cl == false))) {
 
+      // 「Transfer-Encoding: chunked」で応答するかどうかの条件にマッチしたのでtrueをセットする
       s->client_info.receive_chunked_response = true;
+
+      // 「Transfer-Encoding: chunked」の値をセットする
       heads->value_append(MIME_FIELD_TRANSFER_ENCODING, MIME_LEN_TRANSFER_ENCODING, HTTP_VALUE_CHUNKED, HTTP_LEN_CHUNKED, true);
+
+      // MEMO: キャッシュされてしまっているケースについては、chunkedで返されないかもしれない
 
     } else {
 
+      // 「Transfer-Encoding: chunked」で応答するかどうかの条件にマッチしなかったのでfalseをセットする
       s->client_info.receive_chunked_response = false;
 
     }
 
     // make sure no content length header is send when transfer encoding is chunked
+    // Trafficserverがchunkedで応答が可能な場合
     if (s->client_info.receive_chunked_response) {
+
+      // Content-Lengthをレスポンスに含めないということでfalseをセットします
       s->hdr_info.trust_response_cl = false;
 
       // And delete the header if it's already been added...
+      // 「Content-Length」フィールドをレスポンスから削除します
       heads->field_delete(MIME_FIELD_CONTENT_LENGTH, MIME_LEN_CONTENT_LENGTH);
     }
 
@@ -8451,6 +8557,7 @@ HttpTransact::build_request(State *s, HTTPHdr *base_request, HTTPHdr *outgoing_r
   // we don't remove conditional headers so that for a non-200 response
   // from the O.S., we will save bandwidth between proxy and O.S.
   if (s->current.mode == GENERIC_PROXY) {
+
     if (is_request_likely_cacheable(s, base_request)) {
 
       //   cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-cache-when-to-revalidate
@@ -8461,6 +8568,9 @@ HttpTransact::build_request(State *s, HTTPHdr *base_request, HTTPHdr *outgoing_r
         TxnDebug("http_trans", "request like cacheable but keep conditional headers");
       }
     } else {
+
+      // POSTのようにキャッシュできないリクエストはここに入ります
+
       // In this case, we send a conditional request
       // instead of the normal non-conditional request.
       TxnDebug("http_trans", "request not like cacheable and conditional headers not removed");

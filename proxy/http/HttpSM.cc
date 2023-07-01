@@ -2083,8 +2083,7 @@ HttpSM::state_read_server_response_header(int event, void *data)
     server_txn->set_inactivity_timeout(get_server_inactivity_timeout());
 
     // For requests that contain a body, we can cancel the ua inactivity timeout.
-    if (ua_txn && ua_txn->has_request_body(t_state.hdr_info.request_content_length,
-                                           t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING)) {
+    if (ua_txn && ua_txn->has_request_body(t_state.hdr_info.request_content_length, t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING)) {
       ua_txn->cancel_inactivity_timeout();
     }
   }
@@ -2232,8 +2231,7 @@ HttpSM::state_send_server_request_header(int event, void *data)
     server_entry->write_buffer = nullptr;
     method                     = t_state.hdr_info.server_request.method_get_wksidx();
     if (!t_state.api_server_request_body_set && method != HTTP_WKSIDX_TRACE &&
-        ua_txn->has_request_body(t_state.hdr_info.request_content_length,
-                                 t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING)) {
+        ua_txn->has_request_body(t_state.hdr_info.request_content_length, t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING)) {
       if (post_transform_info.vc) {
         setup_transform_to_server_transfer();
       } else {
@@ -5301,8 +5299,7 @@ HttpSM::do_http_server_open(bool raw)
 
   bool try_reuse = false;
   if ((raw == false) && TS_SERVER_SESSION_SHARING_MATCH_NONE != t_state.txn_conf->server_session_sharing_match &&
-      (t_state.txn_conf->keep_alive_post_out == 1 || t_state.hdr_info.request_content_length <= 0) && !is_private() &&
-      ua_txn != nullptr) {
+      (t_state.txn_conf->keep_alive_post_out == 1 || t_state.hdr_info.request_content_length <= 0) && !is_private() && ua_txn != nullptr) {
     HSMresult_t shared_result;
     shared_result = httpSessionManager.acquire_session(this,                                 // state machine
                                                        &t_state.current.server->dst_addr.sa, // ip + port
@@ -6185,8 +6182,7 @@ HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
     postdata_producer_buffer->write(this->_postbuf.postdata_copy_buffer_start);
     int64_t post_bytes = postdata_producer_reader->read_avail();
     transfered_bytes   = post_bytes;
-    p = tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, post_bytes, postdata_producer_reader, (HttpProducerHandler) nullptr,
-                            HT_STATIC, "redirect static agent post");
+    p = tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, post_bytes, postdata_producer_reader, (HttpProducerHandler) nullptr, HT_STATIC, "redirect static agent post");
   } else {
     int64_t alloc_index;
     // content length is undefined, use default buffer size
@@ -6217,8 +6213,7 @@ HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
       post_buffer->write(ua_txn->get_remote_reader(), chunked ? ua_txn->get_remote_reader()->read_avail() : post_bytes);
 
     ua_txn->get_remote_reader()->consume(client_request_body_bytes);
-    p = tunnel.add_producer(ua_entry->vc, post_bytes - transfered_bytes, buf_start, &HttpSM::tunnel_handler_post_ua, HT_HTTP_CLIENT,
-                            "user agent post");
+    p = tunnel.add_producer(ua_entry->vc, post_bytes - transfered_bytes, buf_start, &HttpSM::tunnel_handler_post_ua, HT_HTTP_CLIENT, "user agent post");
   }
   ua_entry->in_tunnel = true;
 
@@ -6296,10 +6291,11 @@ HttpSM::perform_transform_cache_write_action()
 
   case HttpTransact::CACHE_DO_WRITE: {
     if (t_state.api_info.cache_untransformed == false) {
+
+      // null_transformプラグインを有効にするとこのコードパスに入ります
       transform_cache_sm.close_read();
       t_state.cache_info.transform_write_status = HttpTransact::CACHE_WRITE_IN_PROGRESS;
-      setup_cache_write_transfer(&transform_cache_sm, transform_info.entry->vc, &t_state.cache_info.transform_store,
-                                 client_response_hdr_bytes, "cache write t");
+      setup_cache_write_transfer(&transform_cache_sm, transform_info.entry->vc, &t_state.cache_info.transform_store, client_response_hdr_bytes, "cache write t");
     }
     break;
   }
@@ -6513,15 +6509,18 @@ HttpSM::attach_server_session()
   server_txn->set_active_timeout(get_server_active_timeout());
 
   // Do we need Transfer_Encoding?
-  if (ua_txn->has_request_body(t_state.hdr_info.request_content_length,
-                               t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING)) {
+  if (ua_txn->has_request_body(t_state.hdr_info.request_content_length, t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING)) {
+
     // See if we need to insert a chunked header
+    // サーバへのリクエストに「Content-Length」と「Transfer-Encoding」ヘッダが両方共存在しない場合
     if (!t_state.hdr_info.server_request.presence(MIME_PRESENCE_CONTENT_LENGTH) &&
         !t_state.hdr_info.server_request.presence(MIME_PRESENCE_TRANSFER_ENCODING)) {
+
       // Stuff in a TE setting so we treat this as chunked, sort of.
       t_state.server_info.transfer_encoding = HttpTransact::CHUNKED_ENCODING;
-      t_state.hdr_info.server_request.value_append(MIME_FIELD_TRANSFER_ENCODING, MIME_LEN_TRANSFER_ENCODING, HTTP_VALUE_CHUNKED,
-                                                   HTTP_LEN_CHUNKED, true);
+
+      // 「Transfer-Encoding: chunked」をサーバリクエストに付与する
+      t_state.hdr_info.server_request.value_append(MIME_FIELD_TRANSFER_ENCODING, MIME_LEN_TRANSFER_ENCODING, HTTP_VALUE_CHUNKED, HTTP_LEN_CHUNKED, true);
     }
   }
 
@@ -6788,8 +6787,8 @@ HttpSM::setup_100_continue_transfer()
 void
 HttpSM::setup_error_transfer()
 {
-  if (body_factory->is_response_suppressed(&t_state) || t_state.internal_msg_buffer ||
-      is_response_body_precluded(t_state.http_return_code)) {
+
+  if (body_factory->is_response_suppressed(&t_state) || t_state.internal_msg_buffer || is_response_body_precluded(t_state.http_return_code)) {
     // Since we need to send the error message, call the API
     //   function
     ink_assert(t_state.internal_msg_buffer_size > 0 || is_response_body_precluded(t_state.http_return_code));
@@ -6803,6 +6802,7 @@ HttpSM::setup_error_transfer()
     terminate_sm   = true;
     t_state.source = HttpTransact::SOURCE_INTERNAL;
   }
+
 }
 
 void
@@ -6830,6 +6830,7 @@ HttpSM::setup_internal_transfer(HttpSMHandler handler_arg)
       }
       ats_free(t_state.internal_msg_buffer_type);
       t_state.internal_msg_buffer_type = nullptr;
+
     } else {
       t_state.hdr_info.client_response.value_set(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE, "text/html", 9);
     }
@@ -6893,6 +6894,7 @@ HttpSM::setup_internal_transfer(HttpSMHandler handler_arg)
     tunnel.reset();
 
     // Setup the tunnel to the client
+    // オリジンに接続できなかった場合にはこのコードパスを通ることがわかっている
     HttpTunnelProducer *p = tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, nbytes, buf_start, (HttpProducerHandler) nullptr, HT_STATIC, "internal msg");
     tunnel.add_consumer(ua_entry->vc, HTTP_TUNNEL_STATIC_PRODUCER, &HttpSM::tunnel_handler_ua, HT_HTTP_CLIENT, "user agent");
 
@@ -7001,6 +7003,7 @@ HttpSM::setup_server_transfer_to_transform()
   return p;
 }
 
+// null_transformプラグインをセットすると呼ばれるはず
 HttpTunnelProducer *
 HttpSM::setup_transfer_from_transform()
 {
@@ -7023,6 +7026,8 @@ HttpSM::setup_transfer_from_transform()
 
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler);
 
+  // null_transformの場合にはここを通ります
+  // なお、キャッシュ書き込みされた場合には、もうこのコードパスは通らない
   HttpTunnelProducer *p = tunnel.add_producer(transform_info.vc, INT64_MAX, buf_start, &HttpSM::tunnel_handler_transform_read, HT_TRANSFORM, "transform read");
   tunnel.chain(c, p);
 
@@ -7041,6 +7046,7 @@ HttpSM::setup_transfer_from_transform()
   return p;
 }
 
+// どこからも呼ばれてなさそう
 HttpTunnelProducer *
 HttpSM::setup_transfer_from_transform_to_cache_only()
 {
@@ -7284,11 +7290,9 @@ HttpSM::setup_blind_tunnel(bool send_response_hdr, IOBufferReader *initial)
 
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler);
 
-  p_os =
-    tunnel.add_producer(server_entry->vc, -1, r_to, &HttpSM::tunnel_handler_ssl_producer, HT_HTTP_SERVER, "http server - tunnel");
+  p_os = tunnel.add_producer(server_entry->vc, -1, r_to, &HttpSM::tunnel_handler_ssl_producer, HT_HTTP_SERVER, "http server - tunnel");
 
-  c_ua = tunnel.add_consumer(ua_entry->vc, server_entry->vc, &HttpSM::tunnel_handler_ssl_consumer, HT_HTTP_CLIENT,
-                             "user agent - tunnel");
+  c_ua = tunnel.add_consumer(ua_entry->vc, server_entry->vc, &HttpSM::tunnel_handler_ssl_consumer, HT_HTTP_CLIENT, "user agent - tunnel");
 
   p_ua = tunnel.add_producer(ua_entry->vc, -1, r_from, &HttpSM::tunnel_handler_ssl_producer, HT_HTTP_CLIENT, "user agent - tunnel");
 
@@ -7906,8 +7910,7 @@ HttpSM::set_next_state()
       // light of this dependency, TS must ensure that the client finishes
       // sending its request and for this reason, the inactivity timeout
       // cannot be cancelled.
-      if (ua_txn && !ua_txn->has_request_body(t_state.hdr_info.request_content_length,
-                                              t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING)) {
+      if (ua_txn && !ua_txn->has_request_body(t_state.hdr_info.request_content_length, t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING)) {
         ua_txn->cancel_inactivity_timeout();
       } else if (!ua_txn) {
         terminate_sm = true;
@@ -7983,6 +7986,7 @@ HttpSM::set_next_state()
   }
 
   case HttpTransact::SM_ACTION_SERVER_READ: {
+
     t_state.source = HttpTransact::SOURCE_HTTP_ORIGIN_SERVER;
 
     // transform_info.vcは、HttpSM::do_transform_openの中でTS_HTTP_RESPONSE_TRANSFORM_HOOKフックが設定されている場合にセットされている
@@ -8127,6 +8131,7 @@ HttpSM::set_next_state()
   }
 
   case HttpTransact::SM_ACTION_SEND_ERROR_CACHE_NOOP: {
+    // DNSからの取得失敗時やオリジンからの取得失敗時にはこのケースに到達する
     setup_error_transfer();
     break;
   }
@@ -8169,6 +8174,7 @@ HttpSM::set_next_state()
     break;
   }
 
+  // null transformプラグインをセットすると、書き込み前の初回リクエスト時に SM_API_SERVER_READ -> SM_ACTION_CACHE_ISSUE_WRITE_TRANSFORM -> SM_API_TRANSFORM_READとして通ります
   case HttpTransact::SM_ACTION_CACHE_ISSUE_WRITE_TRANSFORM: {
     ink_assert(t_state.cache_info.transform_action == HttpTransact::CACHE_PREPARE_TO_WRITE);
 
@@ -8187,6 +8193,7 @@ HttpSM::set_next_state()
     break;
   }
 
+  // null transformプラグインをセットすると、書き込み前の初回リクエスト時に SM_API_SERVER_READ -> SM_ACTION_CACHE_ISSUE_WRITE_TRANSFORM -> SM_API_TRANSFORM_READとして通ります
   case HttpTransact::SM_ACTION_TRANSFORM_READ: {
     t_state.api_next_action = HttpTransact::SM_ACTION_API_SEND_RESPONSE_HDR;
     do_api_callout();

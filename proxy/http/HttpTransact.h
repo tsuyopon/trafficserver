@@ -359,13 +359,15 @@ public:
   ////////////
   // source //
   ////////////
+
+  // 参照元のレスポンスがどこなのかを表している
   enum Source_t {
     SOURCE_NONE = 0,
-    SOURCE_HTTP_ORIGIN_SERVER,
-    SOURCE_RAW_ORIGIN_SERVER,
-    SOURCE_CACHE,
-    SOURCE_TRANSFORM,
-    SOURCE_INTERNAL // generated from text buffer
+    SOURCE_HTTP_ORIGIN_SERVER,   // オリジンサーバのレスポンス
+    SOURCE_RAW_ORIGIN_SERVER,    // おそらくトンネル時
+    SOURCE_CACHE,                // キャッシュからのレスポンス
+    SOURCE_TRANSFORM,            // Transformの仕組みを利用した場合のレスポンス
+    SOURCE_INTERNAL // generated from text buffer    // 内部エラーなどの場合のレスポンス
   };
 
   ////////////////////////////////////////////////
@@ -1099,6 +1101,7 @@ typedef void (*TransactEntryFunc_t)(HttpTransact::State *s);
  *
  * Refer : [https://tools.ietf.org/html/rfc7231#section-4.3.6]
  */
+// メッセージにボディを含んではいけない場合にはtrueを応答する、含んでも良い場合にはfalseを応答する
 inline bool
 is_response_body_precluded(HTTPStatus status_code)
 {
@@ -1113,6 +1116,7 @@ is_response_body_precluded(HTTPStatus status_code)
   }
 }
 
+// HEAD、Connectメソッド
 inline bool
 is_response_body_precluded(HTTPStatus status_code, int method)
 {

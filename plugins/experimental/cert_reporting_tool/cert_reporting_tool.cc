@@ -51,6 +51,7 @@ asn1_string_extract(ASN1_STRING *s)
 void
 dump_context(const char *ca_path, const char *ck_path)
 {
+
   TSSslContext ctx = TSSslClientContextFindByName(ca_path, ck_path);
   if (ctx) {
     SSL *s = SSL_new(reinterpret_cast<SSL_CTX *>(ctx));
@@ -136,6 +137,7 @@ dump_context(const char *ca_path, const char *ck_path)
                              ck_path, subject_s.c_str(), san_s.c_str(), serial_s.c_str(), time_s.c_str());
       }
     }
+
     SSL_free(s);
     TSSslContextDestroy(ctx);
   }
@@ -182,10 +184,12 @@ TSPluginInit(int argc, const char *argv[])
     TSError("[%s] Plugin registration failed", PLUGIN_NAME);
     return;
   }
+
   if (TSTextLogObjectCreate(PLUGIN_NAME, TS_LOG_MODE_ADD_TIMESTAMP, &cert_reporting_log) != TS_SUCCESS || !cert_reporting_log) {
     TSError("[%s] Failed to create log file", PLUGIN_NAME);
     return;
   }
+
   TSDebug(PLUGIN_NAME, "Initialized.");
   TSLifecycleHookAdd(TS_LIFECYCLE_MSG_HOOK, TSContCreate(CB_context_dump, nullptr));
 }

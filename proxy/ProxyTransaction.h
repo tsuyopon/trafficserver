@@ -154,6 +154,7 @@ ProxyTransaction::is_transparent_passthrough_allowed()
 inline bool
 ProxyTransaction::is_chunked_encoding_supported() const
 {
+  // HTTP1系だとtrue、HTTP/2系だとchunkedはサポートしていないと思われる
   return _proxy_ssn ? _proxy_ssn->is_chunked_encoding_supported() : false;
 }
 inline void
