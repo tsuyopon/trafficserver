@@ -183,6 +183,7 @@ ParentRecord *const extApiRecord = (ParentRecord *)0xeeeeffff;
 constexpr const uint32_t MAX_GROUP_RINGS = 5;
 
 struct ParentResult {
+
   ParentResult() { reset(); }
   // For outside consumption
   ParentResultType result;

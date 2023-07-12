@@ -257,12 +257,14 @@ validate_rww(int new_value)
     float http_bg_fill;
 
     REC_ReadConfigFloat(http_bg_fill, "proxy.config.http.background_fill_completed_threshold");
+    // デフォルトの値は0.0となっています
+    //   cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-background-fill-completed-threshold
     if (http_bg_fill > 0.0) {
       Note("to enable reading while writing a document, %s should be 0.0: read while writing disabled", "proxy.config.http.background_fill_completed_threshold");
       return 0;
     }
 
-    // proxy.config.cache.max_doc_sizeを0よりも大きい値にすることで、Read While Writerが無効になる
+    // proxy.config.cache.max_doc_sizeを0よりも大きい値にすることで、Read While Writerが無効になる (デフォルトは0)
     if (cache_config_max_doc_size > 0) {
       Note("to enable reading while writing a document, %s should be 0: read while writing disabled", "proxy.config.cache.max_doc_size");
       return 0;

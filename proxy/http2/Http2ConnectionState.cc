@@ -1100,6 +1100,7 @@ Http2ConnectionState::destroy()
 void
 Http2ConnectionState::rcv_frame(const Http2Frame *frame)
 {
+
   REMEMBER(NO_EVENT, this->recursion);
   const Http2StreamId stream_id = frame->header().streamid;
   Http2Error error;
@@ -1130,19 +1131,24 @@ Http2ConnectionState::rcv_frame(const Http2Frame *frame)
   }
 
   if (frame_handlers[frame->header().type]) {
+    // フレームタイプに応じて、各フレームに応じたコールバック関数の呼び出しを行います
     error = frame_handlers[frame->header().type](*this, *frame);
   } else {
+    // フレームタイプに応じたコールバック関数が存在しない場合にはエラーを応答します
     error = Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_CONNECTION, Http2ErrorCode::HTTP2_ERROR_INTERNAL_ERROR, "no handler");
   }
 
   if (error.cls != Http2ErrorClass::HTTP2_ERROR_CLASS_NONE) {
+
     ip_port_text_buffer ipb;
     const char *client_ip = ats_ip_ntop(session->get_proxy_session()->get_remote_addr(), ipb, sizeof(ipb));
     if (error.cls == Http2ErrorClass::HTTP2_ERROR_CLASS_CONNECTION) {
+
       if (error.msg) {
         Error("HTTP/2 connection error code=0x%02x client_ip=%s session_id=%" PRId64 " stream_id=%u %s",
               static_cast<int>(error.code), client_ip, session->get_connection_id(), stream_id, error.msg);
       }
+
       this->send_goaway_frame(this->latest_streamid_in, error.code);
       this->session->set_half_close_local_flag(true);
       if (fini_event == nullptr) {
@@ -1164,12 +1170,14 @@ Http2ConnectionState::rcv_frame(const Http2Frame *frame)
 int
 Http2ConnectionState::main_event_handler(int event, void *edata)
 {
+
   if (edata == zombie_event) {
     // zombie session is still around. Assert
     ink_release_assert(zombie_event == nullptr);
   } else if (edata == fini_event) {
     fini_event = nullptr;
   }
+
   ++recursion;
   switch (event) {
   // Finalize HTTP/2 Connection

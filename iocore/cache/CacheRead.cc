@@ -228,14 +228,17 @@ CacheVC::openReadChooseWriter(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSE
     }
     write_vc = w;
   } else {
+
     write_vector      = &od->vector;
     int write_vec_cnt = write_vector->count();
     for (int c = 0; c < write_vec_cnt; c++) {
       vector.insert(write_vector->get(c));
     }
+
     // check if all the writers who came before this reader have
     // set the http_info.
     for (w = static_cast<CacheVC *>(od->writers.head); w; w = static_cast<CacheVC *>(w->opendir_link.next)) {
+
       if (w->start_time > start_time || w->closed < 0) {
         continue;
       }
@@ -375,6 +378,7 @@ CacheVC::openReadFromWriter(int event, Event *e)
       return openReadStartHead(event, e);
     }
   }
+
   OpenDirEntry *cod = od;
   od                = nullptr;
   // someone is currently writing the document
@@ -385,6 +389,7 @@ CacheVC::openReadFromWriter(int event, Event *e)
     SET_HANDLER(&CacheVC::openReadStartHead);
     return openReadStartHead(EVENT_IMMEDIATE, nullptr);
   }
+
   // allow reading from unclosed writer for http requests only.
   ink_assert(frag_type == CACHE_FRAG_TYPE_HTTP || write_vc->closed);
   if (!write_vc->closed && !write_vc->fragment) {

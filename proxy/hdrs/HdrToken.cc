@@ -584,6 +584,7 @@ hdrtoken_method_tokenize(const char *string, int string_len)
 int
 hdrtoken_tokenize(const char *string, int string_len, const char **wks_string_out)
 {
+
   int wks_idx;
   HdrTokenHashBucket *bucket;
 

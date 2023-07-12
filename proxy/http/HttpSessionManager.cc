@@ -480,21 +480,27 @@ HttpSessionManager::release_session(PoolableSession *to_release)
   return released_p ? HSM_DONE : HSM_RETRY;
 }
 
+// エラーログを見る限り、リクエストされてServerSessionPool::addSessionが呼び出されてセッション登録されてから1分経過後に下記のServerSessionPool::removeSessionが呼ばれています。
 void
 ServerSessionPool::removeSession(PoolableSession *to_remove)
 {
   EThread *ethread = this_ethread();
   SCOPED_MUTEX_LOCK(lock, mutex, ethread);
   char peer_ip[INET6_ADDRPORTSTRLEN];
+
+  // デバッグタグによる出力
   if (is_debug_tag_set("http_ss")) {
     ats_ip_nptop(to_remove->get_remote_addr(), peer_ip, sizeof(peer_ip));
-    Debug("http_ss", "Remove session %p %s m_fqdn_pool size=%zu m_ip_pool_size=%zu", to_remove, peer_ip, m_fqdn_pool.count(),
-          m_ip_pool.count());
+    Debug("http_ss", "Remove session %p %s m_fqdn_pool size=%zu m_ip_pool_size=%zu", to_remove, peer_ip, m_fqdn_pool.count(), m_ip_pool.count());
   }
+
+  // セッションプールからの削除
   m_fqdn_pool.erase(to_remove);
   if (m_ip_pool.erase(to_remove)) {
     HTTP_DECREMENT_DYN_STAT(http_pooled_server_connections_stat);
   }
+
+  // デバッグタグによる出力
   if (is_debug_tag_set("http_ss")) {
     Debug("http_ss", "After Remove session %p m_fqdn_pool size=%zu m_ip_pool_size=%zu", to_remove, m_fqdn_pool.count(),
           m_ip_pool.count());
@@ -506,11 +512,14 @@ ServerSessionPool::addSession(PoolableSession *ss)
 {
   EThread *ethread = this_ethread();
   SCOPED_MUTEX_LOCK(lock, mutex, ethread);
+
   // put it in the pools.
   m_ip_pool.insert(ss);
   m_fqdn_pool.insert(ss);
+
   HTTP_INCREMENT_DYN_STAT(http_pooled_server_connections_stat);
 
+  // デバッグタグによる出力
   if (is_debug_tag_set("http_ss")) {
     char peer_ip[INET6_ADDRPORTSTRLEN];
     ats_ip_nptop(ss->get_remote_addr(), peer_ip, sizeof(peer_ip));

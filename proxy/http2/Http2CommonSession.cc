@@ -193,6 +193,7 @@ Http2CommonSession::state_read_connection_preface(int event, void *edata)
     nbytes = copy_from_buffer_reader(buf, this->_read_buffer_reader, sizeof(buf));
     ink_release_assert(nbytes == HTTP2_CONNECTION_PREFACE_LEN);
 
+    // HTTP/2の開始合図「PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n」と一致しているかをチェックする
     if (memcmp(HTTP2_CONNECTION_PREFACE, buf, nbytes) != 0) {
       Http2SsnDebug("invalid connection preface");
       this->get_proxy_session()->do_io_close();
@@ -327,6 +328,7 @@ Http2CommonSession::state_complete_frame_read(int event, void *edata)
 int
 Http2CommonSession::do_complete_frame_read()
 {
+
   // XXX parse the frame and handle it ...
   ink_release_assert(this->_read_buffer_reader->read_avail() >= this->current_hdr.length);
 
@@ -350,11 +352,13 @@ Http2CommonSession::do_complete_frame_read()
 int
 Http2CommonSession::do_process_frame_read(int event, VIO *vio, bool inside_frame)
 {
+
   if (inside_frame) {
     do_complete_frame_read();
   }
 
   while (this->_read_buffer_reader->read_avail() >= static_cast<int64_t>(HTTP2_FRAME_HEADER_LEN)) {
+
     // Cancel reading if there was an error or connection is closed
     if (connection_state.tx_error_code.code != static_cast<uint32_t>(Http2ErrorCode::HTTP2_ERROR_NO_ERROR) ||
         connection_state.is_state_closed()) {
@@ -390,6 +394,7 @@ Http2CommonSession::do_process_frame_read(int event, VIO *vio, bool inside_frame
       HTTP2_SET_SESSION_HANDLER(&Http2CommonSession::state_complete_frame_read);
       break;
     }
+
     do_complete_frame_read();
 
     if (this->_should_do_something_else()) {

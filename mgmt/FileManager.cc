@@ -106,7 +106,7 @@ FileManager::addFile(const char *fileName, const char *configName, bool root_acc
 
 // caller must hold the lock
 // この関数は直前で定義されるFileManager::addFileから呼び出されるが、この場合はparentConfigにはnullptrが指定される
-// いこの関数はFileManager::configFileChildからも呼び出されるが、この場合にはparentConfigが設定される。
+// この関数はFileManager::configFileChildからも呼び出されるが、この場合にはparentConfigが設定される。
 void
 FileManager::addFileHelper(const char *fileName, const char *configName, bool root_access_needed, bool isRequired, ConfigManager *parentConfig)
 {

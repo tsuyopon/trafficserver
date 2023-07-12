@@ -105,6 +105,7 @@ createStrategiesFromFile(const char *file)
   const char *basename = fn.substr(fn.find_last_of('/') + 1).data();
 
   try {
+
     TSDebug(PLUGIN_NAME, "createStrategiesFromFile filename %s loading ...", basename);
     loadConfigFile(fn.data(), doc, include_once);
     TSDebug(PLUGIN_NAME, "createStrategiesFromFile filename %s loaded.", basename);
@@ -131,6 +132,7 @@ createStrategiesFromFile(const char *file)
     // std::map<std::string, TSNextHopSelectionStrategy*, std::less<>>
     strategies_map strategiesMap;
     for (auto &&strategy : strategies) {
+
       auto name = strategy["strategy"].as<std::string>();
       TSDebug(PLUGIN_NAME, "createStrategiesFromFile filename %s got strategy %s.", basename, name.c_str());
       auto policy = strategy["policy"];
@@ -138,22 +140,26 @@ createStrategiesFromFile(const char *file)
         TSError("[%s] no policy is defined for the strategy named '%s'.", PLUGIN_NAME, name.c_str());
         return strategies_map();
       }
+
       TSDebug(PLUGIN_NAME, "createStrategiesFromFile filename %s got strategy %s checked policy.", basename, name.c_str());
       const auto &policy_value = policy.Scalar();
       if (policy_value != consistent_hash) {
         TSError("[%s] strategy named '%s' has unsupported policy '%s'.", PLUGIN_NAME, name.c_str(), policy_value.c_str());
         return strategies_map();
       }
+
       TSDebug(PLUGIN_NAME, "createStrategiesFromFile filename %s got strategy %s creating strategy.", basename, name.c_str());
       TSNextHopSelectionStrategy *tsStrategy = createStrategy(name, strategy);
       TSDebug(PLUGIN_NAME, "createStrategiesFromFile filename %s got strategy %s created strategy.", basename, name.c_str());
       if (tsStrategy == nullptr) {
         return strategies_map();
       }
+
       TSDebug(PLUGIN_NAME, "createStrategiesFromFile filename %s got strategy %s checked strategy null.", basename, name.c_str());
       strategiesMap.emplace(name, std::unique_ptr<TSNextHopSelectionStrategy>(tsStrategy));
       TSDebug(PLUGIN_NAME, "createStrategiesFromFile filename %s got strategy %s emplaced.", basename, name.c_str());
     }
+
     TSDebug(PLUGIN_NAME, "createStrategiesFromFile filename %s returning strategies created.", basename);
 
     {

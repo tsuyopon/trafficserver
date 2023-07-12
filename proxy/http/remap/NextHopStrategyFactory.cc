@@ -195,53 +195,85 @@ NextHopStrategyFactory::strategyInstance(const char *name)
  * '#include' was found. This allows the 'strategy' and 'hosts' yaml files to be separate.  The
  * 'strategy' yaml file would then normally have the '#include hosts.yml' in it's beginning.
  */
+// strategies.yamlを読み込む
+// なお、この関数でstrategies.yamlの中から「#include <filename>」と指定された場合にも読み込まれる再帰利用されることがあります。filenameはディレクトリを指定することもできるようです
+//
+// 下記の関数のfileName変数はファイル名だけでなく、ディレクトリの場合の処理もあるので変数名から勘違いしないように注意すること
 void
 NextHopStrategyFactory::loadConfigFile(const std::string &fileName, std::stringstream &doc,
                                        std::unordered_set<std::string> &include_once)
 {
+
   const char *sep = " \t";
   char *tok, *last;
   struct stat buf;
   std::string line;
 
+  // statシステムコールで指定されたfilenNameの情報が取得できない場合
   if (stat(fileName.c_str(), &buf) == -1) {
     std::string err_msg = strerror(errno);
     throw std::invalid_argument("Unable to stat '" + fileName + "': " + err_msg);
   }
 
+  /*
+   * (重要) fileNameはファイル名だけでなく、ディレクトリの場合の処理もあるので変数名から勘違いしないように注意すること
+   */
+
   // if fileName is a directory, concatenate all '.yaml' files alphanumerically
   // into a single document stream.  No #include is supported.
+  // 指定されたfileNameがディレクトリの場合にはアルファベット順で１つのファイルとして読み込む。なお、#include記法はこの場合にはサポートされない
   if (S_ISDIR(buf.st_mode)) {
+
     DIR *dir               = nullptr;
     struct dirent *dir_ent = nullptr;
     std::vector<std::string_view> files;
 
     NH_Note("loading strategy YAML files from the directory %s", fileName.c_str());
+
+    // fileNameはディレクトリなので、ディレクトリをopenします。
     if ((dir = opendir(fileName.c_str())) == nullptr) {
+      // fileNameで指定されたディレクトリのopendirに失敗した場合
       std::string err_msg = strerror(errno);
       throw std::invalid_argument("Unable to open the directory '" + fileName + "': " + err_msg);
     } else {
+
+      // fileNameで指定されたディレクトリのopendirに成功した場合
+
+      // ディレクトリ中のファイルを1つ１つ抽出してfilesにpush_backする
       while ((dir_ent = readdir(dir)) != nullptr) {
         // filename should be greater that 6 characters to have a '.yaml' suffix.
+        // 拡張子「.yaml」だけで5文字なので、6文字未満(=5文字)にマッチしなかったらcontinueする
         if (strlen(dir_ent->d_name) < 6) {
           continue;
         }
+
+        // 末尾が「.yaml」で終わっているファイル名を見つけて、filesにpush_backする
         std::string_view sv = dir_ent->d_name;
         if (sv.find(".yaml", sv.size() - 5) == sv.size() - 5) {
           files.push_back(sv);
         }
       }
+
       // sort the files alphanumerically
+      // filesにpush_backしたファイルを、アルファベット順に並べます。
       std::sort(files.begin(), files.end(),
                 [](const std::string_view lhs, const std::string_view rhs) { return lhs.compare(rhs) < 0; });
 
+      // filesに対するイテレーション操作を行う
       for (auto &i : files) {
+
+        // 変数名は紛らわしいがfileNameはディレクトリを表す
         std::ifstream file(fileName + "/" + i.data());
+
+        // ファイルをopenする
         if (file.is_open()) {
+          // ファイルを行毎に取得する
           while (std::getline(file, line)) {
+            // 関数に指定されたfileNameがディレクトリの場合には「#include」記法をサポートしないので、そのままコメント扱いとしてcontinueする
             if (line[0] == '#') {
               // continue;
             }
+            // 読み込んだファイル情報を行毎に結合する
             doc << line << "\n";
           }
           file.close();
@@ -250,19 +282,33 @@ NextHopStrategyFactory::loadConfigFile(const std::string &fileName, std::strings
         }
       }
     }
+
     closedir(dir);
+
   } else {
+
+    // ファイルがopenできた場合の処理
     std::ifstream file(fileName);
     if (file.is_open()) {
+
+      // ファイルを行毎に処理する
       while (std::getline(file, line)) {
+
+        // 行が「#」で始まる場合の処理
         if (line[0] == '#') {
           tok = strtok_r(const_cast<char *>(line.c_str()), sep, &last);
+
+          // strategies.yamlには「#include <filename>」として別のファイルを参照する仕組みになっています
+          // see: https://docs.trafficserver.apache.org/admin-guide/files/strategies.yaml.en.html
+
+          // 「#include」が存在する場合
           if (tok != nullptr && strcmp(tok, "#include") == 0) {
             std::string f = strtok_r(nullptr, sep, &last);
             if (include_once.find(f) == include_once.end()) {
               include_once.insert(f);
               // try to load included file.
               try {
+                // strategies.yamlに記載された「#include <filename>」のfilenameを読み込む
                 loadConfigFile(f, doc, include_once);
               } catch (std::exception &ex) {
                 throw std::invalid_argument("Unable to open included file '" + f + "' from '" + fileName + "'");
@@ -270,6 +316,7 @@ NextHopStrategyFactory::loadConfigFile(const std::string &fileName, std::strings
             }
           }
         } else {
+          // 読み込んだファイル情報を行毎に結合する
           doc << line << "\n";
         }
       }

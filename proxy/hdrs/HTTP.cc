@@ -938,18 +938,23 @@ http_parser_parse_req(HTTPParser *parser, HdrHeap *heap, HTTPHdrImpl *hh, const 
 #if (ENABLE_PARSER_FAST_PATHS)
     // first try fast path
     if (end - cur >= 16) {
+
+      // 「GET」にマッチしなければslow_caseにgotoする
       if (((cur[0] ^ 'G') | (cur[1] ^ 'E') | (cur[2] ^ 'T')) != 0) {
         goto slow_case;
       }
 
+      // 「HTTP/?.? \r\n」にマッチしなければslow_caseにgotoする
       if (((end[-10] ^ 'H') | (end[-9] ^ 'T') | (end[-8] ^ 'T') | (end[-7] ^ 'P') | (end[-6] ^ '/') | (end[-4] ^ '.') |
            (end[-2] ^ '\r') | (end[-1] ^ '\n')) != 0) {
         goto slow_case;
       }
 
+      // 「HTTP/?.? \r\n」の最初の?と2番目の?がdigitかどうかのチェックを行ない、digitでなければslow_caseにgotoする
       if (!(isdigit(end[-5]) && isdigit(end[-3]))) {
         goto slow_case;
       }
+
       if (!(ParseRules::is_space(cur[3]) && (!ParseRules::is_space(cur[4])) && (!ParseRules::is_space(end[-12])) &&
             ParseRules::is_space(end[-11]))) {
         goto slow_case;
@@ -969,6 +974,7 @@ http_parser_parse_req(HTTPParser *parser, HdrHeap *heap, HTTPHdrImpl *hh, const 
         return err;
       }
 
+      // バージョンが1.1か1.0以外はエラー
       if (!http_hdr_version_set(hh, version)) {
         return PARSE_RESULT_ERROR;
       }
@@ -1134,8 +1140,8 @@ http_parser_parse_req(HTTPParser *parser, HdrHeap *heap, HTTPHdrImpl *hh, const 
     parser->m_parsing_http = false;
   }
 
-  ParseResult ret = mime_parser_parse(&parser->m_mime_parser, heap, hh->m_fields_impl, start, end, must_copy_strings, eof, false,
-                                      max_hdr_field_size);
+  ParseResult ret = mime_parser_parse(&parser->m_mime_parser, heap, hh->m_fields_impl, start, end, must_copy_strings, eof, false, max_hdr_field_size);
+
   // If we're done with the main parse do some validation
   if (ret == PARSE_RESULT_DONE) {
     ret = validate_hdr_request_target(hh->u.req.m_method_wks_idx, hh->u.req.m_url_impl);
@@ -1473,6 +1479,7 @@ http_parser_parse_resp(HTTPParser *parser, HdrHeap *heap, HTTPHdrImpl *hh, const
     end                    = real_end;
     parser->m_parsing_http = false;
   }
+
   auto ret = mime_parser_parse(&parser->m_mime_parser, heap, hh->m_fields_impl, start, end, must_copy_strings, eof, true);
   // Make sure the length headers are consistent
   if (ret == PARSE_RESULT_DONE) {

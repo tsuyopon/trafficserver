@@ -687,9 +687,11 @@ find_server_and_update_current_info(HttpTransact::State *s)
 
     switch (s->parent_result.result) {
     case PARENT_UNDEFINED:
+      // 通常ここに入るはず
       findParent(s);
       break;
     case PARENT_SPECIFIED:
+      // InkAPI経由で明示的に指定されている場合
       nextParent(s);
 
       // Hack!
@@ -1155,6 +1157,8 @@ HttpTransact::StartRemapRequest(State *s)
   TxnDebug("http_trans", "END HttpTransact::StartRemapRequest");
 
   TxnDebug("http_trans", "Checking if transaction wants to upgrade");
+  // 「Upgrade」ヘッダによる処理を確認します。
+  //   cf. https://developer.mozilla.org/ja/docs/Web/HTTP/Headers/Upgrade
   if (handle_upgrade_request(s)) {
     // everything should be handled by the upgrade handler.
     TxnDebug("http_trans", "Transaction will be upgraded by the appropriate upgrade handler.");
@@ -1379,6 +1383,7 @@ done:
   ink_assert(!"not reached");
 }
 
+// 「Upgrade」ヘッダによる処理を扱います
 bool
 HttpTransact::handle_upgrade_request(State *s)
 {
@@ -1388,6 +1393,12 @@ HttpTransact::handle_upgrade_request(State *s)
   // Quickest way to determine that this is defintely not an upgrade.
   /* RFC 6455 The method of the request MUST be GET, and the HTTP version MUST
         be at least 1.1. */
+
+  // クライアントリクエストが下記のいずれかの条件を1つでも満たしたら、Upgradeヘッダは扱えないとしてfalseを応答します。
+  //  1. Upgradeヘッダが存在しない
+  //  2. Connectionヘッダが存在しない
+  //  3. リクエストメソッドがGETではない
+  //  4. HTTP/1.1未満のバージョンである
   if (!s->hdr_info.client_request.presence(MIME_PRESENCE_UPGRADE) ||
       !s->hdr_info.client_request.presence(MIME_PRESENCE_CONNECTION) || s->method != HTTP_WKSIDX_GET ||
       s->hdr_info.client_request.version_get() < HTTP_1_1) {
@@ -1401,6 +1412,13 @@ HttpTransact::handle_upgrade_request(State *s)
   const char *upgrade_hdr_val = nullptr;
   int upgrade_hdr_val_len     = 0;
 
+  // 以下を満たした場合にはエラー
+  //  1. 「Upgrade」ヘッダのMIMEFieldオブジェクトが取得できない場合
+  //  2. 「Connection」ヘッダのMIMEFieldオブジェクトが取得できない場合
+  //  3. 「Connection」ヘッダの値が取得できない場合
+  //      カンマ区切りが許されているっぽい
+  //      cf. https://superuser.com/questions/1721768/validity-of-connection-tokens-in-http-connection-header
+  //  4. 「Upgrade」ヘッダの値が取得できない場合
   if (!upgrade_hdr || !connection_hdr || connection_hdr->value_get_comma_list(&connection_hdr_vals) == 0 ||
       (upgrade_hdr_val = upgrade_hdr->value_get(&upgrade_hdr_val_len)) == nullptr) {
     TxnDebug("http_trans_upgrade", "Transaction wasn't a valid upgrade request, proceeding as a normal HTTP request.");
@@ -1414,6 +1432,7 @@ HttpTransact::handle_upgrade_request(State *s)
    */
   bool connection_contains_upgrade = false;
   // Next, let's validate that the Connection header contains an Upgrade key
+  // 「Connection」ヘッダに指定された値の中に「upgrade」の文字列が含まれていることを確認する (Connectionはカンマ区切りによるイテレーション)
   for (int i = 0; i < connection_hdr_vals.count; ++i) {
     Str *val = connection_hdr_vals.get_idx(i);
     if (ptr_len_casecmp(val->str, val->len, MIME_FIELD_UPGRADE, MIME_LEN_UPGRADE) == 0) {
@@ -1422,6 +1441,7 @@ HttpTransact::handle_upgrade_request(State *s)
     }
   }
 
+  // 「Connection」ヘッダに指定された値の中に「upgrade」の文字列が含まれていなければ、falseを応答する
   if (!connection_contains_upgrade) {
     TxnDebug("http_trans_upgrade",
              "Transaction wasn't a valid upgrade request, proceeding as a normal HTTP request, missing Connection upgrade header.");
@@ -1444,6 +1464,8 @@ HttpTransact::handle_upgrade_request(State *s)
         13.
    */
   if (hdrtoken_tokenize(upgrade_hdr_val, upgrade_hdr_val_len, &s->upgrade_token_wks) >= 0) {
+
+    // 「Upgrade: websocket」がヘッダに含まれていれば、websocketにより通信となる
     if (s->upgrade_token_wks == MIME_VALUE_WEBSOCKET) {
       MIMEField *sec_websocket_key =
         s->hdr_info.client_request.field_find(MIME_FIELD_SEC_WEBSOCKET_KEY, MIME_LEN_SEC_WEBSOCKET_KEY);
@@ -1458,11 +1480,16 @@ HttpTransact::handle_upgrade_request(State *s)
         TxnDebug("http_trans_upgrade", "Unable to upgrade connection to websockets, invalid headers (RFC 6455).");
       }
     } else if (s->upgrade_token_wks == MIME_VALUE_H2C) {
+
+      // 「Upgrade: h2c」がヘッダに含まれていれば、エラーとする。h2cはHTTPによるHTTP/2へのアップグレードでありTrafficserverではこれをサポートしていない
+
       // We need to recognize h2c to not handle it as an error.
       // We just ignore the Upgrade header and respond to the request as though the Upgrade header field were absent.
       s->is_upgrade_request = false;
       return false;
     }
+    // Upgradeヘッダの値が「websocket」や「h2c」以外には上記ifやelse ifには入らないことに注意すること
+
   } else {
     TxnDebug("http_trans_upgrade", "Transaction requested upgrade for unknown protocol: %s", upgrade_hdr_val);
   }
@@ -1472,6 +1499,7 @@ HttpTransact::handle_upgrade_request(State *s)
   // we want our modify_request method to just return while we fail out from here.
   // this seems like the preferred option because the user wanted to do an upgrade but sent a bad protocol.
   TRANSACT_RETURN_VAL(SM_ACTION_SEND_ERROR_CACHE_NOOP, nullptr, true);
+
 }
 
 // Web Socketの場合にはこの遷移に入る
@@ -2688,9 +2716,10 @@ HttpTransact::HandleCacheOpenRead(State *s)
     }
   }
 
-  // PUSHメソッドの場合に呼ばれる。これはキャッシュ登録をしたい場合に呼び出されるメソッド
-  // cf. https://docs.trafficserver.apache.org/ja/9.1.x/admin-guide/storage/index.en.html#pushing-an-object-into-the-cache
   if (s->method == HTTP_WKSIDX_PUSH) {
+
+    // PUSHメソッドの場合に呼ばれる。これはキャッシュ登録をしたい場合に呼び出されるメソッド
+    //   cf. https://docs.trafficserver.apache.org/ja/9.1.x/admin-guide/storage/index.en.html#pushing-an-object-into-the-cache
     HandleCacheOpenReadPush(s, read_successful);
 
   } else if (read_successful == false) {
@@ -2903,6 +2932,7 @@ HttpTransact::HandleCacheOpenReadHitFreshness(State *s)
 
   TxnDebug("http_trans", "request_sent_time      : %" PRId64, (int64_t)s->request_sent_time);
   TxnDebug("http_trans", "response_received_time : %" PRId64, (int64_t)s->response_received_time);
+
   // if the plugin has already decided the freshness, we don't need to
   // do it again
   if (s->cache_lookup_result == HttpTransact::CACHE_LOOKUP_NONE) {
@@ -2950,6 +2980,7 @@ HttpTransact::CallOSDNSLookup(State *s)
   TxnDebug("http", "%s ", s->server_info.name);
   HostStatus &pstatus = HostStatus::instance();
   HostStatRec *hst    = pstatus.getHostStatus(s->server_info.name);
+
   if (hst && hst->status == TSHostStatus::TS_HOST_STATUS_DOWN) {
     TxnDebug("http", "%d ", s->cache_lookup_result);
     s->current.state = OUTBOUND_CONGESTION;
@@ -3390,6 +3421,7 @@ HttpTransact::build_response_from_cache(State *s, HTTPWarningCode warning_code)
 
 
       // send back the full document to the client.
+      // リクエストがキャッシュ情報にマッチしたので、レスポンスをキャッシュから応答します
       TxnDebug("http_trans", "Match! Serving full document.");
       s->cache_info.action = CACHE_DO_SERVE;
 
@@ -5790,9 +5822,20 @@ HttpTransact::check_request_validity(State *s, HTTPHdr *incoming_hdr)
   int scheme = incoming_url->scheme_get_wksidx();
   int method = incoming_hdr->method_get_wksidx();
 
+  // (HTTP かつ GETメソッド)ではない場合に下記のコードパスに入ります
   if (!((scheme == URL_WKSIDX_HTTP) && (method == HTTP_WKSIDX_GET))) {
+
+    // 下記を全て満たす場合のコードパス
+    //  1. リクエストスキームがHTTPでない
+    //  2. リクエストスキームがHTTPSでない
+    //  3. リクエストメソッドがCONNECTではない
+    //  4. 以下のどちらか片方を満たす場合
+    //    4.1 WSまたはWSSのいずれにもあてはまらない
+    //    4.2 is_websocktがtrueではない
     if (scheme != URL_WKSIDX_HTTP && scheme != URL_WKSIDX_HTTPS && method != HTTP_WKSIDX_CONNECT &&
         !((scheme == URL_WKSIDX_WS || scheme == URL_WKSIDX_WSS) && s->is_websocket)) {
+
+      // schemeは0未満の場合には、リクエストスキーム無しと判定される
       if (scheme < 0) {
         return NO_REQUEST_SCHEME;
       } else {
@@ -6105,6 +6148,7 @@ HttpTransact::handle_trace_and_options_requests(State *s, HTTPHdr *incoming_hdr)
 
     }
     return true;
+
   } else { /* max-forwards != 0 */
 
     // Max-Forwardsヘッダが1以上だとこの分岐に入ります
@@ -7366,11 +7410,19 @@ HttpTransact::handle_content_length_header(State *s, HTTPHdr *header, HTTPHdr *b
     }
     TxnDebug("http_trans", "RESPONSE cont len in hdr is %" PRId64, header->get_content_length());
   } else {
+
+    // Content-Lengthヘッダが存在しない場合
+
     // No content length header.
     // If the source is cache or server returned 304 response,
     // we can try to get the content length based on object size.
     // Also, we should check the scenario of server sending't  a unexpected 304 response for a non conditional request( no cached
     // object )
+    //
+    //   ソース元がキャッシュ
+    // または
+    //   ソース元がオリジンからの取得で かつ オリジンサーバからのレスポンスが304 Not Modifiedの場合
+    // の処理を表します
     if (s->source == SOURCE_CACHE ||
         (s->source == SOURCE_HTTP_ORIGIN_SERVER && s->hdr_info.server_response.status_get() == HTTP_STATUS_NOT_MODIFIED &&
          s->cache_info.object_read != nullptr)) {
@@ -7382,6 +7434,7 @@ HttpTransact::handle_content_length_header(State *s, HTTPHdr *header, HTTPHdr *b
       //   written into a cache completely.
       cl = s->cache_info.object_read->object_size_get();
       if (cl == INT64_MAX) { // INT64_MAX cl in cache indicates rww in progress
+        // rww(Read While Writer)の処理らしい
         header->field_delete(MIME_FIELD_CONTENT_LENGTH, MIME_LEN_CONTENT_LENGTH);
         s->hdr_info.trust_response_cl      = false;
         s->hdr_info.request_content_length = HTTP_UNDEFINED_CL;
@@ -7394,6 +7447,8 @@ HttpTransact::handle_content_length_header(State *s, HTTPHdr *header, HTTPHdr *b
         change_response_header_because_of_range_request(s, header);
         s->hdr_info.trust_response_cl = true;
       } else {
+        // RWWなどのように書き込み中でなければ、すでにContent-Lengthヘッダがわかっているので付与する
+        // つまり、chunkedなどでレスポンスを返した場合でも、Content-Lengthが存在しないようなケースにおいても、次回以降キャッシュから参照された場合にはContent-Lengthを付与する実装となっている
         header->set_content_length(cl);
         s->hdr_info.trust_response_cl = true;
       }
@@ -7514,11 +7569,14 @@ HttpTransact::handle_request_keep_alive_headers(State *s, HTTPVersion ver, HTTPH
       break;
     }
   } else { /* websocket connection */
+
     s->current.server->keep_alive = HTTP_NO_KEEPALIVE;
     s->client_info.keep_alive     = HTTP_NO_KEEPALIVE;
     heads->value_set(MIME_FIELD_CONNECTION, MIME_LEN_CONNECTION, MIME_FIELD_UPGRADE, MIME_LEN_UPGRADE);
 
+    // websocketであれば、
     if (s->is_websocket) {
+      // 「Upgrade: websocket」としてUpgradeヘッダの値をセットする
       heads->value_set(MIME_FIELD_UPGRADE, MIME_LEN_UPGRADE, "websocket", 9);
     }
   }
@@ -8058,6 +8116,8 @@ HttpTransact::what_is_document_freshness(State *s, HTTPHdr *client_request, HTTP
   }
 
   cooked_cc_mask          = cached_obj_response->get_cooked_cc_mask();
+
+  // cooked_cc_maskにMIME_COOKED_MASK_CC_MUST_REVALIDATEかMIME_COOKED_MASK_CC_PROXY_REVALIDATEが含まれていれば、そのフラグが立つ。どちらも含まれていなければ0になる
   os_specifies_revalidate = cooked_cc_mask & (MIME_COOKED_MASK_CC_MUST_REVALIDATE | MIME_COOKED_MASK_CC_PROXY_REVALIDATE);
   cc_mask                 = MIME_COOKED_MASK_CC_NEED_REVALIDATE_ONCE;
 
@@ -8117,6 +8177,7 @@ HttpTransact::what_is_document_freshness(State *s, HTTPHdr *client_request, HTTP
       break;
     }
   }
+
   //////////////////////////////////////////////////////////////////////
   // the normal expiration policy allows serving a doc from cache if: //
   //     basic:          (current_age <= fresh_limit)                 //
@@ -8130,27 +8191,40 @@ HttpTransact::what_is_document_freshness(State *s, HTTPHdr *client_request, HTTP
   TxnDebug("http_match", "initial age limit: %d", age_limit);
 
   cooked_cc_mask = client_request->get_cooked_cc_mask();
+
+  // 以下の3つのフラグでその後に抽出したいので、これらのフラグをcc_maskにセットする
   cc_mask        = (MIME_COOKED_MASK_CC_MAX_STALE | MIME_COOKED_MASK_CC_MIN_FRESH | MIME_COOKED_MASK_CC_MAX_AGE);
+
+  // 上でセットしたcc_maskのフラグでfilterする
   if (cooked_cc_mask & cc_mask) {
 
     /////////////////////////////////////////////////
     // if max-stale set, relax the freshness limit //
     /////////////////////////////////////////////////
+    // Cache-Controlに「max-stale」の値がセットされた場合の処理
     if (cooked_cc_mask & MIME_COOKED_MASK_CC_MAX_STALE) {
 
       if (os_specifies_revalidate) {
+        // 「must-revalidate」「proxy-revalidate」がどちらか片方でもセットされた場合
         TxnDebug("http_match", "OS specifies revalidation; ignoring client's max-stale request...");
       } else {
+
+        // 「must-revalidate」「proxy-revalidate」がどちらもセットされていない場合
+
+        // max-stale=<N>の<N>の値を取得します
         int max_stale_val = client_request->get_cooked_cc_max_stale();
 
         if (max_stale_val != INT_MAX) {
+          // max-stale=<N>がINT_MAXでなければ、fresh_limitに取得したmax-staleの値を加算した値をage_limitとする
           age_limit += max_stale_val;
         } else {
           age_limit = max_stale_val;
         }
+
         TxnDebug("http_match", "max-stale set, age limit: %d", age_limit);
       }
     }
+
     /////////////////////////////////////////////////////
     // if min-fresh set, constrain the freshness limit //
     /////////////////////////////////////////////////////
@@ -8170,6 +8244,7 @@ HttpTransact::what_is_document_freshness(State *s, HTTPHdr *client_request, HTTP
       TxnDebug("http_match", "min_fresh set, age limit: %d", age_limit);
     }
   }
+
   /////////////////////////////////////////////////////////
   // config file may have a "revalidate_after" field set //
   /////////////////////////////////////////////////////////
@@ -8250,18 +8325,26 @@ HttpTransact::AuthenticationNeeded(const OverridableHttpConfigParams *p, HTTPHdr
   if ((p->cache_ignore_auth == 0) && client_request->presence(MIME_PRESENCE_AUTHORIZATION)) {
 
     if (obj_response->is_cache_control_set(HTTP_VALUE_MUST_REVALIDATE) || obj_response->is_cache_control_set(HTTP_VALUE_PROXY_REVALIDATE)) {
+
       // Cache-Controlヘッダに「must-revalidate」または「proxy-revalidate」が指定された場合
       //   cf. https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control
       return AUTHENTICATION_MUST_REVALIDATE;
+
     } else if (obj_response->is_cache_control_set(HTTP_VALUE_PROXY_REVALIDATE)) {
+
       // Cache-Controlヘッダに「proxy-revalidate」が指定された場合 (TBD: その手前のifでひっかりそうな気がするので、このコードパスに入らない気がする)
       //   cf. https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control
       return AUTHENTICATION_MUST_REVALIDATE;
+
     } else if (obj_response->is_cache_control_set(HTTP_VALUE_PUBLIC)) {
+
       // Cache-Controlヘッダに「public」が指定された場合
       //   cf. https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control
       return AUTHENTICATION_SUCCESS;
+
     } else {
+
+      // Cache-Controlヘッダに「must-revalidate」、「proxy-revalidate」、「proxy-revalidate」、「public」以外の値が指定された場合
 
       // オブジェクト中に「@WWW-Auth」が見つかって、クライアントリクエストがGETの場合
       if (obj_response->field_find("@WWW-Auth", 9) && client_request->method_get_wksidx() == HTTP_WKSIDX_GET) {
@@ -8543,8 +8626,10 @@ HttpTransact::build_request(State *s, HTTPHdr *base_request, HTTPHdr *outgoing_r
       TxnDebug("http_trans", "adding target to URL for parent proxy");
       outgoing_request->set_url_target_from_host_field();
     }
-  } else if (s->next_hop_scheme == URL_WKSIDX_HTTP || s->next_hop_scheme == URL_WKSIDX_HTTPS ||
-             s->next_hop_scheme == URL_WKSIDX_WS || s->next_hop_scheme == URL_WKSIDX_WSS) {
+  } else if (s->next_hop_scheme == URL_WKSIDX_HTTP || s->next_hop_scheme == URL_WKSIDX_HTTPS || s->next_hop_scheme == URL_WKSIDX_WS || s->next_hop_scheme == URL_WKSIDX_WSS) {
+
+    // 次のリクエスト先がHTTP、HTTPS、WS、WSSのいずれかである場合
+
     // Otherwise, remove the URL target from HTTP and Websocket URLs since certain origins
     // cannot deal with absolute URLs.
     TxnDebug("http_trans", "removing host name from url");

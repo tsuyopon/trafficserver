@@ -276,8 +276,9 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char *errbuff, int errbuff
   const char *config_file_path = argv[2];
   const char *strategy_name    = argv[3];
 
-  TSDebug(PLUGIN_NAME, "%s %s Loading parent selection strategy file %s for strategy %s", remap_from, remap_to, config_file_path,
-          strategy_name);
+  TSDebug(PLUGIN_NAME, "%s %s Loading parent selection strategy file %s for strategy %s", remap_from, remap_to, config_file_path, strategy_name);
+
+  // strategies.yamlの処理
   auto file_strategies = createStrategiesFromFile(config_file_path);
   if (file_strategies.size() == 0) {
     TSError("[%s] %s %s Failed to parse configuration file %s", PLUGIN_NAME, remap_from, remap_to, config_file_path);
@@ -289,13 +290,11 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char *errbuff, int errbuff
 
   auto new_strategy = file_strategies.find(strategy_name);
   if (new_strategy == file_strategies.end()) {
-    TSDebug(PLUGIN_NAME, "'%s' '%s' TSRemapNewInstance strategy '%s' not found in file '%s'", remap_from, remap_to, strategy_name,
-            config_file_path);
+    TSDebug(PLUGIN_NAME, "'%s' '%s' TSRemapNewInstance strategy '%s' not found in file '%s'", remap_from, remap_to, strategy_name, config_file_path);
     return TS_ERROR;
   }
 
-  TSDebug(PLUGIN_NAME, "'%s' '%s' TSRemapNewInstance successfully loaded strategy '%s' from '%s'.", remap_from, remap_to,
-          strategy_name, config_file_path);
+  TSDebug(PLUGIN_NAME, "'%s' '%s' TSRemapNewInstance successfully loaded strategy '%s' from '%s'.", remap_from, remap_to, strategy_name, config_file_path);
 
   // created a raw pointer _to_ a shared_ptr, because ih needs a raw pointer.
   // The raw pointer in ih will be deleted in TSRemapDeleteInstance,
@@ -315,6 +314,7 @@ TSRemapNewInstance(int argc, char *argv[], void **ih, char *errbuff, int errbuff
 extern "C" tsapi TSRemapStatus
 TSRemapDoRemap(void *ih, TSHttpTxn txnp, TSRemapRequestInfo *rri)
 {
+
   TSDebug(PLUGIN_NAME, "TSRemapDoRemap calling");
 
   auto strategy_ptr = static_cast<std::shared_ptr<TSNextHopSelectionStrategy> *>(ih);

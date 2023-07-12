@@ -1790,6 +1790,7 @@ HttpSM::handle_api_return()
       // a blind tunnel.
       IOBufferReader *initial_data = nullptr;
       if (t_state.is_websocket) {
+
         HTTP_INCREMENT_DYN_STAT(http_websocket_current_active_client_connections_stat);
         if (server_txn) {
           initial_data = server_txn->get_remote_reader();
@@ -2039,6 +2040,7 @@ HttpSM::state_http_server_open(int event, void *data)
 int
 HttpSM::state_read_server_response_header(int event, void *data)
 {
+
   STATE_ENTER(&HttpSM::state_read_server_response_header, event);
   // If we had already received EOS, just go away. We would sometimes see
   // a WRITE event appear after receiving EOS from the server connection
@@ -2087,11 +2089,11 @@ HttpSM::state_read_server_response_header(int event, void *data)
       ua_txn->cancel_inactivity_timeout();
     }
   }
+
   /////////////////////
   // tokenize header //
   /////////////////////
-  ParseResult state =
-    t_state.hdr_info.server_response.parse_resp(&http_parser, server_txn->get_remote_reader(), &bytes_used, server_entry->eos);
+  ParseResult state = t_state.hdr_info.server_response.parse_resp(&http_parser, server_txn->get_remote_reader(), &bytes_used, server_entry->eos);
 
   server_response_hdr_bytes += bytes_used;
 
@@ -2102,12 +2104,16 @@ HttpSM::state_read_server_response_header(int event, void *data)
       (server_entry->eos && state == PARSE_RESULT_CONT)) { // No more data will be coming
     state = PARSE_RESULT_ERROR;
   }
+
   // Check to see if we are over the hdr size limit
+  // レスポンスヘッダの最大サイズの超過 (デフォルト: 131072)
+  // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-response-header-max-size
   if (server_response_hdr_bytes > t_state.txn_conf->response_hdr_max_size) {
     state = PARSE_RESULT_ERROR;
   }
 
   if (state != PARSE_RESULT_CONT) {
+
     // Disable further IO
     server_entry->read_vio->nbytes = server_entry->read_vio->ndone;
     http_parser_clear(&http_parser);
@@ -4955,6 +4961,7 @@ HttpSM::do_cache_lookup_and_read()
   return;
 }
 
+// PURGEリクエストが来た際に、キャッシュの削除を行います。
 void
 HttpSM::do_cache_delete_all_alts(Continuation *cont)
 {
@@ -5548,9 +5555,11 @@ HttpSM::do_http_server_open(bool raw)
     if (new_scheme_to_use < 0) {
       new_scheme_to_use = t_state.hdr_info.client_request.url_get()->scheme_get_wksidx();
     }
+
     if (new_scheme_to_use >= 0) { // found a new scheme, use it
       scheme_to_use = new_scheme_to_use;
     }
+
     if (!raw || !tls_upstream) {
       tls_upstream = scheme_to_use == URL_WKSIDX_HTTPS;
     }
@@ -8089,6 +8098,10 @@ HttpSM::set_next_state()
   }
 
   case HttpTransact::SM_ACTION_INTERNAL_CACHE_NOOP: {
+
+    // redirect種別の場合には「State Transition: SM_ACTION_REMAP_REQUEST -> SM_ACTION_INTERNAL_CACHE_NOOP」といった遷移になります
+    // PURGEが来たけどキャッシュが存在しない場合には「State Transition: SM_ACTION_CACHE_LOOKUP -> SM_ACTION_INTERNAL_CACHE_NOOP」といった遷移になります。
+
     if (server_entry != nullptr && server_entry->in_tunnel == false) {
       release_server_session();
     }
@@ -8108,6 +8121,8 @@ HttpSM::set_next_state()
   }
 
   case HttpTransact::SM_ACTION_INTERNAL_CACHE_DELETE: {
+
+    // PURGEが来た際にそのリクエストに対するキャッシュが存在すれば「State Transition: SM_ACTION_API_READ_CACHE_HDR -> SM_ACTION_INTERNAL_CACHE_DELETE」といった遷移になります
 
     // Nuke all the alternates since this is mostly likely
     //   the result of a delete method

@@ -94,6 +94,8 @@ UrlRewrite::load()
 
   /* Initialize the next hop strategy factory */
   // cf. https://docs.trafficserver.apache.org/en/9.1.x/admin-guide/files/strategies.yaml.en.html
+
+  // sf = Strategy File
   std::string sf = RecConfigReadConfigPath("proxy.config.url_remap.strategies.filename", "strategies.yaml");
   Debug("url_rewrite_regex", "strategyFactory file: %s", sf.c_str());
   strategyFactory = new NextHopStrategyFactory(sf.c_str());

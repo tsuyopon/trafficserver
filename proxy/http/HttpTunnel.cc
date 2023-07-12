@@ -627,7 +627,11 @@ HttpTunnel::add_producer(VConnection *vc, int64_t nbytes_arg, IOBufferReader *re
   Debug("http_tunnel", "[%" PRId64 "] adding producer '%s'", sm->sm_id, name_arg);
 
   ink_assert(reader_start->mbuf);
+
+  // HttpTunnelProducerオブジェクトのメモリ割り当てをallocateできたら
   if ((p = alloc_producer()) != nullptr) {
+
+    // HttpTunnelProducerオブジェクトを無事allocateできたら、初期値をセットします
     p->vc              = vc;
     p->nbytes          = nbytes_arg;
     p->buffer_start    = reader_start;
@@ -655,6 +659,8 @@ HttpTunnel::add_producer(VConnection *vc, int64_t nbytes_arg, IOBufferReader *re
 
     // We are static, the producer is never "alive"
     //   It just has data in the buffer
+    //
+    // HTTP_TUNNEL_STATIC_PRODUCERの場合にはproducerが呼ばれることはない
     if (vc == HTTP_TUNNEL_STATIC_PRODUCER) {
       ink_assert(p->ntodo == 0);
       p->alive        = false;
@@ -663,6 +669,7 @@ HttpTunnel::add_producer(VConnection *vc, int64_t nbytes_arg, IOBufferReader *re
       p->alive = true;
     }
   }
+
   return p;
 }
 
@@ -691,6 +698,7 @@ HttpTunnel::add_consumer(VConnection *vc, VConnection *producer, HttpConsumerHan
     Debug("http_tunnel", "[%" PRId64 "] consumer '%s' not added due to producer failure", sm->sm_id, name_arg);
     return nullptr;
   }
+
   // Initialize the consumer structure
   HttpTunnelConsumer *c = alloc_consumer();
   c->producer           = p;
@@ -739,12 +747,24 @@ HttpTunnel::tunnel_run(HttpTunnelProducer *p_arg)
 
     ink_assert(active == false);
 
-    for (int i = 0; i < MAX_PRODUCERS; ++i) {
+    
+    for (int i = 0; i < MAX_PRODUCERS; ++i) { // MAX_PRODUCERS = 2
+
+      // 次のproducersにずらす。producersはHttpTunnel.hにprivateとして定義されるメンバー変数です
       p = producers + i;
+
+      // 以下の2つを共に満たしていること
+      // 1. p->vcがちゃんと確保できていて
+      // 2. 下記のいずれか片方を満たしていること
+      //   2.1 p->aliveがtrueであること(p->vcがHTTP_TUNNEL_STATIC_PRODUCER以外であること)
+      //   2.2 p->vc_typeがHT_STATIC かつ p->buffer_startがnullptrではないこと
       if (p->vc != nullptr && (p->alive || (p->vc_type == HT_STATIC && p->buffer_start != nullptr))) {
+
         // add_producerで登録したハンドラや、add_consumerで登録したハンドラは下記で呼ばれます。
         producer_run(p);
+
       }
+
     }
   }
 
@@ -752,6 +772,9 @@ HttpTunnel::tunnel_run(HttpTunnelProducer *p_arg)
   //   due to a all transfers being zero length
   //   If that is the case, call the state machine
   //   back to say we are done
+  //
+  // is_tunnel_alive()がfalseになるのはHttpTunnel::add_producerのp->vcにHTTP_TUNNEL_STATIC_PRODUCERがセットされた場合である。
+  // その場合には下記if文に入る
   if (!is_tunnel_alive()) {
     active = false;
     sm->handleEvent(HTTP_TUNNEL_EVENT_DONE, this);
@@ -779,6 +802,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
   // bz57413
   for (c = p->consumer_list.head; c; c = c->link.next) {
     if (c->vc_type == HT_TRANSFORM) {
+      // 変換が必要なコンシューマかどうかをチェックする
       transform_consumer = true;
       break;
     }
@@ -811,6 +835,8 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
   active = true;
 
   IOBufferReader *chunked_buffer_start = nullptr, *dechunked_buffer_start = nullptr;
+
+  // 手前のif文で p->vcが HTTP_TUNNEL_STATIC_PRODUCERでなく、actionがTCA_CHUNK_CONTENT、TCA_DECHUNK_CONTENT、TCA_PASSTHRU_CHUNKED_CONTENTのいずれかであればtrueになる
   if (p->do_chunking || p->do_dechunking || p->do_chunked_passthru) {
 
     p->chunked_handler.init(p->buffer_start, p);
@@ -934,6 +960,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       p->chunked_handler.chunked_reader->consume(p->chunked_handler.skip_bytes);
       Debug("http_tunnel", "[producer_run] do_dechunking p->chunked_handler.skip_bytes = %" PRId64 "", p->chunked_handler.skip_bytes);
     }
+
     // if(p->chunked_handler.chunked_reader->read_avail() > 0)
     // p->chunked_handler.chunked_reader->consume(
     // p->chunked_handler.skip_bytes);

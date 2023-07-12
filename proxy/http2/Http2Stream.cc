@@ -35,6 +35,11 @@
     this->_history.push_back(MakeSourceLocation(), e, r); \
   }
 
+// HTTP2のデバッグ情報は下記のような情報で「[2] [1]」などの情報を出力するが、1つ目がセッションのコネクションID、2つ目がストリームIDを表します
+//   [Jul 12 08:43:46.323] [ET_NET 2] DEBUG: <Http2ConnectionState.cc:1780 (send_headers_frame)> (http2_con) [2] [1] Send HEADERS frame
+//   [Jul 12 08:43:46.323] [ET_NET 2] DEBUG: <Http2ConnectionState.cc:1725 (send_a_data_frame)> (http2_con) [2] [1] Send a DATA frame - client window con: 33554041 stream: 33554041 payload:   391
+//   [Jul 12 08:43:46.323] [ET_NET 2] DEBUG: <Http2ConnectionState.cc:1732 (send_a_data_frame)> (http2_con) [2] [1] END_STREAM
+
 #define Http2StreamDebug(fmt, ...) \
   SsnDebug(_proxy_ssn, "http2_stream", "[%" PRId64 "] [%u] " fmt, _proxy_ssn->connection_id(), this->get_id(), ##__VA_ARGS__);
 
@@ -229,6 +234,8 @@ Http2Stream::decode_header_blocks(HpackHandle &hpack_handle, uint32_t maximum_ta
   return error;
 }
 
+// HTTP/2で受信完了したので、HTTP/1.1に変換して
+// リクエストの契機としてはEND_STREAMフラグがセットされる箇所
 void
 Http2Stream::send_request(Http2ConnectionState &cstate)
 {
@@ -236,6 +243,7 @@ Http2Stream::send_request(Http2ConnectionState &cstate)
   this->_http_sm_id = this->_sm->sm_id;
 
   // Convert header to HTTP/1.1 format
+  // バックポストする際にはHTTP/2のヘッダ情報は、HTTP/1.1へと変換します
   if (http2_convert_header_from_2_to_1_1(&_req_header) == PARSE_RESULT_ERROR) {
     // There's no way to cause Bad Request directly at this time.
     // Set an invalid method so it causes an error later.
@@ -244,6 +252,8 @@ Http2Stream::send_request(Http2ConnectionState &cstate)
 
   // Write header to a buffer.  Borrowing logic from HttpSM::write_header_into_buffer.
   // Seems like a function like this ought to be in HTTPHdr directly
+  //
+  // HTTP/2で受信したヘッダフレームの読み込みが完了するまでdo-whileします
   int bufindex;
   int dumpoffset = 0;
   int done, tmp;
@@ -269,11 +279,18 @@ Http2Stream::send_request(Http2ConnectionState &cstate)
   }
 
   // Is the _sm ready to process the header?
+  // ヘッダとして読み込みべきバイト数が存在するか
   if (this->read_vio.nbytes > 0) {
+
+    // 受信したフレームがEND_STREAMフラグをセットしているかどうかで処理が完了したかどうかを判断します
     if (this->recv_end_stream) {
+      // 受信したフレームにEND_STREAMフラグがセットされているので処理が完了したので、次の処理に移行する。 (おそらくHttpに関する処理に移る?)
       this->read_vio.nbytes = bufindex;
       this->signal_read_event(VC_EVENT_READ_COMPLETE);
     } else {
+      // ヘッダーフレームの読み込みが終了したが、END_STREAMフラグがセットされていなかったので、この場合にはbodyのためのフレームが存在するということでhas_bodyをセットする
+      // このhas_bodyフラグはHttp2Stream::has_request_bodyの戻り値によって参照されます。
+      //
       // End of header but not end of stream, must have some body frames coming
       this->has_body = true;
       this->signal_read_event(VC_EVENT_READ_READY);
@@ -529,11 +546,11 @@ Http2Stream::initiating_close()
         SCOPED_MUTEX_LOCK(lock, write_vio.mutex, this_ethread());
         // Are we done?
         if (write_vio.nbytes > 0 && write_vio.nbytes == write_vio.ndone) {
-          Http2StreamDebug("handle write from destroy (event=%d)", VC_EVENT_WRITE_COMPLETE);
+          Http2StreamDebug("handle write from destroy (event=%d)", VC_EVENT_WRITE_COMPLETE); // event=103
           write_event = send_tracked_event(write_event, VC_EVENT_WRITE_COMPLETE, &write_vio);
         } else {
           write_event = send_tracked_event(write_event, VC_EVENT_EOS, &write_vio);
-          Http2StreamDebug("handle write from destroy (event=%d)", VC_EVENT_EOS);
+          Http2StreamDebug("handle write from destroy (event=%d)", VC_EVENT_EOS);            // event=104
         }
         sent_write_complete = true;
       }

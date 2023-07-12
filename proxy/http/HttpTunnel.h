@@ -411,17 +411,21 @@ HttpTunnel::chain_finish_all(HttpTunnelProducer *p)
   finish_all_internal(p, true);
 }
 
+// abortしていなければ、このis_tunnel_alive()はtrueを応答するはず
 inline bool
 HttpTunnel::is_tunnel_alive() const
 {
   bool tunnel_alive = false;
 
+  // HttpTunnel::abort_tunnel()内で「producer.alive = false」がセットされることがある
   for (const auto &producer : producers) {
     if (producer.alive == true) {
       tunnel_alive = true;
       break;
     }
   }
+
+  // HttpTunnel::abort_tunnel()内で「consumer.alive = false」がセットされることがある
   if (!tunnel_alive) {
     for (const auto &consumer : consumers) {
       if (consumer.alive == true) {

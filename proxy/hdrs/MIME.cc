@@ -948,6 +948,7 @@ mime_init()
 void
 mime_init_cache_control_cooking_masks()
 {
+
   static struct {
     const char *name;
     uint32_t mask;
@@ -2542,6 +2543,7 @@ ParseResult
 mime_parser_parse(MIMEParser *parser, HdrHeap *heap, MIMEHdrImpl *mh, const char **real_s, const char *real_e,
                   bool must_copy_strings, bool eof, bool remove_ws_from_field_name, size_t max_hdr_field_size)
 {
+
   ParseResult err;
   bool line_is_real;
 
@@ -2649,8 +2651,10 @@ mime_parser_parse(MIMEParser *parser, HdrHeap *heap, MIMEHdrImpl *mh, const char
                               field_value.size(), raw_print_field, parsed.size(), false);
     mime_hdr_field_attach(mh, field, 1, nullptr);
   }
+
 }
 
+// デバッグログの場合にこの関数をとおります
 void
 mime_hdr_describe(HdrHeapObjImpl *raw, bool recurse)
 {
@@ -3863,6 +3867,7 @@ MIMEHdrImpl::recompute_accelerators_and_presence_bits()
 void
 MIMEHdrImpl::recompute_cooked_stuff(MIMEField *changing_field_or_null)
 {
+
   int len, tlen;
   const char *s;
   const char *c;
@@ -3879,26 +3884,41 @@ MIMEHdrImpl::recompute_cooked_stuff(MIMEField *changing_field_or_null)
 
   // to be safe, recompute unless you know this call is for other cooked field
   if ((changing_field_or_null == nullptr) || (changing_field_or_null->m_wks_idx != MIME_WKSIDX_PRAGMA)) {
+
+    // Cache-Controlヘッダのオブジェクトを取得する
     field = mime_hdr_field_find(this, MIME_FIELD_CACHE_CONTROL, MIME_LEN_CACHE_CONTROL);
 
+    // Cache-Controlオブジェクトが取得できたら
     if (field) {
+
       // try pathpaths first -- unlike most other fastpaths, this one
       // is probably more useful for polygraph than for the real world
+      // Cache-Controlヘッダの重複がなければ下記に入る
       if (!field->has_dups()) {
+
+        // Cache-Controlの値を取得します
         s = field->value_get(&len);
+
+        // Cache-Controlの値によってフラグをセットします
         if (ptr_len_casecmp(s, len, "public", 6) == 0) {
+          // 「Cache-Control: public」の場合
           mask = MIME_COOKED_MASK_CC_PUBLIC;
           m_cooked_stuff.m_cache_control.m_mask |= mask;
         } else if (ptr_len_casecmp(s, len, "private,no-cache", 16) == 0) {
+          // 「Cache-Control: private,no-cache」の場合
           mask = MIME_COOKED_MASK_CC_PRIVATE | MIME_COOKED_MASK_CC_NO_CACHE;
           m_cooked_stuff.m_cache_control.m_mask |= mask;
         }
       }
 
+      // 「Cache-Control: public」や「Cache-Control: private,no-cache」以外の場合にmask=0となります。
       if (mask == 0) {
+
         HdrCsvIter csv_iter;
 
+        // ヘッダの値をCsv区切りでイテレーション操作します
         for (s = csv_iter.get_first(field, &len); s != nullptr; s = csv_iter.get_next(&len)) {
+
           e = s + len;
           for (c = s; (c < e) && (ParseRules::is_token(*c)); c++) {
             ;
@@ -3928,18 +3948,23 @@ MIMEHdrImpl::recompute_cooked_stuff(MIMEField *changing_field_or_null)
                 Debug("http", "                        set integer value %d", value);
 #endif
                 if (token_wks == MIME_VALUE_MAX_AGE) {
+                  // max-age
                   m_cooked_stuff.m_cache_control.m_secs_max_age = value;
                 } else if (token_wks == MIME_VALUE_MIN_FRESH) {
+                  // min-fresh
                   m_cooked_stuff.m_cache_control.m_secs_min_fresh = value;
                 } else if (token_wks == MIME_VALUE_MAX_STALE) {
+                  // max-stale
                   m_cooked_stuff.m_cache_control.m_secs_max_stale = value;
                 } else if (token_wks == MIME_VALUE_S_MAXAGE) {
+                  // s-maxage
                   m_cooked_stuff.m_cache_control.m_secs_s_maxage = value;
                 }
               } else {
 #if TRACK_COOKING
                 Debug("http", "                        set integer value %d", INT_MAX);
 #endif
+                // max-stale
                 if (token_wks == MIME_VALUE_MAX_STALE) {
                   m_cooked_stuff.m_cache_control.m_secs_max_stale = INT_MAX;
                 }
