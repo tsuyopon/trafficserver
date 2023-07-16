@@ -1056,14 +1056,20 @@ UnixNetVConnection::acceptEvent(int event, Event *e)
     UnixNetVConnection::set_active_timeout(active_timeout_in);
   }
 
-  // ロックが設定されていたらMUTEX_TRY_LOCKする
+  // ロックが設定されていたら
   if (action_.continuation->mutex != nullptr) {
+ 
+    // MUTEX_TRY_LOCKする
     MUTEX_TRY_LOCK(lock3, action_.continuation->mutex, t);
     if (!lock3.is_locked()) {
       ink_release_assert(0);
     }
 
+    // 下記を呼び出す (TBD: その上でSET_HANDLERでUnixNetVConnection::mainEventがセットされているけど、本当に呼び出すのか?)
+    //  HTTPの場合 ProtocolProbeSessionAccept::mainEvent
+    //  TLSの場合  SSLNextProtocolAccept::mainEvent
     action_.continuation->handleEvent(NET_EVENT_ACCEPT, this);
+
   } else {
     action_.continuation->handleEvent(NET_EVENT_ACCEPT, this);
   }

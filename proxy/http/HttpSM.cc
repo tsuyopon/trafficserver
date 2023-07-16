@@ -1785,10 +1785,15 @@ HttpSM::handle_api_return()
   }
 
   case HttpTransact::SM_ACTION_SERVER_READ: {
+
+    // 「Upgrade」処理をまだ実施していない場合には実施する
     if (unlikely(t_state.did_upgrade_succeed)) {
+
       // We've successfully handled the upgrade, let's now setup
       // a blind tunnel.
       IOBufferReader *initial_data = nullptr;
+
+      // websocketの場合
       if (t_state.is_websocket) {
 
         HTTP_INCREMENT_DYN_STAT(http_websocket_current_active_client_connections_stat);
@@ -1797,6 +1802,7 @@ HttpSM::handle_api_return()
         }
 
         if (ua_txn) {
+          // クライアント側のactive timeoutとinactive timeoutを出力する
           SMDebug("http_websocket",
                   "(client session) Setting websocket active timeout=%" PRId64 "s and inactive timeout=%" PRId64 "s",
                   t_state.txn_conf->websocket_active_timeout, t_state.txn_conf->websocket_inactive_timeout);
@@ -1804,6 +1810,7 @@ HttpSM::handle_api_return()
           ua_txn->set_inactivity_timeout(HRTIME_SECONDS(t_state.txn_conf->websocket_inactive_timeout));
         }
 
+          // サーバ側のactive timeoutとinactive timeoutを出力する
         if (server_txn) {
           SMDebug("http_websocket",
                   "(server session) Setting websocket active timeout=%" PRId64 "s and inactive timeout=%" PRId64 "s",
@@ -1813,7 +1820,9 @@ HttpSM::handle_api_return()
         }
       }
 
+      // 双方向トンネルを敷設します。
       setup_blind_tunnel(true, initial_data);
+
     } else {
       HttpTunnelProducer *p = setup_server_transfer();
       perform_cache_write_action();
@@ -3165,6 +3174,7 @@ HttpSM::is_http_server_eos_truncation(HttpTunnelProducer *p)
 int
 HttpSM::tunnel_handler_server(int event, HttpTunnelProducer *p)
 {
+
   STATE_ENTER(&HttpSM::tunnel_handler_server, event);
 
   // An intercept handler may not set TS_MILESTONE_SERVER_CONNECT
@@ -3653,6 +3663,7 @@ HttpSM::tunnel_handler_cache_read(int event, HttpTunnelProducer *p)
   return 0;
 }
 
+// キャッシュ書き込み用のコンシューマ(処理完了の判断を行う)
 int
 HttpSM::tunnel_handler_cache_write(int event, HttpTunnelConsumer *c)
 {
@@ -3679,6 +3690,9 @@ HttpSM::tunnel_handler_cache_write(int event, HttpTunnelConsumer *c)
     }
     break;
   case VC_EVENT_WRITE_COMPLETE:
+
+    // 処理が完了したらこのケースに到達する
+
     // if we've never initiated a cache write
     //   abort the cache since it's finicky about a close
     //   in this case.  This case can only occur
@@ -3691,6 +3705,8 @@ HttpSM::tunnel_handler_cache_write(int event, HttpTunnelConsumer *c)
     } else {
       *status_ptr      = HttpTransact::CACHE_WRITE_COMPLETE;
       c->write_success = true;
+
+      // CacheVC::do_io_closeを呼び出す
       c->vc->do_io_close();
       c->write_vio = nullptr;
     }
@@ -7101,8 +7117,7 @@ HttpSM::setup_server_transfer_to_cache_only()
 
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler);
 
-  HttpTunnelProducer *p =
-    tunnel.add_producer(server_entry->vc, nbytes, buf_start, &HttpSM::tunnel_handler_server, HT_HTTP_SERVER, "http server");
+  HttpTunnelProducer *p = tunnel.add_producer(server_entry->vc, nbytes, buf_start, &HttpSM::tunnel_handler_server, HT_HTTP_SERVER, "http server");
 
   tunnel.set_producer_chunking_action(p, 0, action);
   tunnel.set_producer_chunking_size(p, t_state.txn_conf->http_chunking_size);
@@ -7256,9 +7271,11 @@ HttpSM::setup_push_transfer_to_cache()
   return p;
 }
 
+// websocketにここが呼ばれることがわかっています(他のケースもあるかは不明)
 void
 HttpSM::setup_blind_tunnel(bool send_response_hdr, IOBufferReader *initial)
 {
+
   HttpTunnelConsumer *c_ua;
   HttpTunnelConsumer *c_os;
   HttpTunnelProducer *p_ua;
@@ -7299,6 +7316,8 @@ HttpSM::setup_blind_tunnel(bool send_response_hdr, IOBufferReader *initial)
 
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler);
 
+  // この遷移はwebsocketに通ることがわかっています(それ以外もあるかも)
+  // 双方向のトンネルを作ります。websocketは通常inactivity timeoutなどでトンネルが自動的にcloseされます
   p_os = tunnel.add_producer(server_entry->vc, -1, r_to, &HttpSM::tunnel_handler_ssl_producer, HT_HTTP_SERVER, "http server - tunnel");
 
   c_ua = tunnel.add_consumer(ua_entry->vc, server_entry->vc, &HttpSM::tunnel_handler_ssl_consumer, HT_HTTP_CLIENT, "user agent - tunnel");

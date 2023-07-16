@@ -875,6 +875,7 @@ http_parser_clear(HTTPParser *parser)
 
 // NOTE: end is ONE CHARACTER PAST end of string!
 
+// リクエスト時の「GET /index.html  HTTP/1.1」などの文字列を解析する
 ParseResult
 http_parser_parse_req(HTTPParser *parser, HdrHeap *heap, HTTPHdrImpl *hh, const char **start, const char *end,
                       bool must_copy_strings, bool eof, int strict_uri_parsing, size_t max_request_line_size,

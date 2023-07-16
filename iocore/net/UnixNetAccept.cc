@@ -42,6 +42,8 @@ safe_delay(int msec)
 //
 // General case network connection accept code
 //
+
+// ACCEPTスレッドが担当します
 int
 net_accept(NetAccept *na, void *ep, bool blockable)
 {

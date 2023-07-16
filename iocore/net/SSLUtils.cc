@@ -395,6 +395,7 @@ ssl_verify_client_callback(int preverify_ok, X509_STORE_CTX *ctx)
 
 #if TS_USE_HELLO_CB
 // Pausable callback
+// OpenSSLはこちら
 static int
 ssl_client_hello_callback(SSL *s, int *al, void *arg)
 {
@@ -427,6 +428,7 @@ ssl_client_hello_callback(SSL *s, int *al, void *arg)
   return SSL_CLIENT_HELLO_SUCCESS;
 }
 #elif defined(OPENSSL_IS_BORINGSSL)
+// BoringSSLはこちら
 static ssl_select_cert_result_t
 ssl_client_hello_callback(const SSL_CLIENT_HELLO *client_hello)
 {

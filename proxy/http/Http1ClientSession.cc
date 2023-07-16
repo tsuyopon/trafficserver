@@ -474,7 +474,9 @@ Http1ClientSession::new_transaction()
 
   transact_count++;
 
+  // ProxyTransaction::new_transactionを呼び出す
   trans.new_transaction(read_from_early_data > 0 ? true : false);
+
   return &trans;
 }
 

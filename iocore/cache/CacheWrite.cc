@@ -1152,7 +1152,9 @@ Lwait:
 int
 CacheVC::openWriteCloseDir(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED */)
 {
+
   cancel_trigger();
+
   {
     CACHE_TRY_LOCK(lock, vol->mutex, mutex->thread_holding);
     if (!lock.is_locked()) {
@@ -1165,6 +1167,7 @@ CacheVC::openWriteCloseDir(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED *
       dir_delete(&earliest_key, vol, &earliest_dir);
     }
   }
+
   if (is_debug_tag_set("cache_update")) {
     if (f.update && closed > 0) {
       if (!total_len && !f.allow_empty_doc && alternate_index != CACHE_ALT_REMOVED) {
@@ -1180,6 +1183,7 @@ CacheVC::openWriteCloseDir(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED *
       }
     }
   }
+
   // update the appropriate stat variable
   // These variables may not give the current no of documents with
   // one, two and three or more fragments. This is because for
@@ -1199,6 +1203,7 @@ CacheVC::openWriteCloseDir(int /* event ATS_UNUSED */, Event * /* e ATS_UNUSED *
       break;
     }
   }
+
   if (f.close_complete) {
     recursive++;
     ink_assert(!vol || this_ethread() != vol->mutex->thread_holding);
@@ -1760,6 +1765,7 @@ Action *
 Cache::open_write(Continuation *cont, const CacheKey *key, CacheHTTPInfo *info, time_t apin_in_cache,
                   const CacheKey * /* key1 ATS_UNUSED */, CacheFragType type, const char *hostname, int host_len)
 {
+
   if (!CacheProcessor::IsCacheReady(type)) {
     cont->handleEvent(CACHE_EVENT_OPEN_WRITE_FAILED, (void *)-ECACHE_NOT_READY);
     return ACTION_RESULT_DONE;
@@ -1772,6 +1778,7 @@ Cache::open_write(Continuation *cont, const CacheKey *key, CacheHTTPInfo *info, 
   ProxyMutex *mutex = cont->mutex.get();
   c->vio.op         = VIO::WRITE;
   c->first_key      = *key;
+
   /*
      The transition from single fragment document to a multi-fragment document
      would cause a problem if the key and the first_key collide. In case of
@@ -1826,6 +1833,7 @@ Cache::open_write(Continuation *cont, const CacheKey *key, CacheHTTPInfo *info, 
   } else {
     c->base_stat = cache_write_active_stat;
   }
+
   CACHE_INCREMENT_DYN_STAT(c->base_stat + CACHE_STAT_ACTIVE);
   c->pin_in_cache = static_cast<uint32_t>(apin_in_cache);
 
@@ -1864,6 +1872,7 @@ Cache::open_write(Continuation *cont, const CacheKey *key, CacheHTTPInfo *info, 
         }
       }
     }
+
     // missed lock
     SET_CONTINUATION_HANDLER(c, &CacheVC::openWriteStartDone);
     CONT_SCHED_LOCK_RETRY(c);

@@ -43,6 +43,7 @@ append_protocol(const char *proto, unsigned char *buf)
   return buf + sz;
 }
 
+// HTTPSリクエストをacceptした後に呼ばれる
 bool
 SSLNextProtocolSet::create_npn_advertisement(const SessionProtocolSet &enabled, unsigned char **npn, size_t *len) const
 {

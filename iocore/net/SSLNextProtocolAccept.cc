@@ -139,8 +139,12 @@ SSLNextProtocolAccept::mainEvent(int event, void *edata)
     // force the SSLNetVConnection to complete the SSL handshake. Don't tell
     // the endpoint that there is an accept to handle until the read completes
     // and we know which protocol was negotiated.
+
+    // ALPNとしてh2, http/1.1, http/1.0を登録する
     netvc->registerNextProtocolSet(&this->protoset, this->protoenabled);
+
     netvc->do_io_read(new SSLNextProtocolTrampoline(this, netvc->mutex), 0, this->buffer);
+
     return EVENT_CONT;
   default:
     if (netvc) {

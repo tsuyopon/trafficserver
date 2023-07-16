@@ -528,9 +528,12 @@ SSLNetVConnection::update_rbio(bool move_to_socket)
 {
   bool retval = false;
   if (BIO_eof(SSL_get_rbio(this->ssl)) && this->handShakeReader != nullptr) {
+
     this->handShakeReader->consume(this->handShakeBioStored);
     this->handShakeBioStored = 0;
+
     // Load up the next block if present
+    // 読み込むべきデータがある場合の処理
     if (this->handShakeReader->is_read_avail_more_than(0)) {
       // Setup the next iobuffer block to drain
       char *start              = this->handShakeReader->start();
@@ -550,7 +553,9 @@ SSLNetVConnection::update_rbio(bool move_to_socket)
       SSL_set0_rbio(this->ssl, rbio);
       free_handshake_buffers();
     }
+
   }
+
   return retval;
 }
 
@@ -573,6 +578,7 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
     readReschedule(nh);
     return;
   }
+
   // Got closed by the HttpSessionManager thread during a migration
   // The closed flag should be stable once we get the s->vio.mutex in that case
   // (the global session pool mutex).
@@ -580,6 +586,7 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
     this->super::net_read_io(nh, lthread);
     return;
   }
+
   // If the key renegotiation failed it's over, just signal the error and finish.
   if (sslClientRenegotiationAbort == true) {
     this->read.triggered = 0;
@@ -650,6 +657,7 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
       this->read.triggered = 0;
       readSignalError(nh, err);
     } else if (ret == SSL_HANDSHAKE_WANT_READ || ret == SSL_HANDSHAKE_WANT_ACCEPT) {
+
       if (SSLConfigParams::ssl_handshake_timeout_in > 0) {
         double handshake_time = (static_cast<double>(Thread::get_hrtime() - this->get_tls_handshake_begin_time()) / 1000000000);
         Debug("ssl", "ssl handshake for vc %p, took %.3f seconds, configured handshake_timer: %d", this, handshake_time,
@@ -662,16 +670,21 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
           return;
         }
       }
+
       // move over to the socket if we haven't already
       if (this->handShakeBuffer != nullptr) {
         read.triggered = update_rbio(true);
       } else {
         read.triggered = 0;
       }
+
       if (!read.triggered) {
         nh->read_ready_list.remove(this);
       }
+
+      // ログを見ると「update_rbio」が実行されると、その後これが実行されました。まだ読み込むべき
       readReschedule(nh);
+
     } else if (ret == SSL_HANDSHAKE_WANT_CONNECT || ret == SSL_HANDSHAKE_WANT_WRITE) {
       write.triggered = 0;
       nh->write_ready_list.remove(this);
@@ -862,8 +875,7 @@ SSLNetVConnection::load_buffer_and_write(int64_t towrite, MIOBufferAccessor &buf
       buf.reader()->consume(num_really_written);
     }
 
-    Debug("ssl", "try_to_write=%" PRId64 " written=%" PRId64 " total_written=%" PRId64, try_to_write, num_really_written,
-          total_written);
+    Debug("ssl", "try_to_write=%" PRId64 " written=%" PRId64 " total_written=%" PRId64, try_to_write, num_really_written, total_written);
     NET_INCREMENT_DYN_STAT(net_calls_to_write_stat);
   } while (num_really_written == try_to_write && total_written < towrite);
 
@@ -871,6 +883,7 @@ SSLNetVConnection::load_buffer_and_write(int64_t towrite, MIOBufferAccessor &buf
     sslLastWriteTime = now;
     sslTotalBytesSent += total_written;
   }
+
   redoWriteSize = 0;
   if (num_really_written > 0) {
     needs |= EVENTIO_WRITE;
@@ -1048,19 +1061,24 @@ SSLNetVConnection::free(EThread *t)
 int
 SSLNetVConnection::sslStartHandShake(int event, int &err)
 {
+
   if (TSSystemState::is_ssl_handshaking_stopped()) {
     Debug("ssl", "Stopping handshake due to server shutting down.");
     return EVENT_ERROR;
   }
+
   if (this->get_tls_handshake_begin_time() == 0) {
     this->_record_tls_handshake_begin_time();
     // net_activity will not be triggered until after the handshake
     set_inactivity_timeout(HRTIME_SECONDS(SSLConfigParams::ssl_handshake_timeout_in));
   }
+
   SSLConfig::scoped_config params;
+
   switch (event) {
   case SSL_EVENT_SERVER:
     if (this->ssl == nullptr) {
+
       SSLCertificateConfig::scoped_config lookup;
       IpEndpoint dst;
       int namelen = sizeof(dst);
@@ -1068,6 +1086,7 @@ SSLNetVConnection::sslStartHandShake(int event, int &err)
         Debug("ssl", "Failed to get dest ip, errno = [%d]", errno);
         return EVENT_ERROR;
       }
+
       SSLCertContext *cc = lookup->find(dst);
       if (is_debug_tag_set("ssl")) {
         IpEndpoint src;
@@ -1109,6 +1128,7 @@ SSLNetVConnection::sslStartHandShake(int event, int &err)
       SSLErrorVC(this, "failed to create SSL server session");
       return EVENT_ERROR;
     }
+
     return sslServerHandShakeEvent(err);
 
   case SSL_EVENT_CLIENT:
@@ -1219,6 +1239,7 @@ SSLNetVConnection::sslStartHandShake(int event, int &err)
 int
 SSLNetVConnection::sslServerHandShakeEvent(int &err)
 {
+
   // Continue on if we are in the invoked state.  The hook has not yet reenabled
   if (sslHandshakeHookState == HANDSHAKE_HOOKS_CERT_INVOKE || sslHandshakeHookState == HANDSHAKE_HOOKS_CLIENT_CERT_INVOKE ||
       sslHandshakeHookState == HANDSHAKE_HOOKS_PRE_INVOKE || sslHandshakeHookState == HANDSHAKE_HOOKS_CLIENT_HELLO_INVOKE) {
@@ -1269,7 +1290,10 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
 
   // All the pre-accept hooks have completed, proceed with the actual accept.
   if (this->handShakeReader) {
+
+    // バッファにデータが存在しない場合
     if (BIO_eof(SSL_get_rbio(this->ssl))) { // No more data in the buffer
+
       // Is this the first read?
       if (!this->handShakeReader->is_read_avail_more_than(0) && !this->handShakeHolder->is_read_avail_more_than(0)) {
 #if TS_USE_TLS_ASYNC
@@ -1278,7 +1302,9 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
         }
 #endif
 
+        // (シーケンス1) SSL_Accept()を呼び出す前に最初はこの遷移に入ります
         Debug("ssl", "%p first read\n", this);
+
         // Read from socket to fill in the BIO buffer with the
         // raw handshake data before calling the ssl accept calls.
         int retval = this->read_raw_data();
@@ -1298,12 +1324,15 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
           return EVENT_ERROR;
         }
       } else {
+        // (シーケンス3) バッファの更新処理が行われます
         update_rbio(false);
       }
     } // Still data in the BIO
   }
 
+  // (シーケンス2) ここでSSL_Acceptが開始されます
   ssl_error_t ssl_error = this->_ssl_accept();
+
 #if TS_USE_TLS_ASYNC
   if (ssl_error == SSL_ERROR_WANT_ASYNC) {
     // Do we need to set up the async eventfd?  Or is it already registered?
@@ -1348,7 +1377,11 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
   }
 
   switch (ssl_error) {
+
+  // SSL_Accept()がSSL_ERROR_NONEの場合にはTLSハンドシェイクが完了したことを意味します
   case SSL_ERROR_NONE:
+
+    // デバッグタグがあれば、証明書のsubjectとissuer情報を出力します
     if (is_debug_tag_set("ssl")) {
       X509 *cert = SSL_get_peer_certificate(ssl);
 
@@ -1360,6 +1393,7 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
       }
     }
 
+    // ハンドシェイクが完了したのでSSL_HANDSHAKE_DONEをセットします
     sslHandshakeStatus = SSL_HANDSHAKE_DONE;
 
     if (this->get_tls_handshake_begin_time()) {
@@ -1379,12 +1413,15 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
       const unsigned char *proto = nullptr;
       unsigned len               = 0;
 
+      // TLSバージョン情報のメトリクス情報をインクリメントする
       increment_ssl_version_metric(SSL_version(ssl));
 
       // If it's possible to negotiate both NPN and ALPN, then ALPN
       // is preferred since it is the server's preference.  The server
       // preference would not be meaningful if we let the client
       // preference have priority.
+
+      // TLSでネゴシエートされたALPNの値を取得する。この値自体はALPNのコールバックssl_alpn_select_callbackの処理で決定されるはず
       SSL_get0_alpn_selected(ssl, &proto, &len);
       if (len == 0) {
         SSL_get0_next_proto_negotiated(ssl, &proto, &len);
@@ -1394,6 +1431,8 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
         if (_tunnel_type == SNIRoutingType::NONE && !this->setSelectedProtocol(proto, len)) {
           return EVENT_ERROR;
         }
+
+        // ネゴシエートで取得したALPNのプロトコル(proto)をセットしておきます
         this->set_negotiated_protocol_id({reinterpret_cast<const char *>(proto), static_cast<size_t>(len)});
 
         Debug("ssl", "client selected next protocol '%.*s'", len, proto);
@@ -1912,6 +1951,7 @@ SSLNetVConnection::populate(Connection &con, Continuation *c, void *arg)
   return EVENT_DONE;
 }
 
+// TLSのバージョン情報のメトリクスをインクリメントする
 void
 SSLNetVConnection::increment_ssl_version_metric(int version) const
 {

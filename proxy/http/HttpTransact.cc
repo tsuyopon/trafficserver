@@ -7157,6 +7157,7 @@ HttpTransact::is_request_retryable(State *s)
 void
 HttpTransact::process_quick_http_filter(State *s, int method)
 {
+
   // connection already disabled by previous ACL filtering, don't modify it.
   if (!s->client_connection_enabled) {
     return;

@@ -1012,6 +1012,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       // Nothing to do, call back the cleanup handlers
       c->write_vio = nullptr;
       consumer_handler(VC_EVENT_WRITE_COMPLETE, c);
+
     } else {
       // In the client half close case, all the data that will be sent
       // from the client is already in the buffer.  Go ahead and set
@@ -1030,7 +1031,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       }
 
       // Start the writes now that we know we will consume all the initial data
-      c->write_vio = c->vc->do_io_write(this, c_write, c->buffer_reader);
+      c->write_vio = c->vc->do_io_write(this, c_write, c->buffer_reader);   // CacheVC::do_io_write
       ink_assert(c_write > 0);
       if (c->write_vio == nullptr) {
         consumer_handler(VC_EVENT_ERROR, c);
@@ -1039,8 +1040,10 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
   }
 
   if (p->alive) {
+
     ink_assert(producer_n >= 0);
 
+    // read_avail = 0で　producer_n=0がセットされているはず
     if (producer_n == 0) {
       // Everything is already in the buffer so mark the producer as done.  We need to notify
       // state machine that everything is done.  We use a special event to say the producers is
@@ -1049,6 +1052,8 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       p->read_success  = true;
       p->handler_state = HTTP_SM_POST_SUCCESS;
       Debug("http_tunnel", "[%" PRId64 "] [tunnel_run] producer already done", sm->sm_id);
+
+      // producerの処理が完了したらここに入ると思われる。
       producer_handler(HTTP_TUNNEL_EVENT_PRECOMPLETE, p);
     } else {
       if (read_start_pos > 0) {
@@ -1272,12 +1277,14 @@ HttpTunnel::producer_handler(int event, HttpTunnelProducer *p)
     // p->vc_handlerはHttpTunnel::add_producerへのハンドラの引数で指定された値が指定されている
     jump_point = p->vc_handler;
     (sm->*jump_point)(event, p);
+
     sm_callback = true;
     p->update_state_if_not_set(HTTP_SM_POST_SUCCESS);
 
     // Data read from producer, reenable consumers
     for (c = p->consumer_list.head; c; c = c->link.next) {
       if (c->alive && c->write_vio) {
+        // 主にここでVIO::reenable経由でCacheVC::reenableが呼ばれると、その後HttpTunnel::main_handlerが呼ばれてproducer_handlerが呼ばれる
         c->write_vio->reenable();
       }
     }

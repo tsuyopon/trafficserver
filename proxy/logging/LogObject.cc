@@ -489,6 +489,7 @@ LogObject::va_log(LogAccess *lad, const char *fmt, va_list ap)
 }
 
 // LogObject::va_logから呼ばれる
+// 第２引数の text_entryはデフォルト nullptr となっている
 int
 LogObject::log(LogAccess *lad, const char *text_entry)
 {
@@ -616,6 +617,7 @@ LogObject::log(LogAccess *lad, std::string_view text_entry)
     memset(dst + text_entry.size(), 0, bytes_needed - text_entry.size());
   }
 
+  // ここで書き込みを指示します
   buffer->checkin_write(offset);
 
   return Log::LOG_OK;
@@ -1334,6 +1336,7 @@ LogObjectManager::log(LogAccess *lad)
   ProxyMutex *mutex = this_thread()->mutex.get();
 
   for (unsigned i = 0; i < this->_objects.size(); i++) {
+    // LogObject::logが呼ばれる
     ret |= _objects[i]->log(lad);
   }
 

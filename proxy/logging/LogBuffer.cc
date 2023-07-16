@@ -340,6 +340,7 @@ LogBuffer::checkin_write(size_t write_offset)
   //        m_id, m_owner->get_base_filename(), ret_val, writers_left);
 
   return ret_val;
+
 }
 
 unsigned

@@ -805,20 +805,28 @@ Http2Stream::push_promise(URL &url, const MIMEField *accept_encoding)
   return h2_proxy_ssn->connection_state.send_push_promise_frame(this, url, accept_encoding);
 }
 
+// レスポンスのボディを送ります
 void
 Http2Stream::send_response_body(bool call_update)
 {
   Http2ClientSession *h2_proxy_ssn = static_cast<Http2ClientSession *>(this->_proxy_ssn);
   _timeout.update_inactivity();
 
+  // HTTP/2のStream Priorityが有効の場合に入る (デフォルト: 0)
+  //  cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http2-stream-priority-enabled
   if (Http2::stream_priority_enabled) {
     SCOPED_MUTEX_LOCK(lock, h2_proxy_ssn->mutex, this_ethread());
     h2_proxy_ssn->connection_state.schedule_stream(this);
     // signal_write_event() will be called from `Http2ConnectionState::send_data_frames_depends_on_priority()`
     // when write_vio is consumed
   } else {
+    // 通常こちらの遷移に入る
     SCOPED_MUTEX_LOCK(lock, h2_proxy_ssn->mutex, this_ethread());
+
+    // dataフレームを送信する
     h2_proxy_ssn->connection_state.send_data_frames(this);
+
+    // Http2Stream::signal_write_eventが呼ばれる
     this->signal_write_event(call_update);
     // XXX The call to signal_write_event can destroy/free the Http2Stream.
     // Don't modify the Http2Stream after calling this method.

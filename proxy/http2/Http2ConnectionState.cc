@@ -1364,6 +1364,7 @@ Http2ConnectionState::find_stream(Http2StreamId id) const
 void
 Http2ConnectionState::restart_streams()
 {
+
   Http2Stream *s = stream_list.head;
   if (s) {
     Http2Stream *end = s;
