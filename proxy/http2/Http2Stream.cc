@@ -628,6 +628,7 @@ Http2Stream::update_read_request(bool call_update)
   }
 }
 
+
 void
 Http2Stream::restart_sending()
 {
@@ -644,6 +645,7 @@ Http2Stream::restart_sending()
     return;
   }
 
+  // 下記関数からDATAフレームが創出される
   this->send_response_body(true);
 }
 

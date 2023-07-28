@@ -29,6 +29,7 @@
     this->remember(MakeSourceLocation(), e, r); \
   }
 
+// 過去に通った場所を記録し、デバッグログを出力する役割を持つ
 #define STATE_ENTER(state_name, event)                                                                                          \
   do {                                                                                                                          \
     REMEMBER(event, this->recursion)                                                                                            \
@@ -37,6 +38,7 @@
 
 #define Http2SsnDebug(fmt, ...) Debug("http2_cs", "[%" PRId64 "] " fmt, this->get_connection_id(), ##__VA_ARGS__)
 
+// session_handlerのコールバック関数をセットする
 #define HTTP2_SET_SESSION_HANDLER(handler) \
   do {                                     \
     REMEMBER(NO_EVENT, this->recursion);   \
@@ -150,7 +152,11 @@ Http2CommonSession::set_half_close_local_flag(bool flag)
 int64_t
 Http2CommonSession::xmit(const Http2TxFrame &frame, bool flush)
 {
+
+  // Http2TxFrameはポリモーフィズムによって、呼び出されるクラスが変わってくる。
+  // たとえば、Http2SettingsFrameのframeが指定された場合にはttp2SettingsFrame::write_toが下記で呼ばれます。
   int64_t len = frame.write_to(this->write_buffer);
+
   this->_pending_sending_data_size += len;
   // Force flush for some cases
   if (!flush) {
@@ -162,6 +168,7 @@ Http2CommonSession::xmit(const Http2TxFrame &frame, bool flush)
   }
 
   if (flush) {
+    // すぐ下で定義されるHttp2CommonSession::flush()が呼ばれる
     this->flush();
   }
 
@@ -186,14 +193,16 @@ Http2CommonSession::state_read_connection_preface(int event, void *edata)
   STATE_ENTER(&Http2CommonSession::state_read_connection_preface, event);
   ink_assert(event == VC_EVENT_READ_COMPLETE || event == VC_EVENT_READ_READY);
 
+  // HTTP/2のPREFACE 「PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n」の文字列以上読み込めた場合にだけ処理を行う。
   if (this->_read_buffer_reader->read_avail() >= static_cast<int64_t>(HTTP2_CONNECTION_PREFACE_LEN)) {
     char buf[HTTP2_CONNECTION_PREFACE_LEN];
     unsigned nbytes;
 
+    // Connection Preface分のサイズだけreaderから読み込む
     nbytes = copy_from_buffer_reader(buf, this->_read_buffer_reader, sizeof(buf));
     ink_release_assert(nbytes == HTTP2_CONNECTION_PREFACE_LEN);
 
-    // HTTP/2の開始合図「PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n」と一致しているかをチェックする
+    // HTTP/2の開始合図「PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n」と一致しているかをチェックする (acceptorのチェックによるprefaceチェックはproto_is_http2関数でも行われている)
     if (memcmp(HTTP2_CONNECTION_PREFACE, buf, nbytes) != 0) {
       Http2SsnDebug("invalid connection preface");
       this->get_proxy_session()->do_io_close();
@@ -201,23 +210,32 @@ Http2CommonSession::state_read_connection_preface(int event, void *edata)
     }
 
     // Check whether data is read from early data
+    // TLS1.3以降のEarlyDataとしての文字列が存在した場合
     if (this->read_from_early_data > 0) {
       this->read_from_early_data -= this->read_from_early_data > nbytes ? nbytes : this->read_from_early_data;
     }
 
+    // Connection Prefaceを受信したことをデバッグに表示する
     Http2SsnDebug("received connection preface");
+
+    // bytesは読み込んだことを通知する
     this->_read_buffer_reader->consume(nbytes);
     HTTP2_SET_SESSION_HANDLER(&Http2CommonSession::state_start_frame_read);
 
+    // HTTP/2のinactivity timeoutとactive timeoutをセットする
     this->get_netvc()->set_inactivity_timeout(HRTIME_SECONDS(Http2::no_activity_timeout_in));
     this->get_netvc()->set_active_timeout(HRTIME_SECONDS(Http2::active_timeout_in));
 
     // XXX start the write VIO ...
 
     // If we have unconsumed data, start tranferring frames now.
+    // preface後に送信されてきたデータが1byte以上存在すれば、次の処理を実行する
     if (this->_read_buffer_reader->is_read_avail_more_than(0)) {
       return this->get_proxy_session()->handleEvent(VC_EVENT_READ_READY, vio);
     }
+
+    // preface後のデータが1byteも届いていない場合には、このコードパスに到達する。
+
   }
 
   // XXX We don't have enough data to check the connection preface. We should
@@ -239,11 +257,14 @@ Http2CommonSession::state_start_frame_read(int event, void *edata)
   return do_process_frame_read(event, vio, false);
 }
 
+// フレームが呼ばれるとまずはここが呼ばれます、その後に各フレームの処理に移ります
 int
 Http2CommonSession::do_start_frame_read(Http2ErrorCode &ret_error)
 {
 
   ret_error = Http2ErrorCode::HTTP2_ERROR_NO_ERROR;
+
+  // HTTP/2で規定されているフレームヘッダの最低長(9byte)以上ある場合だけこの関数で処理されます。
   ink_release_assert(this->_read_buffer_reader->read_avail() >= (int64_t)HTTP2_FRAME_HEADER_LEN);
 
   uint8_t buf[HTTP2_FRAME_HEADER_LEN];
@@ -251,9 +272,14 @@ Http2CommonSession::do_start_frame_read(Http2ErrorCode &ret_error)
 
   // フレームを受信すると呼ばれます
   Http2SsnDebug("receiving frame header");
+
+  // フレームのヘッダ長さをまずは取得します
   nbytes = copy_from_buffer_reader(buf, this->_read_buffer_reader, sizeof(buf));
 
   this->cur_frame_from_early_data = false;
+
+  // フレームのヘッダをparseします。
+  // その後に利用するフレームtypeや長さなどの情報は「this->current_hdr」にセットされます。
   if (!http2_parse_frame_header(make_iovec(buf), this->current_hdr)) {
     Http2SsnDebug("frame header parse failure");
     this->get_proxy_session()->do_io_close();
@@ -261,11 +287,11 @@ Http2CommonSession::do_start_frame_read(Http2ErrorCode &ret_error)
   }
 
   // Check whether data is read from early data
+  // TLS1.3のEarlyDataがあればその際の処理を行います
   if (this->read_from_early_data > 0) {
     this->read_from_early_data -= this->read_from_early_data > nbytes ? nbytes : this->read_from_early_data;
     this->cur_frame_from_early_data = true;
   }
-
 
   // 下記にログを示すます (間にrcv_window_update_frameも時系列として含まれますが記載しておきます)// 
   // [Jun 23 09:31:10.956] [ET_NET 3] DEBUG: <Http2CommonSession.cc:250 (do_start_frame_read)> (http2_cs) [0] receiving frame header
@@ -276,14 +302,17 @@ Http2CommonSession::do_start_frame_read(Http2ErrorCode &ret_error)
   Http2SsnDebug("frame header length=%u, type=%u, flags=0x%x, streamid=%u", (unsigned)this->current_hdr.length,
                 (unsigned)this->current_hdr.type, (unsigned)this->current_hdr.flags, this->current_hdr.streamid);
 
+  // フレームのヘッダ長さ分を取得したのでconsumeしておきます
   this->_read_buffer_reader->consume(nbytes);
 
+  // HTTP/2フレームヘッダが妥当かどうかをチェックします
   if (!http2_frame_header_is_valid(this->current_hdr, this->connection_state.server_settings.get(HTTP2_SETTINGS_MAX_FRAME_SIZE))) {
     ret_error = Http2ErrorCode::HTTP2_ERROR_PROTOCOL_ERROR;
     return -1;
   }
 
   // If we know up front that the payload is too long, nuke this connection.
+  // SETTINGSフレームにて送付されてきたHTTP2_SETTINGS_MAX_FRAME_SIZE(see https://datatracker.ietf.org/doc/html/rfc9113#section-6.5.2)よりも、フレーム長が超過している場合にはFRAME_SIZE_ERROR(see: https://datatracker.ietf.org/doc/html/rfc9113#FRAME_SIZE_ERROR)を応答します
   if (this->current_hdr.length > this->connection_state.server_settings.get(HTTP2_SETTINGS_MAX_FRAME_SIZE)) {
     ret_error = Http2ErrorCode::HTTP2_ERROR_FRAME_SIZE_ERROR;
     return -1;
@@ -294,18 +323,22 @@ Http2CommonSession::do_start_frame_read(Http2ErrorCode &ret_error)
 
   if (continued_stream_id != 0 &&
       (continued_stream_id != this->current_hdr.streamid || this->current_hdr.type != HTTP2_FRAME_TYPE_CONTINUATION)) {
+    // see: https://datatracker.ietf.org/doc/html/rfc9113#PROTOCOL_ERROR
     ret_error = Http2ErrorCode::HTTP2_ERROR_PROTOCOL_ERROR;
     return -1;
   }
   return 0;
 }
 
+// フレームの読み込みが完了した場合に呼び出される関数
 int
 Http2CommonSession::state_complete_frame_read(int event, void *edata)
 {
   VIO *vio = static_cast<VIO *>(edata);
   STATE_ENTER(&Http2CommonSession::state_complete_frame_read, event);
   ink_assert(event == VC_EVENT_READ_COMPLETE || event == VC_EVENT_READ_READY);
+
+  // フレームで指定されたフレーム長よりも、読み込み可能なバイト数が少ない場合にはreenableする
   if (this->_read_buffer_reader->read_avail() < this->current_hdr.length) {
     if (this->_should_do_something_else()) {
       if (this->_reenable_event == nullptr) {
@@ -333,6 +366,8 @@ Http2CommonSession::do_complete_frame_read()
   ink_release_assert(this->_read_buffer_reader->read_avail() >= this->current_hdr.length);
 
   Http2Frame frame(this->current_hdr, this->_read_buffer_reader, this->cur_frame_from_early_data);
+
+  // (重要) 各種フレーム毎の処理はここを起点にして行われます
   connection_state.rcv_frame(&frame);
 
   // Check whether data is read from early data
@@ -340,7 +375,10 @@ Http2CommonSession::do_complete_frame_read()
     this->read_from_early_data -=
       this->read_from_early_data > this->current_hdr.length ? this->current_hdr.length : this->read_from_early_data;
   }
+
+  // 読み込み完了したので、フレーム長のサイズが完了したことを通知する
   this->_read_buffer_reader->consume(this->current_hdr.length);
+
   ++(this->_n_frame_read);
 
   // Set the event handler if there is no more data to process a new frame
@@ -357,6 +395,7 @@ Http2CommonSession::do_process_frame_read(int event, VIO *vio, bool inside_frame
     do_complete_frame_read();
   }
 
+  // HTTP/2では1つのフレームは最低9byte(HTTP2_FRAME_HEADER_LEN)のデータ構造を持ちます
   while (this->_read_buffer_reader->read_avail() >= static_cast<int64_t>(HTTP2_FRAME_HEADER_LEN)) {
 
     // Cancel reading if there was an error or connection is closed
@@ -367,6 +406,8 @@ Http2CommonSession::do_process_frame_read(int event, VIO *vio, bool inside_frame
     }
 
     Http2ErrorCode err = Http2ErrorCode::HTTP2_ERROR_NO_ERROR;
+
+    // エラー割合が一定の閾値を超過してしまった場合、サーバ側からENHANCE_YOUR_CALMを応答する
     if (this->connection_state.get_stream_error_rate() > std::min(1.0, Http2::stream_error_rate_threshold * 2.0)) {
       ip_port_text_buffer ipb;
       const char *client_ip = ats_ip_ntop(this->get_proxy_session()->get_remote_addr(), ipb, sizeof(ipb));
@@ -378,39 +419,51 @@ Http2CommonSession::do_process_frame_read(int event, VIO *vio, bool inside_frame
     }
 
     // Return if there was an error
-    if (err > Http2ErrorCode::HTTP2_ERROR_NO_ERROR || do_start_frame_read(err) < 0) {
+    // 以下のいずれかに該当する場合にこのコードパスに入る
+    //   1. エラーがあった
+    //   2. do_start_frame_readの戻り値が負
+    //
+    if (err > Http2ErrorCode::HTTP2_ERROR_NO_ERROR || do_start_frame_read(err) < 0) {   // do_start_frame_readの中でフレームヘッダのparse処理が行われる
+
       // send an error if specified.  Otherwise, just go away
       if (err > Http2ErrorCode::HTTP2_ERROR_NO_ERROR) {
         if (!this->connection_state.is_state_closed()) {
+          // GOAWAYフレームを送出して、half closeフラグをセットする
           this->connection_state.send_goaway_frame(this->connection_state.get_latest_stream_id_in(), err);
           this->set_half_close_local_flag(true);
         }
       }
+
       return 0;
     }
 
     // If there is no more data to finish the frame, set up the event handler and reenable
+    // ヘッダの長さよりも、読み込みしているbyte数の方が少ない場合
     if (this->_read_buffer_reader->read_avail() < this->current_hdr.length) {
       HTTP2_SET_SESSION_HANDLER(&Http2CommonSession::state_complete_frame_read);
       break;
     }
 
+    // フレームの読み込みが完了した場合に呼び出す
     do_complete_frame_read();
 
+    // 128回に1度だけ特定の処理を呼び出す
     if (this->_should_do_something_else()) {
       if (this->_reenable_event == nullptr) {
         vio->disable();
-        this->_reenable_event = this->get_mutex()->thread_holding->schedule_in(this->get_proxy_session(), HRTIME_MSECONDS(1),
-                                                                               HTTP2_SESSION_EVENT_REENABLE, vio);
+        this->_reenable_event = this->get_mutex()->thread_holding->schedule_in(this->get_proxy_session(), HRTIME_MSECONDS(1), HTTP2_SESSION_EVENT_REENABLE, vio);
         return 0;
       }
     }
+
   }
 
   // If the client hasn't shut us down, reenable
+  // peerとの接続がまだ存在していたら処理を続行する
   if (!this->get_proxy_session()->is_peer_closed()) {
     vio->reenable();
   }
+
   return 0;
 }
 

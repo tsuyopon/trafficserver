@@ -89,16 +89,22 @@ size_t ink_strlcat(char *dst, const char *str, size_t siz);
 inline int
 ptr_len_casecmp(const char *p1, int l1, const char *p2, int l2)
 {
+
+  // 文字の長さを比較する
   if (l1 < l2) {
     return -1;
   } else if (l1 > l2) {
     return 1;
   }
 
+  // 1文字ずつ比較する
   while (l1) {
+
+    // 文字列を小文字に変換する
     char p1c = ParseRules::ink_tolower(*p1);
     char p2c = ParseRules::ink_tolower(*p2);
 
+    // 文字が一致しなければ、文字コードの大きさにより-1か1のいずれかを応答する
     if (p1c != p2c) {
       if (p1c > p2c) {
         return 1;
@@ -107,6 +113,7 @@ ptr_len_casecmp(const char *p1, int l1, const char *p2, int l2)
       }
     }
 
+    // 文字ポインタを進める
     p1++;
     p2++;
     l1--;

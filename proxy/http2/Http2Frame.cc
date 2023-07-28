@@ -130,17 +130,24 @@ Http2RstStreamFrame::write_to(MIOBuffer *iobuffer) const
 int64_t
 Http2SettingsFrame::write_to(MIOBuffer *iobuffer) const
 {
+
   // Write frame header
   uint8_t buf[HTTP2_FRAME_HEADER_LEN];
   http2_write_frame_header(this->_hdr, make_iovec(buf));
   int64_t len = iobuffer->write(buf, sizeof(buf));
 
   // Write frame payload
+  // パラメータのサイズ分だけイテレーションする
   for (uint32_t i = 0; i < this->_psize; ++i) {
+
     Http2SettingsParameter *p = this->_params + i;
 
     uint8_t p_buf[HTTP2_SETTINGS_PARAMETER_LEN];
+
+    // SETTINGSフレームのフォーマットIdentifer(16bit) + Value(32bit)をメモリ上に配置する
     http2_write_settings(*p, make_iovec(p_buf));
+
+    // 上記で配置されたデータを送信する
     len += iobuffer->write(p_buf, sizeof(p_buf));
   }
 

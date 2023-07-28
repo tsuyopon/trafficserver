@@ -1008,9 +1008,11 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       }
     }
 
+    // 書き込みが完了した場合には c_write=0となり、consumerに移る
     if (c_write == 0) {
       // Nothing to do, call back the cleanup handlers
       c->write_vio = nullptr;
+
       consumer_handler(VC_EVENT_WRITE_COMPLETE, c);
 
     } else {
@@ -1276,6 +1278,8 @@ HttpTunnel::producer_handler(int event, HttpTunnelProducer *p)
 
     // p->vc_handlerはHttpTunnel::add_producerへのハンドラの引数で指定された値が指定されている
     jump_point = p->vc_handler;
+
+    // 下記で指定したproducerのコールバックを呼び出します
     (sm->*jump_point)(event, p);
 
     sm_callback = true;
@@ -1417,6 +1421,7 @@ HttpTunnel::consumer_handler(int event, HttpTunnelConsumer *c)
 
   ink_assert(c->alive == true);
 
+  // 基本的には書き込み中はVC_EVENT_WRITE_READYで呼ばれ、書き込み完了するとVC_EVENT_WRITE_COMPLETEが呼ばれる
   switch (event) {
   case VC_EVENT_WRITE_READY:
     this->consumer_reenable(c);
@@ -1438,26 +1443,37 @@ HttpTunnel::consumer_handler(int event, HttpTunnelConsumer *c)
     c->bytes_written = c->write_vio ? c->write_vio->ndone : 0;
 
     // Interesting tunnel event, call SM
-    // c->vc_handlerはHttpTunnel::add_consumerへのハンドラの引数で指定された値が指定されている
+    // c->vc_handlerはHttpTunnel::add_consumerへのハンドラの引数で指定された値が指定されている。
     jump_point = c->vc_handler;
+
+    // 下記で指定したconsumerが呼び出されます
     (sm->*jump_point)(event, c);
+
     // Make sure the handler_state is set
     // Necessary for post tunnel end processing
     if (c->producer && c->producer->handler_state == 0) {
+
+      // 正常に書き込みが完了した場合
       if (event == VC_EVENT_WRITE_COMPLETE) {
+
         c->producer->handler_state = HTTP_SM_POST_SUCCESS;
         // If the consumer completed, presumably the producer successfully read
         c->producer->read_success = true;
+
         // Go ahead and clean up the producer side
         if (p->alive) {
           producer_handler(VC_EVENT_READ_COMPLETE, p);
         }
+
       } else if (c->vc_type == HT_HTTP_SERVER) {
+        // VC_EVENT_WRITE_COMPLETE以外のeventで来たので、失敗フラグをセット
         c->producer->handler_state = HTTP_SM_POST_UA_FAIL;
       } else if (c->vc_type == HT_HTTP_CLIENT) {
+        // VC_EVENT_WRITE_COMPLETE以外のeventで来たので、失敗フラグをセット
         c->producer->handler_state = HTTP_SM_POST_SERVER_FAIL;
       }
     }
+
     sm_callback = true;
 
     // Deallocate the reader after calling back the sm

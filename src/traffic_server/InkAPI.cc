@@ -5557,6 +5557,8 @@ TSHttpTxnInfoIntGet(TSHttpTxn txnp, TSHttpTxnInfoKey key, TSMgmtInt *value)
   return TS_SUCCESS;
 }
 
+// Websocketかどうかを判断するフラグを応答する
+// このフラグはSM_ACTION_API_READ_REQUEST_HDRからwebsocketと判断されると、HttpTransact::handle_websocket_upgrade_pre_remapにて設定されます
 int
 TSHttpTxnIsWebsocket(TSHttpTxn txnp)
 {

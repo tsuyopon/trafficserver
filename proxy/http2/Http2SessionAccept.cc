@@ -33,6 +33,7 @@ Http2SessionAccept::Http2SessionAccept(const HttpSessionAccept::Options &_o) : S
 
 Http2SessionAccept::~Http2SessionAccept() = default;
 
+// HTTP/2.0を開始する場合に呼ばれます。ProtocolProbeTrampoline::ioCOmpleteEventを経由して呼ばれます
 bool
 Http2SessionAccept::accept(NetVConnection *netvc, MIOBuffer *iobuf, IOBufferReader *reader)
 {
@@ -59,6 +60,8 @@ Http2SessionAccept::accept(NetVConnection *netvc, MIOBuffer *iobuf, IOBufferRead
 
   // Pin session to current ET_NET thread
   new_session->setThreadAffinity(this_ethread());
+
+  // Http2ClientSession::new_connectionを呼び出す
   new_session->new_connection(netvc, iobuf, reader);
 
   return true;

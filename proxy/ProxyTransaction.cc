@@ -36,6 +36,7 @@ ProxyTransaction::~ProxyTransaction()
   this->mutex.clear();
 }
 
+// rcv_headers_frameから呼び出されます
 void
 ProxyTransaction::new_transaction(bool from_early_data)
 {
@@ -45,8 +46,13 @@ ProxyTransaction::new_transaction(bool from_early_data)
   // connection re-use
 
   ink_release_assert(_proxy_ssn != nullptr);
+
+  // ここでHttpSMが生成されるのでHttpSM::HttpSMが呼ばれます
   _sm = THREAD_ALLOC(httpSMAllocator, this_thread());
+
+  // HttpSM::init
   _sm->init(from_early_data);
+
   HttpTxnDebug("[%" PRId64 "] Starting transaction %d using sm [%" PRId64 "]", _proxy_ssn->connection_id(),
                _proxy_ssn->get_transact_count(), _sm->sm_id);
 
@@ -61,6 +67,7 @@ ProxyTransaction::new_transaction(bool from_early_data)
 
   this->increment_transactions_stat();
   _sm->attach_client_session(this);
+
 }
 
 bool

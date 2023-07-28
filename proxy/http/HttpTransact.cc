@@ -1443,8 +1443,7 @@ HttpTransact::handle_upgrade_request(State *s)
 
   // 「Connection」ヘッダに指定された値の中に「upgrade」の文字列が含まれていなければ、falseを応答する
   if (!connection_contains_upgrade) {
-    TxnDebug("http_trans_upgrade",
-             "Transaction wasn't a valid upgrade request, proceeding as a normal HTTP request, missing Connection upgrade header.");
+    TxnDebug("http_trans_upgrade", "Transaction wasn't a valid upgrade request, proceeding as a normal HTTP request, missing Connection upgrade header.");
     return false;
   }
 
@@ -1467,18 +1466,23 @@ HttpTransact::handle_upgrade_request(State *s)
 
     // 「Upgrade: websocket」がヘッダに含まれていれば、websocketにより通信となる
     if (s->upgrade_token_wks == MIME_VALUE_WEBSOCKET) {
-      MIMEField *sec_websocket_key =
-        s->hdr_info.client_request.field_find(MIME_FIELD_SEC_WEBSOCKET_KEY, MIME_LEN_SEC_WEBSOCKET_KEY);
-      MIMEField *sec_websocket_ver =
-        s->hdr_info.client_request.field_find(MIME_FIELD_SEC_WEBSOCKET_VERSION, MIME_LEN_SEC_WEBSOCKET_VERSION);
 
+      // websocketリクエスト時にはブラウザから「Upgrade: websocket」、「Connection: upgrade」ヘッダだけではなく、「Sec-Websocket-Key」と「Sec-WebSocket-Version」が付与されてきます。
+      MIMEField *sec_websocket_key = s->hdr_info.client_request.field_find(MIME_FIELD_SEC_WEBSOCKET_KEY, MIME_LEN_SEC_WEBSOCKET_KEY);
+      MIMEField *sec_websocket_ver = s->hdr_info.client_request.field_find(MIME_FIELD_SEC_WEBSOCKET_VERSION, MIME_LEN_SEC_WEBSOCKET_VERSION);
+
+      // 「Sec-Websocket-Key」と「Sec-WebSocket-Version」が見つかり、「Sec-WebSocket-Version」の値が13であること
+      // cf. https://qiita.com/south37/items/6f92d4268fe676347160
+      //   現在のWebSocketの最新バージョンはRFC6455により13と規定されているので、13を指定しなければならないらしい。
       if (sec_websocket_key && sec_websocket_ver && sec_websocket_ver->value_get_int() == 13) {
         TxnDebug("http_trans_upgrade", "Transaction wants upgrade to websockets");
         handle_websocket_upgrade_pre_remap(s);
         return true;
       } else {
+        // 上記を満たさない場合にはwebsocketとしては扱われません
         TxnDebug("http_trans_upgrade", "Unable to upgrade connection to websockets, invalid headers (RFC 6455).");
       }
+
     } else if (s->upgrade_token_wks == MIME_VALUE_H2C) {
 
       // 「Upgrade: h2c」がヘッダに含まれていれば、エラーとする。h2cはHTTPによるHTTP/2へのアップグレードでありTrafficserverではこれをサポートしていない
@@ -1737,12 +1741,17 @@ HttpTransact::HandleRequest(State *s)
       // websocketの接続数として用意しているコネクション数を超過してしまった場合には、エラーレスポンスを応答する
       //  cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-websocket-max-number-of-connections
       if (val >= s->http_config_param->max_websocket_connections) {
+
         s->is_websocket = false; // unset to avoid screwing up stats.
         TxnDebug("http_trans", "Rejecting websocket connection because the limit has been exceeded");
         bootstrap_state_variables_from_request(s, &s->hdr_info.client_request);
+
+        // websocketの接続数超過によるためにエラーを送信する
         build_error_response(s, HTTP_STATUS_SERVICE_UNAVAILABLE, "WebSocket Connection Limit Exceeded", nullptr);
         TRANSACT_RETURN(SM_ACTION_SEND_ERROR_CACHE_NOOP, nullptr);
+
       }
+
     }
 
     // The following code is configurable to allow a user to control the max post size (TS-3631)
@@ -1758,32 +1767,54 @@ HttpTransact::HandleRequest(State *s)
     }
 
     // The following chunk of code allows you to disallow post w/ expect 100-continue (TS-3459)
+    //
+    // 下記の2つを満たす場合には下記のifのコードパスを通ります
+    //   1. Content-Lengthが指定されている場合
+    //   2. proxy.config.http.disallow_post_100_continueの設定値が1の場合 (デフォルト: 0)
+    //      cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-disallow-post-100-continue
     if (s->hdr_info.request_content_length && s->http_config_param->disallow_post_100_continue) {
+
+      // Expectヘッダを取得する
       MIMEField *expect = s->hdr_info.client_request.field_find(MIME_FIELD_EXPECT, MIME_LEN_EXPECT);
 
+      // Expectヘッダが存在する場合には下記ifのコードパスに入る
       if (expect != nullptr) {
+
         const char *expect_hdr_val = nullptr;
         int expect_hdr_val_len     = 0;
+
+        // Expectヘッダに指定された値を取得する
         expect_hdr_val             = expect->value_get(&expect_hdr_val_len);
+
+        // 100-continueと文字列数が一致したら、100-continueが送付されてきたとみなす
         if (ptr_len_casecmp(expect_hdr_val, expect_hdr_val_len, HTTP_VALUE_100_CONTINUE, HTTP_LEN_100_CONTINUE) == 0) {
+
+          // 「s->http_config_param->disallow_post_100_continue」が有効なので、この場合には「Expect: 100-continue」がクライアントから指定されてきた場合にはエラーとして応答することになります。
           // Let's error out this request.
           TxnDebug("http_trans", "Client sent a post expect: 100-continue, sending 405.");
           HTTP_INCREMENT_DYN_STAT(disallowed_post_100_continue);
+
           build_error_response(s, HTTP_STATUS_METHOD_NOT_ALLOWED, "Method Not Allowed", "request#method_unsupported");
+
+           // disallow_post_100_continue設定が有効で、Expect: 100-continueが送付されてきたケースなのでエラーとする。下記マクロはそのままreturnされることに注意
           TRANSACT_RETURN(SM_ACTION_SEND_ERROR_CACHE_NOOP, nullptr);
         }
       }
     }
 
-    // proxy.config.http.request_buffer_enabledが有効な場合、入力値のPOSTのバッファリングが完了するまで、outboundにリクエストが行わなません。
+    // proxy.config.http.request_buffer_enabledが有効な場合(デフォルト: 0で無効)、入力値のPOSTのバッファリングが完了するまで、outboundにリクエストが行わなません。
     //   cf. https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-request-buffer-enabled
     // かつ
-    // 「Content-Length」ヘッダが0以上で、chunkedであること
+    // 「Content-Length」ヘッダが0以上で、かつ、リクエストボディが存在する場合にSM_ACTION_WAIT_FOR_FULL_BODYの遷移に入る
     if (s->txn_conf->request_buffer_enabled &&
-        s->state_machine->ua_txn->has_request_body(s->hdr_info.request_content_length,
-                                                   s->client_info.transfer_encoding == CHUNKED_ENCODING)) {
+
+        s->state_machine->ua_txn->has_request_body(s->hdr_info.request_content_length, s->client_info.transfer_encoding == CHUNKED_ENCODING)) {
+
+      // proxy.config.http.request_buffer_enabled=1(デフォルト: 0)の場合にしか呼ばれない。下記マクロはそのままreturnされることに注意
       TRANSACT_RETURN(SM_ACTION_WAIT_FOR_FULL_BODY, nullptr);
+
     }
+
   }
 
   // Cache lookup or not will be decided later at DecideCacheLookup().
@@ -4415,6 +4446,8 @@ HttpTransact::handle_server_connection_not_open(State *s)
 // Possible Next States From Here:
 //
 ///////////////////////////////////////////////////////////////////////////////
+
+// 下記関数ではオリジンサーバから100-Continueの最初のレスポンスを受け取った時、その後の最終レスポンスを受け取った時には下記関数を2度通ることがわかっています
 void
 HttpTransact::handle_forward_server_connection_open(State *s)
 {
@@ -4432,8 +4465,8 @@ HttpTransact::handle_forward_server_connection_open(State *s)
 
   s->state_machine->do_hostdb_update_if_necessary();
 
-  if (s->hdr_info.server_response.status_get() == HTTP_STATUS_CONTINUE ||
-      s->hdr_info.server_response.status_get() == HTTP_STATUS_EARLY_HINTS) {
+  // サーバからのレスポンスが100(Continue)、または、103(EarlyHints)のいずれかであれば、if文内の処理を実行する
+  if (s->hdr_info.server_response.status_get() == HTTP_STATUS_CONTINUE || s->hdr_info.server_response.status_get() == HTTP_STATUS_EARLY_HINTS) {
     handle_100_continue_response(s);
     return;
   }
@@ -4502,6 +4535,7 @@ HttpTransact::handle_forward_server_connection_open(State *s)
   /* fall through */
   default:
     // Just tunnel?
+    // proxy(proxy.config.http.cache.http = 0)の場合やwebsocketの場合のようにキャッシュ操作がない場合にはここを通ります
     TxnDebug("http_trans", "[hfsco] cache action: %s", HttpDebugNames::get_cache_action_name(s->cache_info.action));
     handle_no_cache_operation_on_forward_server_response(s);
     break;
@@ -4516,27 +4550,38 @@ HttpTransact::handle_forward_server_connection_open(State *s)
 //     we should just swallow the response 100 or forward it
 //     the client.  http-1.1-spec-rev-06 section 8.2.3
 //
+// サーバからも100-Continue関連のレスポンスコードを受信した場合に実行されるハンドラです。
 void
 HttpTransact::handle_100_continue_response(State *s)
 {
   bool forward_100 = false;
 
+  // クライアントのリクエストしてきたHTTPバージョンを取得します
   HTTPVersion ver = s->hdr_info.client_request.version_get();
   if (ver == HTTP_1_1) {
+    // HTTP/1.1ならば100-continueを許可
     forward_100 = true;
   } else if (ver == HTTP_1_0) {
+    // HTTP/1.0ならば100-continueについては「Expect: 100-continue」がクライアントリクエストに付与されていれば100-continueを許可する
+    // TBD: おそらく「Expect: 100-continue」であれば、下記の100判定にまっちするはず?
     if (s->hdr_info.client_request.value_get_int(MIME_FIELD_EXPECT, MIME_LEN_EXPECT) == 100) {
       forward_100 = true;
     }
   }
 
+  // 上記の条件分岐でforward_100変数の値が決定します
+  // HTTP/2以降だとforward_100がfalseになります
   if (forward_100) {
     // We just want to copy the server's response.  All
     //   the other build response functions insist on
     //   adding stuff
     build_response_copy(s, &s->hdr_info.server_response, &s->hdr_info.client_response, s->client_info.http_version);
+
+    // オリジンサーバから100-continueのレスポンスを受信した場合には、このコードパスをはず
     TRANSACT_RETURN(SM_ACTION_INTERNAL_100_RESPONSE, HandleResponse);
+
   } else {
+    // TBD: 103(EarlyHints)の場合(HTTP/2仕様だと思われる)からもこの関数HttpTransact::handle_100_continue_responseが呼ばれる可能性があるみたいなのでその処理ではないのだろうか。
     TRANSACT_RETURN(SM_ACTION_SERVER_PARSE_NEXT_HDR, HandleResponse);
   }
 }
@@ -5211,8 +5256,7 @@ HttpTransact::handle_no_cache_operation_on_forward_server_response(State *s)
   }
 
   if (warn_text) {
-    HttpTransactHeaders::insert_warning_header(s->http_config_param, to_warn, HTTP_WARNING_CODE_MISC_WARNING, warn_text,
-                                               strlen(warn_text));
+    HttpTransactHeaders::insert_warning_header(s->http_config_param, to_warn, HTTP_WARNING_CODE_MISC_WARNING, warn_text, strlen(warn_text));
   }
 
   return;
@@ -5841,6 +5885,7 @@ HttpTransact::check_request_validity(State *s, HTTPHdr *incoming_hdr)
       } else {
         return SCHEME_NOT_SUPPORTED;
       }
+
     }
 
     if (!HttpTransactHeaders::is_this_method_supported(scheme, method)) {
@@ -6255,22 +6300,32 @@ HttpTransact::initialize_state_variables_from_request(State *s, HTTPHdr *obsolet
   // you'll need to force the next hop to be https.
   if (s->is_websocket) {
 
+    // websocketの場合に、次のリクエスト先がws://やwss://のいずれかにマッチすることをチェックする。マッチしなければエラーとして取り扱う
+
     if (s->next_hop_scheme == URL_WKSIDX_WS) {            // 次のリクエスト先が 「ws://」の場合
+
       TxnDebug("http_trans", "Switching WS next hop scheme to http.");
       s->next_hop_scheme = URL_WKSIDX_HTTP;
       s->scheme          = URL_WKSIDX_HTTP;
       // s->request_data.hdr->url_get()->scheme_set(URL_SCHEME_HTTP, URL_LEN_HTTP);
+
     } else if (s->next_hop_scheme == URL_WKSIDX_WSS) {    // 次のリクエスト先が「wss://」の場合
+
       TxnDebug("http_trans", "Switching WSS next hop scheme to https.");
       s->next_hop_scheme = URL_WKSIDX_HTTPS;
       s->scheme          = URL_WKSIDX_HTTPS;
       // s->request_data.hdr->url_get()->scheme_set(URL_SCHEME_HTTPS, URL_LEN_HTTPS);
+
     } else {
+
       Error("Scheme doesn't match websocket...!");
+
     }
 
+    // websocketの場合には一般的なProxy(GENERIC_PROXY)として扱う必要があり、キャッシュも不要(CACHE_DO_NO_ACTION)である
     s->current.mode      = GENERIC_PROXY;
     s->cache_info.action = CACHE_DO_NO_ACTION;
+
   }
 
   s->method = incoming_request->method_get_wksidx();
@@ -7533,6 +7588,7 @@ HttpTransact::handle_request_keep_alive_headers(State *s, HTTPVersion ver, HTTPH
   heads->field_delete(MIME_FIELD_PROXY_CONNECTION, MIME_LEN_PROXY_CONNECTION);
   heads->field_delete(MIME_FIELD_CONNECTION, MIME_LEN_CONNECTION);
 
+  // クライアントからの要求で「Upgrade」リクエストではない場合(これはwebsocketのようなケースを意味する)
   if (!s->is_upgrade_request) {
     // Insert K-A headers as necessary
     switch (ka_action) {
@@ -7571,8 +7627,11 @@ HttpTransact::handle_request_keep_alive_headers(State *s, HTTPVersion ver, HTTPH
     }
   } else { /* websocket connection */
 
+    // websocketの場合にはkeep-aliveは意味がないので設定しない
     s->current.server->keep_alive = HTTP_NO_KEEPALIVE;
     s->client_info.keep_alive     = HTTP_NO_KEEPALIVE;
+
+    // 「Connection: upgrade」をセットする
     heads->value_set(MIME_FIELD_CONNECTION, MIME_LEN_CONNECTION, MIME_FIELD_UPGRADE, MIME_LEN_UPGRADE);
 
     // websocketであれば、
@@ -7619,12 +7678,25 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
   heads->field_delete(MIME_FIELD_PROXY_CONNECTION, MIME_LEN_PROXY_CONNECTION);
 
   // Handle the upgrade cases
+  // 
+  // 以下の3条件を満たしていること (つまり、websocketであることを表すこと)
+  //   1. 「Upgrade」ヘッダが存在すること
+  //   2. 戻りステータスが「101 Switching Protocol」となっていること
+  //   3. ソース元がオリジンサーバから取得したものであること
   if (s->is_upgrade_request && heads->status_get() == HTTP_STATUS_SWITCHING_PROTOCOL && s->source == SOURCE_HTTP_ORIGIN_SERVER) {
 
+    // keep-aliveにはしない
     s->client_info.keep_alive = HTTP_NO_KEEPALIVE;
+
+    // websocketの場合 (TBD: websocketではなくここに入るケースには何があるんだろうか?)
     if (s->is_websocket) {
+
+      // websocketの場合の成功ログを出力する
       TxnDebug("http_trans", "transaction successfully upgraded to websockets.");
+
       // s->transparent_passthrough = true;
+
+      // 「Connection: upgrade」と「Upgrade: websocket」ヘッダをセットする
       heads->value_set(MIME_FIELD_CONNECTION, MIME_LEN_CONNECTION, MIME_FIELD_UPGRADE, MIME_LEN_UPGRADE);
       heads->value_set(MIME_FIELD_UPGRADE, MIME_LEN_UPGRADE, "websocket", 9);
     }
@@ -7633,6 +7705,7 @@ HttpTransact::handle_response_keep_alive_headers(State *s, HTTPVersion ver, HTTP
     // the response is sent to the client.
     s->did_upgrade_succeed = true;
     return;
+
   }
 
   int c_hdr_field_len;
@@ -8664,7 +8737,7 @@ HttpTransact::build_request(State *s, HTTPHdr *base_request, HTTPHdr *outgoing_r
   }
 
   // proxy.config.http.send_100_continue_response(デフォルト:0)
-  // 0だと、TrafficserverはPostを受け取るまで待って、受け取りが完了したらオリジンサーバにリクエストを出す
+  // 0だと、TrafficserverはPOSTを受け取るまで待って、受け取りが完了したらオリジンサーバにリクエストを出す
   //  cf. https://docs.trafficserver.apache.org/ja/9.2.x/admin-guide/files/records.config.en.html#proxy-config-http-send-100-continue-response
   if (s->http_config_param->send_100_continue_response) {
     HttpTransactHeaders::remove_100_continue_headers(s, outgoing_request);

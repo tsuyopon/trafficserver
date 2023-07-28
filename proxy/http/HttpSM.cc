@@ -413,6 +413,7 @@ HttpSM::init(bool from_early_data)
   debug_sm_list.push(this);
   ink_mutex_release(&debug_sm_list_mutex);
 #endif
+
 }
 
 void
@@ -766,16 +767,24 @@ HttpSM::state_read_client_request_header(int event, void *data)
     // If we had a parse error and we're done reading data
     // blind tunnel
     if ((event == VC_EVENT_READ_READY || event == VC_EVENT_EOS) && state == PARSE_RESULT_ERROR) {
+
+      // parse errorになったが、読み込みが完了した場合にはblind tunnelを開く
+      // TBD: これはどのようなケースの場合に通るコードパスなのか?
       do_blind_tunnel = true;
 
       // If we had a GET request that has data after the
       // get request, do blind tunnel
     } else if (state == PARSE_RESULT_DONE && t_state.hdr_info.client_request.method_get_wksidx() == HTTP_WKSIDX_GET &&
                ua_txn->get_remote_reader()->read_avail() > 0 && !t_state.hdr_info.client_request.is_keep_alive_set()) {
+
+      // GETリクエストを受け取ったが、その後も何かしらのbodyが存在する場合
       do_blind_tunnel = true;
+
     }
 
+    // 直前の分岐でdo_blind_tunnelのフラグがセットされる
     if (do_blind_tunnel) {
+
       SMDebug("http", "first request on connection failed parsing, switching to passthrough.");
 
       t_state.transparent_passthrough = true;
@@ -797,6 +806,7 @@ HttpSM::state_read_client_request_header(int event, void *data)
       }
       return 0;
     }
+
   }
 
   // Check to see if we are done parsing the header
@@ -895,11 +905,9 @@ HttpSM::state_read_client_request_header(int event, void *data)
 
     ua_txn->set_session_active();
 
-    // クライアントからのリクエストが
-    // HTTP/1.1 かつ POSTかPUTの場合
+    // クライアントからのリクエストがHTTP/1.1 かつ POSTかPUTの場合
     if (t_state.hdr_info.client_request.version_get() == HTTP_1_1 &&
-        (t_state.hdr_info.client_request.method_get_wksidx() == HTTP_WKSIDX_POST ||
-         t_state.hdr_info.client_request.method_get_wksidx() == HTTP_WKSIDX_PUT)) {
+        (t_state.hdr_info.client_request.method_get_wksidx() == HTTP_WKSIDX_POST || t_state.hdr_info.client_request.method_get_wksidx() == HTTP_WKSIDX_PUT)) {
 
       int len            = 0;
 
@@ -926,12 +934,13 @@ HttpSM::state_read_client_request_header(int event, void *data)
           IOBufferReader *buf_start = ua_entry->write_buffer->alloc_reader();
           SMDebug("http_seq", "send 100 Continue response to client");
 
-          // 「HTTP/1.1 100 Continue」という固定文字列を応答する
+          // クライアントに対して「HTTP/1.1 100 Continue」という固定文字列を応答する (これをクライアントが受け取ると、100レスポンスを受け取ったとして続けても良いとサーバからの許可が出たということでbodyメッセージを送付してくる)
           int64_t nbytes      = ua_entry->write_buffer->write(str_100_continue_response, len_100_continue_response);
           ua_entry->write_vio = ua_txn->do_io_write(this, nbytes, buf_start);
 
         } else {
           // デフォルトの設定値は t_state.http_config_param->send_100_continue_respons = 0なので、この分岐に入ります
+          // この場合にはATSでは「HTTP/1.1 100 Continue」を応答せずに、オリジン側に「Expect: 100-continue」が引き渡されて、オリジンから「HTTP/1.1 100 Continue」が返される想定です。
           t_state.hdr_info.client_request.m_100_continue_required = true;
         }
       }
@@ -966,9 +975,11 @@ HttpSM::state_read_client_request_header(int event, void *data)
   return 0;
 }
 
+// proxy.config.http.request_buffer_enabled=1(デフォルト: 0)の場合にしか呼ばれない
 void
 HttpSM::wait_for_full_body()
 {
+
   is_waiting_for_full_body = true;
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler_post);
   bool chunked = (t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING);
@@ -1007,8 +1018,10 @@ HttpSM::wait_for_full_body()
   ua_entry->in_tunnel = true;
   ua_txn->set_inactivity_timeout(HRTIME_SECONDS(t_state.txn_conf->transaction_no_activity_timeout_in));
   tunnel.tunnel_run(p);
+
 }
 
+// リクエストのabort処理を行います
 int
 HttpSM::state_watch_for_client_abort(int event, void *data)
 {
@@ -1801,6 +1814,7 @@ HttpSM::handle_api_return()
           initial_data = server_txn->get_remote_reader();
         }
 
+        // クライアント側のactive timeoutとinactive timeoutを設定しておく
         if (ua_txn) {
           // クライアント側のactive timeoutとinactive timeoutを出力する
           SMDebug("http_websocket",
@@ -1810,8 +1824,9 @@ HttpSM::handle_api_return()
           ua_txn->set_inactivity_timeout(HRTIME_SECONDS(t_state.txn_conf->websocket_inactive_timeout));
         }
 
-          // サーバ側のactive timeoutとinactive timeoutを出力する
+        // サーバ側のactive timeoutとinactive timeoutを設定しておく
         if (server_txn) {
+          // サーバ側のactive timeoutとinactive timeoutを出力する
           SMDebug("http_websocket",
                   "(server session) Setting websocket active timeout=%" PRId64 "s and inactive timeout=%" PRId64 "s",
                   t_state.txn_conf->websocket_active_timeout, t_state.txn_conf->websocket_inactive_timeout);
@@ -2245,13 +2260,14 @@ HttpSM::state_send_server_request_header(int event, void *data)
     free_MIOBuffer(server_entry->write_buffer);
     server_entry->write_buffer = nullptr;
     method                     = t_state.hdr_info.server_request.method_get_wksidx();
+
     if (!t_state.api_server_request_body_set && method != HTTP_WKSIDX_TRACE &&
         ua_txn->has_request_body(t_state.hdr_info.request_content_length, t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING)) {
       if (post_transform_info.vc) {
         setup_transform_to_server_transfer();
       } else {
         // Go ahead and set up the post tunnel if we are not waiting for a 100 response
-        // proxy.config.http.send_100_continue_responseの設定値が0ならばバッファを蓄積完了した後にオリジンサーバにリクエストを送る。設定値が1ならばPOSTボディを待たずに即座に100-Continueを応答する。
+        // 下記の条件はproxy.config.http.send_100_continue_responseの設定値が0ならば、POST用途のトンネルの設定をおこないます
         // cf. https://docs.trafficserver.apache.org/admin-guide/files/records.config.en.html#proxy-config-http-send-100-continue-response
         if (!t_state.hdr_info.client_request.m_100_continue_required) {
           do_setup_post_tunnel(HTTP_SERVER_VC);
@@ -3726,6 +3742,8 @@ HttpSM::tunnel_handler_cache_write(int event, HttpTunnelConsumer *c)
 
 }
 
+// POSTからのproducerとして呼ばれる
+// クライアント(useragent)からPOSTメッセージが送付されてきた場合には、このハンドラによりproduceされる
 int
 HttpSM::tunnel_handler_post_ua(int event, HttpTunnelProducer *p)
 {
@@ -3792,8 +3810,11 @@ HttpSM::tunnel_handler_post_ua(int event, HttpTunnelProducer *p)
     // Now that we have communicated the post body, turn off the inactivity timeout
     // until the server starts sending data back
     if (ua_txn) {
+
+      // POSTデータをここでは受け取ったので、タイムアウトを再設定する
       ua_txn->cancel_inactivity_timeout();
 
+      // 上記のinactivity timeout時に実行されるハンドラを指定する
       // Initiate another read to catch aborts
       ua_entry->vc_handler = &HttpSM::state_watch_for_client_abort;
       ua_entry->read_vio   = p->vc->do_io_read(this, INT64_MAX, ua_txn->get_remote_reader()->mbuf);
@@ -3832,9 +3853,11 @@ HttpSM::tunnel_handler_for_partial_post(int event, void * /* data ATS_UNUSED */)
   return 0;
 }
 
+// POST時にクライアント(useragent)からproducer経由で受け取ったPOSTデータを処理するconsumerハンドラとして実行されます
 int
 HttpSM::tunnel_handler_post_server(int event, HttpTunnelConsumer *c)
 {
+
   STATE_ENTER(&HttpSM::tunnel_handler_post_server, event);
 
   server_request_body_bytes = c->bytes_written;
@@ -3933,6 +3956,7 @@ HttpSM::tunnel_handler_post_server(int event, HttpTunnelConsumer *c)
     ink_assert(tunnel.is_tunnel_alive() == false);
     break;
 
+  // consume処理が成功するとここにきます(通常これ)
   case VC_EVENT_WRITE_COMPLETE:
     // Completed successfully
     c->write_success        = true;
@@ -5565,7 +5589,9 @@ HttpSM::do_http_server_open(bool raw)
     }
   }
 
+  // websocketではない場合にはメソッドスキームを取得する
   if (!t_state.is_websocket) { // if not websocket, then get scheme from server request
+
     int new_scheme_to_use = t_state.hdr_info.server_request.url_get()->scheme_get_wksidx();
     // if the server_request url scheme was never set, try the client_request
     if (new_scheme_to_use < 0) {
@@ -6208,6 +6234,7 @@ HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
     int64_t post_bytes = postdata_producer_reader->read_avail();
     transfered_bytes   = post_bytes;
     p = tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, post_bytes, postdata_producer_reader, (HttpProducerHandler) nullptr, HT_STATIC, "redirect static agent post");
+
   } else {
     int64_t alloc_index;
     // content length is undefined, use default buffer size
@@ -6234,12 +6261,15 @@ HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
 
     // Next order of business if copy the remaining data from the
     //  header buffer into new buffer
-    client_request_body_bytes =
-      post_buffer->write(ua_txn->get_remote_reader(), chunked ? ua_txn->get_remote_reader()->read_avail() : post_bytes);
+    client_request_body_bytes = post_buffer->write(ua_txn->get_remote_reader(), chunked ? ua_txn->get_remote_reader()->read_avail() : post_bytes);
 
     ua_txn->get_remote_reader()->consume(client_request_body_bytes);
+
+    // POSTリクエストだと下記のproducerがセットされる
+    // クライアント(user agent)からtrafficserverへのPOSTメッセージが渡される際に下記のHttpSM::tunnel_handler_post_uaが呼ばれる
     p = tunnel.add_producer(ua_entry->vc, post_bytes - transfered_bytes, buf_start, &HttpSM::tunnel_handler_post_ua, HT_HTTP_CLIENT, "user agent post");
   }
+
   ua_entry->in_tunnel = true;
 
   switch (to_vc_type) {
@@ -6586,6 +6616,7 @@ HttpSM::setup_server_send_request()
 
   // We need a reader so bytes don't fall off the end of
   //  the buffer
+  // 下記にてオリジンサーバへの書き込み処理が行われる
   IOBufferReader *buf_start = server_entry->write_buffer->alloc_reader();
   server_request_hdr_bytes = hdr_length = write_header_into_buffer(&t_state.hdr_info.server_request, server_entry->write_buffer);
 
@@ -6609,6 +6640,7 @@ HttpSM::setup_server_send_request()
 void
 HttpSM::setup_server_read_response_header()
 {
+
   ink_assert(server_txn != nullptr);
   ink_assert(server_entry != nullptr);
   // REQ_FLAVOR_SCHEDULED_UPDATE can be transformed in REQ_FLAVOR_REVPROXY
@@ -6649,6 +6681,7 @@ HttpSM::setup_server_read_response_header()
   if (server_txn->get_remote_reader()->read_avail() > 0) {
     state_read_server_response_header((server_entry->eos) ? VC_EVENT_EOS : VC_EVENT_READ_READY, server_entry->read_vio);
   }
+
 }
 
 HttpTunnelProducer *
@@ -6780,16 +6813,27 @@ HttpSM::setup_100_continue_transfer()
   tunnel.reset();
 
   // Setup the tunnel to the client
+
+  // 下記producerの処理では何もvcが指定されていないが、これはどのようなことを意味するのか?
+  // => おそらく、100-continueの動作としてはproducerとconsumerペアが2度セットされる。まずは、ここのproducer、consumerペアはクライアントからのPOSTデータの全受信を待つためのトンネルである。
+  //    その後、POSTメッセージの受信が全て完了してから、オリジンへのリクエスト(producer)とクライアントへのレスポンス(consumer)を立てるものとおもわます。
+
+  // producerの設定
   HttpTunnelProducer *p = tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, client_response_hdr_bytes, buf_start, (HttpProducerHandler) nullptr, HT_STATIC, "internal msg - 100 continue");
+
+  // consumerの設定
   tunnel.add_consumer(ua_entry->vc, HTTP_TUNNEL_STATIC_PRODUCER, &HttpSM::tunnel_handler_100_continue_ua, HT_HTTP_CLIENT, "user agent");
 
   // Make sure the half_close is not set.
   ua_txn->set_half_close_flag(false);
   ua_entry->in_tunnel = true;
+
+  // トンネルを実行する
   tunnel.tunnel_run(p);
 
   // Set up the header response read again.  Already processed the 100 response
   setup_server_read_response_header();
+
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -8008,6 +8052,7 @@ HttpSM::set_next_state()
     break;
   }
 
+  // 下記のケースはオリジンサーバからExpect:100-continueに対応する「100 continue」レスポンスを受信した場合に通るケースになります
   case HttpTransact::SM_ACTION_INTERNAL_100_RESPONSE: {
     setup_100_continue_transfer();
     break;
@@ -8262,6 +8307,7 @@ HttpSM::set_next_state()
     break;
   }
 
+  // proxy.config.http.request_buffer_enabled=1(デフォルト: 0)の場合にしか呼ばれない
   case HttpTransact::SM_ACTION_WAIT_FOR_FULL_BODY: {
     wait_for_full_body();
     break;

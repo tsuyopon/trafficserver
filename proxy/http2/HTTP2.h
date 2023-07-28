@@ -127,6 +127,7 @@ enum class Http2ErrorClass {
 };
 
 // [RFC 7540] 7. Error Codes
+// https://datatracker.ietf.org/doc/html/rfc9113#section-7
 enum class Http2ErrorCode {
   HTTP2_ERROR_NO_ERROR            = 0,
   HTTP2_ERROR_PROTOCOL_ERROR      = 1,

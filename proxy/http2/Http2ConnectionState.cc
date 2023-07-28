@@ -247,6 +247,8 @@ rcv_headers_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
   } else {
     // Create new stream
     Http2Error error(Http2ErrorClass::HTTP2_ERROR_CLASS_NONE);
+
+    // Http2ConnectionState::create_streamが呼ばれます
     stream     = cstate.create_stream(stream_id, error);
     new_stream = true;
     if (!stream) {
@@ -263,11 +265,13 @@ rcv_headers_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
   uint32_t header_block_fragment_offset = 0;
   uint32_t header_block_fragment_length = payload_length;
 
+  // END_STREAMフラグがセットされている場合
   if (frame.header().flags & HTTP2_FLAGS_HEADERS_END_STREAM) {
     stream->recv_end_stream = true;
   }
 
   // NOTE: Strip padding if exists
+  // PADDEDフラグがセットされている場合
   if (frame.header().flags & HTTP2_FLAGS_HEADERS_PADDED) {
     uint8_t buf[HTTP2_HEADERS_PADLEN_LEN] = {0};
     frame.reader()->memcpy(buf, HTTP2_HEADERS_PADLEN_LEN);
@@ -286,6 +290,7 @@ rcv_headers_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
   }
 
   // NOTE: Parse priority parameters if exists
+  // PRIORITYフラグがセットされている場合
   if (frame.header().flags & HTTP2_FLAGS_HEADERS_PRIORITY) {
     uint8_t buf[HTTP2_PRIORITY_LEN] = {0};
 
@@ -334,7 +339,9 @@ rcv_headers_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
   stream->header_blocks = static_cast<uint8_t *>(ats_malloc(header_block_fragment_length));
   frame.reader()->memcpy(stream->header_blocks, header_block_fragment_length, header_block_fragment_offset);
 
+  // END_HEADERSのフラグがセットされている場合の処理
   if (frame.header().flags & HTTP2_FLAGS_HEADERS_END_HEADERS) {
+
     // NOTE: If there are END_HEADERS flag, decode stored Header Blocks.
     if (!stream->change_state(HTTP2_FRAME_TYPE_HEADERS, frame.header().flags) && stream->has_trailing_header() == false) {
       return Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_CONNECTION, Http2ErrorCode::HTTP2_ERROR_PROTOCOL_ERROR, "recv headers end headers and not trailing header");
@@ -353,8 +360,7 @@ rcv_headers_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
     }
 
     stream->mark_milestone(Http2StreamMilestone::START_DECODE_HEADERS);
-    Http2ErrorCode result =
-      stream->decode_header_blocks(*cstate.local_hpack_handle, cstate.server_settings.get(HTTP2_SETTINGS_HEADER_TABLE_SIZE));
+    Http2ErrorCode result = stream->decode_header_blocks(*cstate.local_hpack_handle, cstate.server_settings.get(HTTP2_SETTINGS_HEADER_TABLE_SIZE));
 
     if (result != Http2ErrorCode::HTTP2_ERROR_NO_ERROR) {
       if (result == Http2ErrorCode::HTTP2_ERROR_COMPRESSION_ERROR) {
@@ -375,9 +381,13 @@ rcv_headers_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
     if (!empty_request) {
       SCOPED_MUTEX_LOCK(stream_lock, stream->mutex, this_ethread());
       stream->mark_milestone(Http2StreamMilestone::START_TXN);
+
+      // Http2Stream::new_transactionを呼ぼうとするが、定義が存在しないために、Http2StreamはProxyTransactionを継承しているので、ProxyTransaction::new_transactionをここで呼び出すことになる
       stream->new_transaction(frame.is_from_early_data());
+
       // Send request header to SM
       stream->send_request(cstate);
+
     } else {
       // Signal VC_EVENT_READ_COMPLETE because received trailing header fields with END_STREAM flag
       stream->signal_read_event(VC_EVENT_READ_COMPLETE);
@@ -638,6 +648,8 @@ rcv_settings_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
   // [RFC 7540] 6.5. Once all values have been applied, the recipient MUST
   // immediately emit a SETTINGS frame with the ACK flag set.
   Http2SettingsFrame ack_frame(0, HTTP2_FLAGS_SETTINGS_ACK);
+
+  // Http2CommonSession::xmitが呼ばれる
   cstate.session->xmit(ack_frame);
 
   return Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_NONE);
@@ -736,6 +748,7 @@ rcv_goaway_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
 static Http2Error
 rcv_window_update_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
 {
+
   char buf[HTTP2_WINDOW_UPDATE_LEN];
   uint32_t size;
   const Http2StreamId stream_id = frame.header().streamid;
@@ -761,6 +774,8 @@ rcv_window_update_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
   }
 
   // ストリームID=0(ConnectionレベルのWindow設定)か、ストリームレベル(ID != 0)のWindow設定か
+  // 
+  // WINDOW_UPDATEはフレームのストリーム ID が 0 の場合はコネクション全体が対象。そうでない場合は、指定されたストリームIDが対象の増加量となる
   if (stream_id == 0) {
 
     // 全体レベルのwindow_updateフレームによる設定更新処理です
@@ -783,7 +798,9 @@ rcv_window_update_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
       return Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_CONNECTION, Http2ErrorCode::HTTP2_ERROR_FLOW_CONTROL_ERROR, "window update too big");
     }
 
+    // コネクション全体の増加量を指定する
     auto error = cstate.increment_client_rwnd(size);
+
     if (error != Http2ErrorCode::HTTP2_ERROR_NO_ERROR) {
       return Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_CONNECTION, error, "Erroneous client window update");
     }
@@ -819,7 +836,9 @@ rcv_window_update_frame(Http2ConnectionState &cstate, const Http2Frame &frame)
       return Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_STREAM, Http2ErrorCode::HTTP2_ERROR_FLOW_CONTROL_ERROR, "window update too big 2");
     }
 
+    // ストリームに対する単体の増加量を設定する
     auto error = stream->increment_client_rwnd(size);
+
     if (error != Http2ErrorCode::HTTP2_ERROR_NO_ERROR) {
       return Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_STREAM, error);
     }
@@ -1049,12 +1068,18 @@ Http2ConnectionState::init(Http2CommonSession *ssn)
 void
 Http2ConnectionState::send_connection_preface()
 {
+
   REMEMBER(NO_EVENT, this->recursion)
 
   Http2ConnectionSettings configured_settings;
+
+  // SETTINGSフレーム用の設定を行う
   configured_settings.settings_from_configs();
+
+  // 同時接続数のセットを行います
   configured_settings.set(HTTP2_SETTINGS_MAX_CONCURRENT_STREAMS, _adjust_concurrent_stream());
 
+  // SETTINGSフレームを送信する
   send_settings_frame(configured_settings);
 
   if (server_settings.get(HTTP2_SETTINGS_INITIAL_WINDOW_SIZE) > HTTP2_INITIAL_WINDOW_SIZE) {
@@ -1167,6 +1192,8 @@ Http2ConnectionState::rcv_frame(const Http2Frame *frame)
   }
 }
 
+// TBD: 常に呼ばれているというわけではなく、リクエストの終了時に1度呼ばれることが多そう?
+// リクエスト終了時に呼ばれることが多そう
 int
 Http2ConnectionState::main_event_handler(int event, void *edata)
 {
@@ -1270,6 +1297,7 @@ Http2ConnectionState::state_closed(int event, void *edata)
 Http2Stream *
 Http2ConnectionState::create_stream(Http2StreamId new_id, Http2Error &error)
 {
+
   // first check if we've hit the active connection limit
   if (!session->get_netvc()->add_to_active_queue()) {
     error = Http2Error(Http2ErrorClass::HTTP2_ERROR_CLASS_CONNECTION, Http2ErrorCode::HTTP2_ERROR_NO_ERROR, "refused to create new stream, maxed out active connections");
@@ -1319,13 +1347,16 @@ Http2ConnectionState::create_stream(Http2StreamId new_id, Http2Error &error)
     }
   }
 
+  // Http2Stream::Http2Stream
   Http2Stream *new_stream = THREAD_ALLOC_INIT(http2StreamAllocator, this_ethread(), session->get_proxy_session(), new_id,
                                               client_settings.get(HTTP2_SETTINGS_INITIAL_WINDOW_SIZE));
 
   ink_assert(nullptr != new_stream);
   ink_assert(!stream_list.in(new_stream));
 
+  // 作成したHttp2Streamのインスタンスをstream_listにエンキューする
   stream_list.enqueue(new_stream);
+
   if (client_streamid) {
     latest_streamid_in = new_id;
     ink_assert(client_streams_in_count < UINT32_MAX);
@@ -1365,8 +1396,12 @@ void
 Http2ConnectionState::restart_streams()
 {
 
+  // stream_listはHttp2ConnectionState::create_streamからenqueueされる
   Http2Stream *s = stream_list.head;
+
+  // MEMO: Http2ConnectionState::restart_streamsに到達の初回次は、rcv_window_update_frameから呼ばれるが、まだHttp2ConnectionState::create_streamからenqueueされておらずstream_listが存在しないので、ここには入らないと思われる。
   if (s) {
+
     Http2Stream *end = s;
 
     // This is a static variable, so it is shared in Http2ConnectionState instances and will get incremented in subsequent calls.
@@ -1382,18 +1417,26 @@ Http2ConnectionState::restart_streams()
 
     // Call send_response_body() for each streams
     while (s != end) {
+
       Http2Stream *next = static_cast<Http2Stream *>(s->link.next ? s->link.next : stream_list.head);
-      if (!s->is_closed() && s->get_state() == Http2StreamState::HTTP2_STREAM_STATE_HALF_CLOSED_REMOTE &&
-          std::min(this->client_rwnd(), s->client_rwnd()) > 0) {
+      if (!s->is_closed() && s->get_state() == Http2StreamState::HTTP2_STREAM_STATE_HALF_CLOSED_REMOTE && std::min(this->client_rwnd(), s->client_rwnd()) > 0) {
+
         SCOPED_MUTEX_LOCK(lock, s->mutex, this_ethread());
+
+        // 下記からDATAフレームが創出される
         s->restart_sending();
       }
+
       ink_assert(s != next);
       s = next;
+
     }
-    if (!s->is_closed() && s->get_state() == Http2StreamState::HTTP2_STREAM_STATE_HALF_CLOSED_REMOTE &&
-        std::min(this->client_rwnd(), s->client_rwnd()) > 0) {
+
+    if (!s->is_closed() && s->get_state() == Http2StreamState::HTTP2_STREAM_STATE_HALF_CLOSED_REMOTE && std::min(this->client_rwnd(), s->client_rwnd()) > 0) {
+
       SCOPED_MUTEX_LOCK(lock, s->mutex, this_ethread());
+
+      // 下記からDATAフレームが創出される
       s->restart_sending();
     }
 
@@ -1963,6 +2006,8 @@ Http2ConnectionState::send_settings_frame(const Http2ConnectionSettings &new_set
   }
 
   Http2SettingsFrame settings(stream_id, HTTP2_FRAME_NO_FLAG, params, params_size);
+
+  // SETTINGSフレームメッセージを送信する
   this->session->xmit(settings);
 }
 
@@ -1972,6 +2017,8 @@ Http2ConnectionState::send_ping_frame(Http2StreamId id, uint8_t flag, const uint
   Http2StreamDebug(session, id, "Send PING frame");
 
   Http2PingFrame ping(id, flag, opaque_data);
+
+  // PINGフレームメッセージを送信する
   this->session->xmit(ping);
 }
 
@@ -1995,6 +2042,8 @@ Http2ConnectionState::send_goaway_frame(Http2StreamId id, Http2ErrorCode ec)
   goaway.error_code    = ec;
 
   Http2GoawayFrame frame(goaway);
+
+  // GOAWAYフレームメッセージを送信する
   this->session->xmit(frame);
 }
 
@@ -2005,6 +2054,8 @@ Http2ConnectionState::send_window_update_frame(Http2StreamId id, uint32_t size)
 
   // Create WINDOW_UPDATE frame
   Http2WindowUpdateFrame window_update(id, size);
+
+  // WINDOW_UPDATEフレームメッセージを送信する
   this->session->xmit(window_update);
 }
 

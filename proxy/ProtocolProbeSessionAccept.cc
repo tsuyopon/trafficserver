@@ -132,6 +132,7 @@ struct ProtocolProbeTrampoline : public Continuation, public ProtocolProbeSessio
       }
     } // end of Proxy Protocol processing
 
+    // 「PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n」のprefaceが送付されてきているかどうかをチェックします
     if (proto_is_http2(reader)) {
       key = PROTO_HTTP2;
     } else {

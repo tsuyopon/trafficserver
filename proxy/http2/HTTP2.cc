@@ -102,6 +102,7 @@ template <typename T> union byte_addressable_value {
   T value;
 };
 
+// 指定されたポインタに対してメモリとその長さをセットするだけ
 static void
 write_and_advance(byte_pointer &dst, const uint8_t *src, size_t length)
 {
@@ -153,9 +154,11 @@ memcpy_and_advance(uint8_t(&dst), byte_pointer &src)
   ++src.u8;
 }
 
+// DATAフレームでstreamidが0のパターンは仕様上禁止されているのでそのチェックを行います
 bool
 http2_frame_header_is_valid(const Http2FrameHeader &hdr, unsigned max_frame_size)
 {
+
   // 6.1 If a DATA frame is received whose stream identifier field is 0x0, the recipient MUST
   // respond with a connection error (Section 5.4.1) of type PROTOCOL_ERROR.
   if (hdr.type == HTTP2_FRAME_TYPE_DATA && hdr.streamid == 0) {
@@ -236,9 +239,11 @@ http2_parse_frame_header(IOVec iov, Http2FrameHeader &hdr)
   return true;
 }
 
+// ptrポインタに対してFRAMEヘッダ情報に書き込む際の情報をメモリにセットする
 bool
 http2_write_frame_header(const Http2FrameHeader &hdr, IOVec iov)
 {
+
   byte_pointer ptr(iov.iov_base);
 
   if (unlikely(iov.iov_len < HTTP2_FRAME_HEADER_LEN)) {
@@ -273,14 +278,18 @@ http2_write_rst_stream(uint32_t error_code, IOVec iov)
 bool
 http2_write_settings(const Http2SettingsParameter &param, const IOVec &iov)
 {
+
   byte_pointer ptr(iov.iov_base);
 
+  // SETTINGSフレームのフォーマットを構成する上で必要な6byteがあることを確認する(後述)
   if (unlikely(iov.iov_len < HTTP2_SETTINGS_PARAMETER_LEN)) {
     return false;
   }
 
-  write_and_advance(ptr, param.id);
-  write_and_advance(ptr, param.value);
+  // SETTINGSフレームのフォーマットは Identifier(16bit) + Value(32bit)の合計48bit(6byte)
+  //  cf. https://qiita.com/nozmiz/items/42e5cb75da4bb3b11f05#settings-%E3%83%95%E3%83%AC%E3%83%BC%E3%83%A0-type--0x4
+  write_and_advance(ptr, param.id);    // 2byte
+  write_and_advance(ptr, param.value); // 4byte
 
   return true;
 }
@@ -533,31 +542,42 @@ http2_convert_header_from_2_to_1_1(HTTPHdr *headers)
 void
 http2_init_pseudo_headers(HTTPHdr &hdr)
 {
+
   switch (http_hdr_type_get(hdr.m_http)) {
+
   case HTTP_TYPE_REQUEST: {
+
+    // :method
     MIMEField *method = hdr.field_create(HTTP2_VALUE_METHOD, HTTP2_LEN_METHOD);
     hdr.field_attach(method);
 
+    // :scheme
     MIMEField *scheme = hdr.field_create(HTTP2_VALUE_SCHEME, HTTP2_LEN_SCHEME);
     hdr.field_attach(scheme);
 
+    // :authority
     MIMEField *authority = hdr.field_create(HTTP2_VALUE_AUTHORITY, HTTP2_LEN_AUTHORITY);
     hdr.field_attach(authority);
 
+    // :path
     MIMEField *path = hdr.field_create(HTTP2_VALUE_PATH, HTTP2_LEN_PATH);
     hdr.field_attach(path);
 
     break;
   }
+
   case HTTP_TYPE_RESPONSE: {
+    // :status
     MIMEField *status = hdr.field_create(HTTP2_VALUE_STATUS, HTTP2_LEN_STATUS);
     hdr.field_attach(status);
 
     break;
   }
+
   default:
     ink_abort("HTTP_TYPE_UNKNOWN");
   }
+
 }
 
 /**

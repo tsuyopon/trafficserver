@@ -71,6 +71,7 @@ Http2ClientSession::start()
   SCOPED_MUTEX_LOCK(lock, this->mutex, this_ethread());
 
   SET_HANDLER(&Http2ClientSession::main_event_handler);
+
   HTTP2_SET_SESSION_HANDLER(&Http2ClientSession::state_read_connection_preface);
 
   VIO *read_vio = this->do_io_read(this, INT64_MAX, this->read_buffer);
@@ -84,6 +85,7 @@ Http2ClientSession::start()
   }
 }
 
+// Http2SessionAccept::acceptから呼び出されます
 void
 Http2ClientSession::new_connection(NetVConnection *new_vc, MIOBuffer *iobuf, IOBufferReader *reader)
 {
@@ -159,6 +161,8 @@ Http2ClientSession::do_io_close(int alerrno)
   this->do_io_write(this, 0, nullptr);
 }
 
+// Http2ClientSession::startで下記がSET_HANDLERされている。
+// HTTP/2では基本的にhandleポイントはここで、その後の処理はeventからのsession_handler (HTTP2_SET_SESSION_HANDLER)によって指定される
 int
 Http2ClientSession::main_event_handler(int event, void *edata)
 {
@@ -174,13 +178,18 @@ Http2ClientSession::main_event_handler(int event, void *edata)
   }
 
   switch (event) {
-  case VC_EVENT_READ_COMPLETE:
+  case VC_EVENT_READ_COMPLETE: // rcv_data_frameやrcv_headers_frameなどからこのeventになる
   case VC_EVENT_READ_READY: {
+
     bool is_zombie = connection_state.get_zombie_event() != nullptr;
+
+    // session_handlerはHTTP2_SET_SESSION_HANDLERによってセットされます
     retval         = (this->*session_handler)(event, edata);
+
     if (is_zombie && connection_state.get_zombie_event() != nullptr) {
       Warning("Processed read event for zombie session %" PRId64, connection_id());
     }
+
     break;
   }
 
@@ -224,11 +233,14 @@ Http2ClientSession::main_event_handler(int event, void *edata)
   }
 
   if (this->connection_state.get_shutdown_state() == HTTP2_SHUTDOWN_NONE) {
+
     if (this->is_draining()) { // For a case we already checked Connection header and it didn't exist
+
       Http2SsnDebug("Preparing for graceful shutdown because of draining state");
       this->connection_state.set_shutdown_state(HTTP2_SHUTDOWN_NOT_INITIATED);
-    } else if (this->connection_state.get_stream_error_rate() >
-               Http2::stream_error_rate_threshold) { // For a case many stream errors happened
+
+    } else if (this->connection_state.get_stream_error_rate() > Http2::stream_error_rate_threshold) { // For a case many stream errors happened
+
       ip_port_text_buffer ipb;
       const char *client_ip = ats_ip_ntop(get_remote_addr(), ipb, sizeof(ipb));
       SiteThrottledWarning("HTTP/2 session error client_ip=%s session_id=%" PRId64
@@ -239,9 +251,12 @@ Http2ClientSession::main_event_handler(int event, void *edata)
       cause_of_death = Http2SessionCod::HIGH_ERROR_RATE;
       this->connection_state.set_shutdown_state(HTTP2_SHUTDOWN_NOT_INITIATED, Http2ErrorCode::HTTP2_ERROR_ENHANCE_YOUR_CALM);
     }
+
   }
 
+
   if (this->connection_state.get_shutdown_state() == HTTP2_SHUTDOWN_NOT_INITIATED) {
+    // Http2ConnectionState::main_event_handlerが呼ばれる
     send_connection_event(&this->connection_state, HTTP2_SESSION_EVENT_SHUTDOWN_INIT, this);
   }
 
@@ -249,6 +264,7 @@ Http2ClientSession::main_event_handler(int event, void *edata)
   if (!connection_state.is_recursing() && this->recursion == 0 && kill_me) {
     this->free();
   }
+
   return retval;
 }
 

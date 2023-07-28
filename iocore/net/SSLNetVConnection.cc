@@ -2273,6 +2273,7 @@ SSLNetVConnection::_ssl_read_buffer(void *buf, int64_t nbytes, int64_t &nread)
   ERR_clear_error();
 
 #if TS_HAS_TLS_EARLY_DATA
+  // TLS1.3のEarly Dataが送付されてきた場合の処理
   if (SSL_version(ssl) >= TLS1_3_VERSION) {
     int64_t early_data_len = 0;
     if (this->early_data_reader != nullptr) {
