@@ -1392,6 +1392,8 @@ Http2ConnectionState::find_stream(Http2StreamId id) const
   return nullptr;
 }
 
+
+// この関数は主にHttp2ClientSession::main_event_handlerから呼ばれることが多い
 void
 Http2ConnectionState::restart_streams()
 {

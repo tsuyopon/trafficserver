@@ -2539,6 +2539,8 @@ mime_parser_clear(MIMEParser *parser)
   _mime_parser_init(parser);
 }
 
+
+// ヘッダ終了(CRLF, LF)が正しく解釈できた場合には、PARSE_RESULT_DONEを応答します
 ParseResult
 mime_parser_parse(MIMEParser *parser, HdrHeap *heap, MIMEHdrImpl *mh, const char **real_s, const char *real_e,
                   bool must_copy_strings, bool eof, bool remove_ws_from_field_name, size_t max_hdr_field_size)
@@ -2549,6 +2551,7 @@ mime_parser_parse(MIMEParser *parser, HdrHeap *heap, MIMEHdrImpl *mh, const char
 
   MIMEScanner *scanner = &parser->m_scanner;
 
+  // イテレーションのループ
   while (true) {
     ////////////////////////////////////////////////////////////////////////////
     // get a name:value line, with all continuation lines glued into one line //
@@ -2565,11 +2568,13 @@ mime_parser_parse(MIMEParser *parser, HdrHeap *heap, MIMEHdrImpl *mh, const char
     //////////////////////////////////////////////////
     // if got a LF or CR on its own, end the header //
     //////////////////////////////////////////////////
-
+    
+    // CRLFが存在する場合には、ヘッダの終了であることを示すので正常にパースできたということでPARSE_RESULT_DONEが戻り値として返ります。
     if ((parsed.size() >= 2) && (parsed[0] == ParseRules::CHAR_CR) && (parsed[1] == ParseRules::CHAR_LF)) {
       return PARSE_RESULT_DONE;
     }
 
+    // LFが存在する場合には、ヘッダの終了であることを示すので正常にパースできたということでPARSE_RESULT_DONEが戻り値として返ります。
     if ((parsed.size() >= 1) && (parsed[0] == ParseRules::CHAR_LF)) {
       return PARSE_RESULT_DONE;
     }

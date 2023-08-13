@@ -1165,6 +1165,7 @@ HTTPHdr::is_early_data() const
 /*-------------------------------------------------------------------------
   -------------------------------------------------------------------------*/
 
+// ヘッダのパース処理を行います
 inline ParseResult
 HTTPHdr::parse_req(HTTPParser *parser, const char **start, const char *end, bool eof, int strict_uri_parsing,
                    size_t max_request_line_size, size_t max_hdr_field_size)
@@ -1172,8 +1173,7 @@ HTTPHdr::parse_req(HTTPParser *parser, const char **start, const char *end, bool
   ink_assert(valid());
   ink_assert(m_http->m_polarity == HTTP_TYPE_REQUEST);
 
-  return http_parser_parse_req(parser, m_heap, m_http, start, end, true, eof, strict_uri_parsing, max_request_line_size,
-                               max_hdr_field_size);
+  return http_parser_parse_req(parser, m_heap, m_http, start, end, true, eof, strict_uri_parsing, max_request_line_size, max_hdr_field_size);
 }
 
 /*-------------------------------------------------------------------------

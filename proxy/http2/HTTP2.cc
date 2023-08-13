@@ -429,6 +429,8 @@ http2_parse_window_update(IOVec iov, uint32_t &size)
   return true;
 }
 
+// クライアントでHTTP/2で受け付けて、内部処理やオリジンサーバへのリクエスト時に用いるHTTP/1.1へと変換する関数です
+// 逆に内部処理のHTTP1.1からレスポンス用途としてHTTP/2に変換するhttp2_convert_header_from_1_1_to_2という関数もあります
 ParseResult
 http2_convert_header_from_2_to_1_1(HTTPHdr *headers)
 {
@@ -585,6 +587,7 @@ http2_init_pseudo_headers(HTTPHdr &hdr)
 
   Assuming HTTP/2 Pseudo-Header Fields are reserved by `http2_init_pseudo_headers()`.
  */
+// Trafficserverでの内部処理(HTTP/1.1)を、クライアントのHTTP/2用のヘッダに変換するための関数です
 ParseResult
 http2_convert_header_from_1_1_to_2(HTTPHdr *headers)
 {

@@ -270,6 +270,13 @@ read_from_net(NetHandler *nh, UnixNetVConnection *vc, EThread *thread)
       msg.msg_namelen = ats_ip_size(vc->get_remote_addr());
       msg.msg_iov     = &tiovec[0];
       msg.msg_iovlen  = niov;
+
+
+      // HTTP/1.1では、ここで受信したメッセージを取得できる
+      // $ curl --http1.1 -X POST --data-urlencode 'name=太郎' -d 'age=30'   http://localhost:8080/httpbin/post
+      // としてリクエストした際に下記のrecvmsgに到達した際に必要なリクエストが全て出力されることを確認しました。
+      // (gdb) x/s  msg->msg_iov->iov_base
+      // 0x7f05bc14e000:	"POST /httpbin/post HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\nContent-Length: 30\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=%E5%A4%AA%E9%83%8E&age=30\276\357ޭ\276\357ޭ\276", <incomplete sequence \357>...
       r               = socketManager.recvmsg(vc->con.fd, &msg, 0);
 
       NET_INCREMENT_DYN_STAT(net_calls_to_read_stat);

@@ -641,6 +641,7 @@ Http2Stream::restart_sending()
     return;
   }
 
+  // 書き込みすべきデータが存在しなければ、return
   if (this->write_vio.mutex && this->write_vio.ntodo() == 0) {
     return;
   }
@@ -811,6 +812,7 @@ Http2Stream::push_promise(URL &url, const MIMEField *accept_encoding)
 void
 Http2Stream::send_response_body(bool call_update)
 {
+
   Http2ClientSession *h2_proxy_ssn = static_cast<Http2ClientSession *>(this->_proxy_ssn);
   _timeout.update_inactivity();
 

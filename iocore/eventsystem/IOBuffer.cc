@@ -240,6 +240,10 @@ IOBufferReader::memcpy(void *ap, int64_t len, int64_t offset)
       bytes = len;
     }
     ::memcpy(p, b->start() + offset, bytes);
+
+    // 下記の行にと立つするとpの値が変化する
+    // (gdb) p p
+    // $3 = 0x7f244bd4afb0 "POST /httpbin/post/ HTTP"
     p += bytes;
     len -= bytes;
     b      = b->next.get();

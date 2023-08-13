@@ -292,7 +292,10 @@ HttpVCTable::cleanup_all()
 ink_hrtime
 HttpSM::get_server_inactivity_timeout()
 {
+
   ink_hrtime retval = 0;
+
+  // 下記の変数はTSHttpTxnNoActivityTimeoutSetによってセットされます(デフォルト値は-1)
   if (t_state.api_txn_no_activity_timeout_value != -1) {
     retval = HRTIME_MSECONDS(t_state.api_txn_no_activity_timeout_value);
   } else {
@@ -2103,6 +2106,8 @@ HttpSM::state_read_server_response_header(int event, void *data)
   //   time we've been called.  The timeout had been set to
   //   the connect timeout when we set up to read the header
   //
+  // この関数自体は2度呼ばれることがあります。
+  // 例えば、"Expect: 100-continu」を受けとったオリジンが応答する場合と、その後の正式なレスポンスを送り返す場合です。最初の場合にだけ送り返すようです。
   if (server_response_hdr_bytes == 0) {
     milestones[TS_MILESTONE_SERVER_FIRST_READ] = Thread::get_hrtime();
 
@@ -2119,6 +2124,7 @@ HttpSM::state_read_server_response_header(int event, void *data)
   /////////////////////
   ParseResult state = t_state.hdr_info.server_response.parse_resp(&http_parser, server_txn->get_remote_reader(), &bytes_used, server_entry->eos);
 
+  // サーバのレスポンスヘッダのバイト
   server_response_hdr_bytes += bytes_used;
 
   // Don't allow HTTP 0.9 (unparsable headers) on resued connections.
@@ -6215,6 +6221,7 @@ close_connection:
 void
 HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
 {
+
   bool chunked = t_state.client_info.transfer_encoding == HttpTransact::CHUNKED_ENCODING ||
                  t_state.hdr_info.request_content_length == HTTP_UNDEFINED_CL;
   bool post_redirect = false;
@@ -6223,6 +6230,7 @@ HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
   // YTS Team, yamsat Plugin
   // if redirect_in_process and redirection is enabled add static producer
 
+  // TBD: このif文にはどのような時に入るのか? 通常のPOSTトンネルではelseに入っていた
   if (is_using_post_buffer ||
       (t_state.redirect_info.redirect_in_process && enable_redirection && this->_postbuf.postdata_copy_buffer_start != nullptr)) {
     post_redirect = true;
@@ -6236,6 +6244,7 @@ HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
     p = tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, post_bytes, postdata_producer_reader, (HttpProducerHandler) nullptr, HT_STATIC, "redirect static agent post");
 
   } else {
+
     int64_t alloc_index;
     // content length is undefined, use default buffer size
     if (t_state.hdr_info.request_content_length == HTTP_UNDEFINED_CL) {
@@ -6247,6 +6256,7 @@ HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
       alloc_index =
         buffer_size_to_index(t_state.hdr_info.request_content_length, t_state.http_config_param->max_payload_iobuf_index);
     }
+
     MIOBuffer *post_buffer    = new_MIOBuffer(alloc_index);
     IOBufferReader *buf_start = post_buffer->alloc_reader();
     int64_t post_bytes        = chunked ? INT64_MAX : t_state.hdr_info.request_content_length;
@@ -6593,6 +6603,7 @@ HttpSM::setup_server_send_request_api()
   do_api_callout();
 }
 
+// オリジンサーバへの書き込み処理はここで行われます
 void
 HttpSM::setup_server_send_request()
 {
@@ -6663,6 +6674,7 @@ HttpSM::setup_server_read_response_header()
   //  does not free the memory from the header
   t_state.hdr_info.server_response.destroy();
   t_state.hdr_info.server_response.create(HTTP_TYPE_RESPONSE);
+
   http_parser_clear(&http_parser);
   server_response_hdr_bytes                        = 0;
   milestones[TS_MILESTONE_SERVER_READ_HEADER_DONE] = 0;
@@ -6803,6 +6815,8 @@ HttpSM::setup_100_continue_transfer()
 
   // First write the client response header into the buffer
   ink_assert(t_state.client_info.http_version != HTTP_0_9);
+
+  // クライアントの「Expect: 100-continue」をそのままオリジンにバイパスした際に、オリジンからのレスポンス情報をセットします。
   client_response_hdr_bytes = write_header_into_buffer(&t_state.hdr_info.client_response, buf);
   ink_assert(client_response_hdr_bytes > 0);
 
@@ -6819,9 +6833,11 @@ HttpSM::setup_100_continue_transfer()
   //    その後、POSTメッセージの受信が全て完了してから、オリジンへのリクエスト(producer)とクライアントへのレスポンス(consumer)を立てるものとおもわます。
 
   // producerの設定
+  // クライアントの「Expect: 100-continue」をそのままオリジンにバイパスした際に、オリジンからのレスポンス情報がSTATIC PRODUCERとしてセットされるようです
   HttpTunnelProducer *p = tunnel.add_producer(HTTP_TUNNEL_STATIC_PRODUCER, client_response_hdr_bytes, buf_start, (HttpProducerHandler) nullptr, HT_STATIC, "internal msg - 100 continue");
 
   // consumerの設定
+  // User-Agentにオリジンからの「Expect: 100-continue」に対するレスポンスを応答します
   tunnel.add_consumer(ua_entry->vc, HTTP_TUNNEL_STATIC_PRODUCER, &HttpSM::tunnel_handler_100_continue_ua, HT_HTTP_CLIENT, "user agent");
 
   // Make sure the half_close is not set.
@@ -7223,21 +7239,29 @@ HttpSM::setup_server_transfer()
 
   // Now dump the header into the buffer
   ink_assert(t_state.hdr_info.client_response.status_get() != HTTP_STATUS_NOT_MODIFIED);
+
+  // build_responseなどで生成されたレスポンスヘッダ情報はここでbufferへと格納します
   client_response_hdr_bytes = hdr_size = write_response_header_into_buffer(&t_state.hdr_info.client_response, buf);
 
+  // 下記でレスポンスのnbytesにはContent-Lengthで応答が返ってきた値と上記で生成されたヘッダサイズの合算値が格納されます
   nbytes = server_transfer_init(buf, hdr_size);
 
+  // ネガティブキャッシュが有効で、かつ、オリジンサーバからのレスポンスが204(No Content)の場合
   if (t_state.is_cacheable_due_to_negative_caching_configuration &&
       t_state.hdr_info.server_response.status_get() == HTTP_STATUS_NO_CONTENT) {
+
+    // TBD: 204(No Content)だとボディが存在しないはずなのに、下記の３行は何を意味するのか?
     int s = sizeof("No Content") - 1;
     buf->write("No Content", s);
     nbytes += s;
+
   }
 
   // default_handlerをセットしておく
   HTTP_SM_SET_DEFAULT_HANDLER(&HttpSM::tunnel_handler);
 
   // Tunnelにproducerとconsumerそれぞれの追加を行います。
+  // nbytesが指定されているので、ヘッダとボディ部分全体のbyte数です
   HttpTunnelProducer *p = tunnel.add_producer(server_entry->vc, nbytes, buf_start, &HttpSM::tunnel_handler_server, HT_HTTP_SERVER, "http server");
   tunnel.add_consumer(ua_entry->vc, server_entry->vc, &HttpSM::tunnel_handler_ua, HT_HTTP_CLIENT, "user agent");
 

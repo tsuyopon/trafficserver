@@ -169,7 +169,9 @@ SSLNetVConnection::_make_ssl_connection(SSL_CTX *ctx)
       }
 
       SSL_set_bio(ssl, bio, bio);
+
     } else {
+
       this->initialize_handshake_buffers();
       BIO *rbio = BIO_new(BIO_s_mem());
       BIO *wbio = BIO_new_fd(this->get_socket(), BIO_NOCLOSE);
@@ -312,16 +314,46 @@ SSLNetVConnection::_ssl_read_from_net(EThread *lthread, int64_t &ret)
     Debug("ssl", "amount_to_read=%" PRId64, amount_to_read);
     char *current_block = buf.writer()->end();
     ink_release_assert(current_block != nullptr);
+
+    // ここでSSL_readが実行される
     sslErr = this->_ssl_read_buffer(current_block, amount_to_read, nread);
 
+    // _ssl_read_bufferにてnreadがセットされる。SSL_readされて読み込まれたバイト数がセットされる
     Debug("ssl", "nread=%" PRId64, nread);
 
     switch (sslErr) {
     case SSL_ERROR_NONE:
 
+
 #if DEBUG
+
+      ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+      // TLS時に出力されるリクエストだが、HTTP/1.1とHTTP/2で出力内容に違いがあるので注意が必要です。
+      ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+      // $ curl -k --http1.1 -X POST --data-urlencode 'name=太郎' -d 'age=30'   https://localhost:443/httpbin/post
+      //
+      // としてTLS + HTTP/1.1でリクエストするとdiags.logに下記のようにリクエスト内容が出力されます。
+      //
+      // [Aug 13 09:33:09.807] [ET_NET 0] DEBUG: <SSLNetVConnection.cc:289 (_ssl_read_from_net)> (ssl) nread=185
+      // SSL Read
+      // POST /httpbin/post HTTP/1.1
+      // Host: localhost
+      // User-Agent: curl/7.81.0
+      // Accept: */*
+      // Content-Length: 30
+      // Content-Type: application/x-www-form-urlencoded
+      // 
+      // name=%E5%A4%AA%E9%83%8E&age=30
+
+      // なお、TLS + HTTP/2のリクエストの場合にはdiags.logには下記のみで、TLS+HTTP/1.1の時と異なりリクエスト内容が出力されません。
+      // [Aug 13 09:36:14.411] [ET_NET 0] DEBUG: <SSLNetVConnection.cc:289 (_ssl_read_from_net)> (ssl) nread=9
+      // SSL Read
+      // 
+
       SSLDebugBufferPrint("ssl_buff", current_block, nread, "SSL Read");
 #endif
+
       ink_assert(nread);
       bytes_read += nread;
       if (nread > 0) {
@@ -616,6 +648,7 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
     } else {
       ret = sslStartHandShake(SSL_EVENT_SERVER, err);
     }
+
     // If we have flipped to blind tunnel, don't read ahead
     if (this->handShakeReader) {
       if (this->attributes == HttpProxyPort::TRANSPORT_BLIND_TUNNEL) {
@@ -653,6 +686,7 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
         return; // Leave if we are tunneling
       }
     }
+
     if (ret == EVENT_ERROR) {
       this->read.triggered = 0;
       readSignalError(nh, err);
@@ -782,6 +816,8 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
       Debug("ssl", "read finished - 0 useful bytes read, bytes used by SSL layer");
     }
     break;
+
+  // 読み込みが完了した場合には、VC_EVENT_READ_COMPLETEシグナルを送付する
   case SSL_READ_COMPLETE:
     readSignalDone(VC_EVENT_READ_COMPLETE, nh);
     Debug("ssl", "read finished - signal done");
@@ -888,6 +924,7 @@ SSLNetVConnection::load_buffer_and_write(int64_t towrite, MIOBufferAccessor &buf
   if (num_really_written > 0) {
     needs |= EVENTIO_WRITE;
   } else {
+
     switch (err) {
     case SSL_ERROR_NONE:
       Debug("ssl", "SSL_write-SSL_ERROR_NONE");
@@ -927,6 +964,7 @@ SSLNetVConnection::load_buffer_and_write(int64_t towrite, MIOBufferAccessor &buf
       SSL_CLR_ERR_INCR_DYN_STAT(this, ssl_error_ssl, "SSL_write-SSL_ERROR_SSL errno=%d", errno);
     } break;
     }
+
   }
   return num_really_written;
 }
@@ -937,6 +975,7 @@ void
 SSLNetVConnection::do_io_close(int lerrno)
 {
   if (this->ssl != nullptr) {
+
     if (get_context() == NET_VCONNECTION_OUT) {
       callHooks(TS_EVENT_VCONN_OUTBOUND_CLOSE);
     } else {
@@ -967,6 +1006,7 @@ SSLNetVConnection::do_io_close(int lerrno)
       if (x < 0) {
         do_shutdown = (errno == EAGAIN || errno == EWOULDBLOCK);
       }
+
       if (do_shutdown) {
         // Send the close-notify
         int ret = SSL_shutdown(ssl);
@@ -1219,11 +1259,8 @@ SSLNetVConnection::sslStartHandShake(int event, int &err)
 
       // ALPN
       if (!this->options.alpn_protos.empty()) {
-        if (int res = SSL_set_alpn_protos(this->ssl, reinterpret_cast<const uint8_t *>(this->options.alpn_protos.data()),
-                                          this->options.alpn_protos.size());
-            res != 0) {
-          Debug("ssl.error", "failed to set ALPN '%.*s' for client handshake", static_cast<int>(this->options.alpn_protos.size()),
-                this->options.alpn_protos.data());
+        if (int res = SSL_set_alpn_protos(this->ssl, reinterpret_cast<const uint8_t *>(this->options.alpn_protos.data()), this->options.alpn_protos.size()); res != 0) {
+          Debug("ssl.error", "failed to set ALPN '%.*s' for client handshake", static_cast<int>(this->options.alpn_protos.size()), this->options.alpn_protos.data());
         }
       }
     }
@@ -2215,6 +2252,32 @@ SSLNetVConnection::_ssl_connect()
   return ssl_error;
 }
 
+
+// 下記のSSLNetVConnection::_ssl_write_bufferにブレークポイントを当てることによって、TLSでのレスポンスを確認することができます。ただし、HTTP/1.1の場合でないとbufを出力させてもバイナリでわかりにくいので注意すること
+//
+//  $ curl -k --http1.1 -X POST -F upfile=@tempfile -H 'Expect: 100-continue' https://localhost:443/httpbin/post
+//
+// 下記のようにして確認できる
+//  Thread 4 "[ET_NET 2]" hit Breakpoint 1, SSLNetVConnection::_ssl_write_buffer (this=0x7ff51402aac0, buf=0x7ff5342e4000, nbytes=81, nwritten=@0x7ff533ffd090: 0) at SSLNetVConnection.cc:2152
+//  2152	{
+//  (gdb) p buf
+//  $9 = (const void *) 0x7ff5342e4000
+//  (gdb) x/s buf
+//  0x7ff5342e4000:	"HTTP/1.1 100 Continue\r\nDate: Sun, 13 Aug 2023 01:18:13 GMT\r\nServer: ATS/9.2.0\r\n\r\n\255\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276\357ޭ\276", <incomplete sequence \357>...
+//  (gdb) x/81c buf
+//  0x7ff5342e4000:	72 'H'	84 'T'	84 'T'	80 'P'	47 '/'	49 '1'	46 '.'	49 '1'
+//  0x7ff5342e4008:	32 ' '	49 '1'	48 '0'	48 '0'	32 ' '	67 'C'	111 'o'	110 'n'
+//  0x7ff5342e4010:	116 't'	105 'i'	110 'n'	117 'u'	101 'e'	13 '\r'	10 '\n'	68 'D'
+//  0x7ff5342e4018:	97 'a'	116 't'	101 'e'	58 ':'	32 ' '	83 'S'	117 'u'	110 'n'
+//  0x7ff5342e4020:	44 ','	32 ' '	49 '1'	51 '3'	32 ' '	65 'A'	117 'u'	103 'g'
+//  0x7ff5342e4028:	32 ' '	50 '2'	48 '0'	50 '2'	51 '3'	32 ' '	48 '0'	49 '1'
+//  0x7ff5342e4030:	58 ':'	49 '1'	56 '8'	58 ':'	49 '1'	51 '3'	32 ' '	71 'G'
+//  0x7ff5342e4038:	77 'M'	84 'T'	13 '\r'	10 '\n'	83 'S'	101 'e'	114 'r'	118 'v'
+//  0x7ff5342e4040:	101 'e'	114 'r'	58 ':'	32 ' '	65 'A'	84 'T'	83 'S'	47 '/'
+//  0x7ff5342e4048:	57 '9'	46 '.'	50 '2'	46 '.'	48 '0'	13 '\r'	10 '\n'	13 '\r'
+//  0x7ff5342e4050:	10 '\n'
+//
+// 暗号化されていない平文のバッファ(buf)を受け取り、SSL_writeにより暗号化して送付を行います。
 ssl_error_t
 SSLNetVConnection::_ssl_write_buffer(const void *buf, int64_t nbytes, int64_t &nwritten)
 {
@@ -2262,6 +2325,7 @@ SSLNetVConnection::_ssl_write_buffer(const void *buf, int64_t nbytes, int64_t &n
   return ssl_error;
 }
 
+// 受信した暗号化パケットを受け取り、SSL_readにより複合したパケットに変換する
 ssl_error_t
 SSLNetVConnection::_ssl_read_buffer(void *buf, int64_t nbytes, int64_t &nread)
 {
@@ -2272,7 +2336,9 @@ SSLNetVConnection::_ssl_read_buffer(void *buf, int64_t nbytes, int64_t &nread)
   }
   ERR_clear_error();
 
+// SSL_set_max_early_dataがopensslのヘッダファイルに存在すれば定義される(通常ifに入るはず)
 #if TS_HAS_TLS_EARLY_DATA
+
   // TLS1.3のEarly Dataが送付されてきた場合の処理
   if (SSL_version(ssl) >= TLS1_3_VERSION) {
     int64_t early_data_len = 0;
@@ -2327,11 +2393,28 @@ SSLNetVConnection::_ssl_read_buffer(void *buf, int64_t nbytes, int64_t &nread)
   }
 #endif
 
+  // 送付されてきたTLSパケットの処理
   int ret = SSL_read(ssl, buf, static_cast<int>(nbytes));
+
+  // 上記のSSL_readでgdbによりブレークポイントを当て、nextによりSSL_readが完了したら、リクエストとなるパケットを確認することができます。(
+  // ただし、TLS + HTTP/1.1でないと文字列として見ることができないので注意すること
+  //   $ curl -k --http1.1 -X POST --data-urlencode 'name=太郎' -d 'age=30' https://localhost:443/httpbin/post
+  //
+  // Thread 2 "[ET_NET 0]" hit Breakpoint 1, SSLNetVConnection::_ssl_read_buffer (this=0x7ff51402aac0, buf=0x7ff5342e2000, nbytes=4096, nread=@0x7ff53c1feed8: 0) at SSLNetVConnection.cc:2261
+  // 2261	  int ret = SSL_read(ssl, buf, static_cast<int>(nbytes));
+  // (gdb) x/s buf
+  // 0x7ff5342e2000:	"\001P.4\365\177"          // SSL_readの箇所だとまだbufにはセットされていない
+  // (gdb) n
+  // 2262	  if (ret > 0) {
+  // (gdb) x/s buf
+  // 0x7ff5342e2000:	"POST /httpbin/post HTTP/1.1\r\nHost: localhost\r\nUser-Agent: curl/7.81.0\r\nAccept: */*\r\nContent-Length: 30\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nname=%E5%A4%AA%E9%83%8E&age=30\255\276\357ޭ\276\357ޭ\276\357ޭ\276", <incomplete sequence \357>...
+  // 
   if (ret > 0) {
     nread = ret;
     return SSL_ERROR_NONE;
   }
+
+  // 受信したTLSパケットに対して何かしらエラーがあり、タグ(ssl.error.read)がセットされていたらメッセージを出力する
   int ssl_error = SSL_get_error(ssl, ret);
   if (ssl_error == SSL_ERROR_SSL && is_debug_tag_set("ssl.error.read")) {
     char tempbuf[512];

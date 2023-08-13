@@ -4577,7 +4577,7 @@ HttpTransact::handle_100_continue_response(State *s)
     //   adding stuff
     build_response_copy(s, &s->hdr_info.server_response, &s->hdr_info.client_response, s->client_info.http_version);
 
-    // オリジンサーバから100-continueのレスポンスを受信した場合には、このコードパスをはず
+    // オリジンサーバから100-continueのレスポンスを受信した場合には、このコードパスを通るはず
     TRANSACT_RETURN(SM_ACTION_INTERNAL_100_RESPONSE, HandleResponse);
 
   } else {
