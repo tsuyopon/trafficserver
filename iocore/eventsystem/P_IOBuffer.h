@@ -403,6 +403,7 @@ IOBufferBlock::free()
 TS_INLINE void
 IOBufferBlock::set_internal(void *b, int64_t len, int64_t asize_index)
 {
+  // TBD: ここでは、サイズを気にせずIObufferDataに放り込めるのか?
   data        = new_IOBufferData_internal(_location, BUFFER_SIZE_NOT_ALLOCATED);
   data->_data = (char *)b;
   iobuffer_mem_inc(_location, asize_index);
@@ -630,11 +631,15 @@ extern ClassAllocator<MIOBuffer> ioAllocator;
 //  MIOBufferData) will be freed by this class.
 //
 ////////////////////////////////////////////////////////////////
+// このコンストラクタは、new_MIOBuffer_internalやnew_empty_MIOBuffer_internalから呼ばれそうです
 TS_INLINE
 MIOBuffer::MIOBuffer(void *b, int64_t bufsize, int64_t aWater_mark)
 {
   _location = nullptr;
+
+  // 下記のMIOBuffer::set経由でIOBufferDataが登録されることになります
   set(b, bufsize);
+
   water_mark = aWater_mark;
   size_index = BUFFER_SIZE_NOT_ALLOCATED;
   return;
@@ -791,15 +796,18 @@ MIOBuffer::block_write_avail()
 //  block.
 //
 ////////////////////////////////////////////////////////////////
+// 指定されたIOBufferBlockを writer->nextに追加して、現在のブロックとします
 TS_INLINE void
 MIOBuffer::append_block_internal(IOBufferBlock *b)
 {
+
   // It would be nice to remove an empty buffer at the beginning,
   // but this breaks HTTP.
   if (!_writer) {
     _writer = b;
     init_readers();
   } else {
+
     ink_assert(!_writer->next || !_writer->next->read_avail());
     _writer->next = b;
     while (b->read_avail()) {
@@ -810,9 +818,11 @@ MIOBuffer::append_block_internal(IOBufferBlock *b)
       }
     }
   }
+
   while (_writer->next && !_writer->write_avail() && _writer->next->read_avail()) {
     _writer = _writer->next;
   }
+
 }
 
 TS_INLINE void
@@ -876,6 +886,8 @@ TS_INLINE int64_t
 MIOBuffer::current_write_avail()
 {
   int64_t t        = 0;
+
+  // IOBufferBlockへのポインタを取得する
   IOBufferBlock *b = _writer.get();
   while (b) {
     t += b->write_avail();
@@ -893,6 +905,7 @@ MIOBuffer::current_write_avail()
 //  the current block then a new block is appended.
 //
 //////////////////////////////////////////////////////////////////
+// 現在のブロックで利用可能なブロックを応答する
 TS_INLINE int64_t
 MIOBuffer::write_avail()
 {
@@ -904,15 +917,27 @@ TS_INLINE void
 MIOBuffer::fill(int64_t len)
 {
   int64_t f = _writer->write_avail();
+
+  // 利用可能なバイト数(f)よりも、指定されたバイト数(len)の方が大きければ、利用可能なバイト数(f)だけをfillする
   while (f < len) {
+
+    // IOBufferBlock::fillを呼び出す
     _writer->fill(f);
+
     len -= f;
+
     if (len > 0) {
+      // 次のIOBufferDataを指し示すポインタをセット
       _writer = _writer->next;
     }
+
+    // IOBufferBlockの書き込み可能な容量をfに格納する
     f = _writer->write_avail();
   }
+
+  // IOBufferBlock::fillを呼び出す
   _writer->fill(len);
+
 }
 
 TS_INLINE int
@@ -944,16 +969,21 @@ MIOBuffer::max_read_avail()
       found = 1;
     }
   }
+
   if (!found && _writer) {
     return _writer->read_avail();
   }
+
   return s;
 }
 
+// IOBufferDataの主体となる_dataはここで登録される
+// このインライン関数はMIOBuffer::MIOBufferから呼ばれます
 TS_INLINE void
 MIOBuffer::set(void *b, int64_t len)
 {
   _writer = new_IOBufferBlock_internal(_location);
+  // IOBufferDataへの値はここで指定されたbが登録される
   _writer->set_internal(b, len, BUFFER_SIZE_INDEX_FOR_CONSTANT_SIZE(len));
   init_readers();
 }

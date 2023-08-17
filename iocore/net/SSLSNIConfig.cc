@@ -109,18 +109,21 @@ SNIConfigParams::get_property_config(const std::string &servername) const
 int
 SNIConfigParams::load_sni_config()
 {
+
   for (auto &item : yaml_sni.items) {
+
     auto ai = sni_action_list.emplace(sni_action_list.end());
     ai->set_glob_name(item.fqdn);
     Debug("ssl", "name: %s", item.fqdn.data());
 
     // set SNI based actions to be called in the ssl_servername_only callback
+    // sni.yamlのdisable_h2やhttp2の値によって下記が値を持つかどうかが決まります (iocore/net/YamlSNIConfig.ccでoffer_h2がセットされる)
     if (item.offer_h2.has_value()) {
       ai->actions.push_back(std::make_unique<ControlH2>(item.offer_h2.value()));
     }
+
     if (item.verify_client_level != 255) {
-      ai->actions.push_back(
-        std::make_unique<VerifyClient>(item.verify_client_level, item.verify_client_ca_file, item.verify_client_ca_dir));
+      ai->actions.push_back( std::make_unique<VerifyClient>(item.verify_client_level, item.verify_client_ca_file, item.verify_client_ca_dir));
     }
     if (item.host_sni_policy != 255) {
       ai->actions.push_back(std::make_unique<HostSniPolicy>(item.host_sni_policy));
@@ -129,8 +132,7 @@ SNIConfigParams::load_sni_config()
       ai->actions.push_back(std::make_unique<TLSValidProtocols>(item.protocol_mask));
     }
     if (item.tunnel_destination.length() > 0) {
-      ai->actions.push_back(
-        std::make_unique<TunnelDestination>(item.tunnel_destination, item.tunnel_type, item.tunnel_prewarm, item.tunnel_alpn));
+      ai->actions.push_back( std::make_unique<TunnelDestination>(item.tunnel_destination, item.tunnel_type, item.tunnel_prewarm, item.tunnel_alpn));
     }
     if (!item.client_sni_policy.empty()) {
       ai->actions.push_back(std::make_unique<OutboundSNIPolicy>(item.client_sni_policy));
@@ -210,6 +212,7 @@ SNIConfigParams::get(std::string_view servername) const
 int
 SNIConfigParams::initialize()
 {
+
   std::string sni_filename = RecConfigReadConfigPath("proxy.config.ssl.servername.filename");
 
   Note("%s loading ...", sni_filename.c_str());
@@ -234,6 +237,7 @@ SNIConfigParams::initialize()
     }
     return 1;
   }
+
   yaml_sni = std::move(yaml_sni_tmp);
 
   return load_sni_config();

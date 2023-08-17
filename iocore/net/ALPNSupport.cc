@@ -91,6 +91,7 @@ ALPNSupport::advertise_next_protocol(SSL *ssl, const unsigned char **out, unsign
   return SSL_TLSEXT_ERR_NOACK;
 }
 
+// ALPNにより、ATSサーバがサポートプロトコルの中から、選定する
 int
 ALPNSupport::select_next_protocol(SSL *ssl, const unsigned char **out, unsigned char *outlen, const unsigned char *in,
                                   unsigned inlen)
@@ -99,16 +100,24 @@ ALPNSupport::select_next_protocol(SSL *ssl, const unsigned char **out, unsigned 
   unsigned int npnsize        = 0;
   int retval                  = SSL_TLSEXT_ERR_ALERT_FATAL;
 
+  // SSL_select_next_protoに渡すためのnpnptr, npnsizeを取得する
   if (this->getNPN(&npnptr, &npnsize) && npnsize > 0) {
+
     // SSL_select_next_proto chooses the first server-offered protocol that appears in the clients protocol set, ie. the
     // server selects the protocol. This is a n^2 search, so it's preferable to keep the protocol set short.
+    // 下記のSSL_select_next_protoはOpenSSL API: https://www.openssl.org/docs/man3.1/man3/SSL_select_next_proto.html
+    //
+    // サーバが利用可能なプロトコルリスト一覧をnpnptr, npnsizeによって指定し、ALPNとして選択されたプロトコルをout, outlenにより取得する
     if (SSL_select_next_proto(const_cast<unsigned char **>(out), outlen, npnptr, npnsize, in, inlen) == OPENSSL_NPN_NEGOTIATED) {
+
+      // SSL_select_next_protoにてALPNから選択された唯一のprotocolを出力する
       Debug("ssl", "selected ALPN protocol %.*s", (int)(*outlen), *out);
       retval = SSL_TLSEXT_ERR_OK;
     } else {
       *out    = nullptr;
       *outlen = 0;
     }
+
   } else {
     *out    = nullptr;
     *outlen = 0;

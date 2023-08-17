@@ -6162,8 +6162,7 @@ HttpTransact::handle_trace_and_options_requests(State *s, HTTPHdr *incoming_hdr)
       s->internal_msg_buffer_size = req_length * 2;
 
       if (s->internal_msg_buffer_size <= BUFFER_SIZE_FOR_INDEX(s->http_config_param->max_msg_iobuf_index)) {
-        s->internal_msg_buffer_fast_allocator_size =
-          buffer_size_to_index(s->internal_msg_buffer_size, s->http_config_param->max_msg_iobuf_index);
+        s->internal_msg_buffer_fast_allocator_size = buffer_size_to_index(s->internal_msg_buffer_size, s->http_config_param->max_msg_iobuf_index);
         s->internal_msg_buffer = static_cast<char *>(ioBufAllocator[s->internal_msg_buffer_fast_allocator_size].alloc_void());
       } else {
         s->internal_msg_buffer_fast_allocator_size = -1;
@@ -9163,8 +9162,7 @@ HttpTransact::build_error_response(State *s, HTTPStatus status_code, const char 
   if (len > 0) {
     // 長さが0以上の場合にはContent-Type、Content-Languageヘッダを、クライアントのレスポンスにセットする
     s->hdr_info.client_response.value_set(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE, body_type, strlen(body_type));
-    s->hdr_info.client_response.value_set(MIME_FIELD_CONTENT_LANGUAGE, MIME_LEN_CONTENT_LANGUAGE, body_language,
-                                          strlen(body_language));
+    s->hdr_info.client_response.value_set(MIME_FIELD_CONTENT_LANGUAGE, MIME_LEN_CONTENT_LANGUAGE, body_language, strlen(body_language));
   } else {
     // 長さが0の場合にはContent-Type、Content-Languageヘッダを、クライアントのレスポンスから除去する
     s->hdr_info.client_response.field_delete(MIME_FIELD_CONTENT_TYPE, MIME_LEN_CONTENT_TYPE);

@@ -716,6 +716,10 @@ ts_host_res_global_init()
 void
 ts_session_protocol_well_known_name_indices_init()
 {
+
+  // globalSessionProtocolNameRegistryはALPNやNPNなどにセットしても問題ないプロトコル文字列をチェックするための配列です。
+  // globalSessionProtocolNameRegistryはNPNやALPNの文字列としてのチェック用途としてOpenSSLのコールバック関数などから利用されます。
+  //
   // register all the well known protocols and get the indices set.
   TS_ALPN_PROTOCOL_INDEX_HTTP_0_9   = globalSessionProtocolNameRegistry.toIndexConst(std::string_view{TS_ALPN_PROTOCOL_HTTP_0_9});
   TS_ALPN_PROTOCOL_INDEX_HTTP_1_0   = globalSessionProtocolNameRegistry.toIndexConst(std::string_view{TS_ALPN_PROTOCOL_HTTP_1_0});
@@ -724,8 +728,7 @@ ts_session_protocol_well_known_name_indices_init()
   TS_ALPN_PROTOCOL_INDEX_HTTP_3     = globalSessionProtocolNameRegistry.toIndexConst(std::string_view{TS_ALPN_PROTOCOL_HTTP_3});
   TS_ALPN_PROTOCOL_INDEX_HTTP_3_D27 = globalSessionProtocolNameRegistry.toIndexConst(std::string_view{TS_ALPN_PROTOCOL_HTTP_3_D27});
   TS_ALPN_PROTOCOL_INDEX_HTTP_QUIC  = globalSessionProtocolNameRegistry.toIndexConst(std::string_view{TS_ALPN_PROTOCOL_HTTP_QUIC});
-  TS_ALPN_PROTOCOL_INDEX_HTTP_QUIC_D27 =
-    globalSessionProtocolNameRegistry.toIndexConst(std::string_view{TS_ALPN_PROTOCOL_HTTP_QUIC_D27});
+  TS_ALPN_PROTOCOL_INDEX_HTTP_QUIC_D27 = globalSessionProtocolNameRegistry.toIndexConst(std::string_view{TS_ALPN_PROTOCOL_HTTP_QUIC_D27});
 
   // Now do the predefined protocol sets.
   HTTP_PROTOCOL_SET.markIn(TS_ALPN_PROTOCOL_INDEX_HTTP_0_9);
@@ -759,6 +762,7 @@ ts_session_protocol_well_known_name_indices_init()
   TSProtoTags.insert(TS_PROTO_TAG_UDP);
   TSProtoTags.insert(TS_PROTO_TAG_IPV4);
   TSProtoTags.insert(TS_PROTO_TAG_IPV6);
+
 }
 
 const char *
@@ -793,22 +797,36 @@ SessionProtocolNameRegistry::convert_openssl_alpn_wire_format(int index)
   return {};
 }
 
+// NPNやALPNで利用されるプロトコル情報を保持した配列中に、指定したnameが含まれるかどうかをチェックする
+// 返す戻り値は配列のindexとなる値のようです
 int
 SessionProtocolNameRegistry::toIndex(ts::TextView name)
 {
+
   int zret = this->indexFor(name);
+
+  // 指定されたnameが登録された配列中に見つからない場合には
   if (INVALID == zret) {
+
+    // 最大値に達するまでは
     if (m_n < MAX) {
+
       // Localize the name by copying it in to the arena.
       auto text = m_arena.alloc(name.size() + 1).rebind<char>();
       memcpy(text.data(), name.data(), name.size());
       text.end()[-1] = '\0';
+
+      // m_names(メンバー変数)に登録し、m_n(メンバー変数)はインクリメントしておく
       m_names[m_n]   = text.view();
       zret           = m_n++;
+
     } else {
       ink_release_assert(!"Session protocol name registry overflow");
     }
+
   }
+
+  // 戻り値には配列のindexを返す
   return zret;
 }
 
@@ -833,8 +851,11 @@ SessionProtocolNameRegistry::indexFor(TextView name) const
   const ts::TextView *end = m_names.begin() + m_n;
   auto spot               = std::find(m_names.begin(), end, name);
   if (spot != end) {
+    // 指定されたnameが配列中に見つかった場合には、indexを返す
     return static_cast<int>(spot - m_names.begin());
   }
+
+  // 指定されたnameが配列中に見つからなかった場合
   return INVALID;
 }
 

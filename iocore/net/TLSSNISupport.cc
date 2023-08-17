@@ -57,6 +57,8 @@ TLSSNISupport::unbind(SSL *ssl)
 int
 TLSSNISupport::perform_sni_action()
 {
+
+  // servernameを取得する
   const char *servername = this->_get_sni_server_name();
   if (!servername) {
     Debug("ssl_sni", "No servername provided");

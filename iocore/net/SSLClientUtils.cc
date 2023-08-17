@@ -70,8 +70,7 @@ verify_callback(int signature_ok, X509_STORE_CTX *ctx)
   err   = X509_STORE_CTX_get_error(ctx);
 
   bool enforce_mode = (netvc->options.verifyServerPolicy == YamlSNIConfig::Policy::ENFORCED);
-  bool check_sig =
-    static_cast<uint8_t>(netvc->options.verifyServerProperties) & static_cast<uint8_t>(YamlSNIConfig::Property::SIGNATURE_MASK);
+  bool check_sig = static_cast<uint8_t>(netvc->options.verifyServerProperties) & static_cast<uint8_t>(YamlSNIConfig::Property::SIGNATURE_MASK);
 
   if (check_sig) {
     if (!signature_ok) {
@@ -91,14 +90,14 @@ verify_callback(int signature_ok, X509_STORE_CTX *ctx)
       return enforce_mode ? signature_ok : 1;
     }
   }
+
   // Don't check names and other things unless this is the terminal cert
   if (depth != 0) {
     // Not server cert....
     return signature_ok;
   }
 
-  bool check_name =
-    static_cast<uint8_t>(netvc->options.verifyServerProperties) & static_cast<uint8_t>(YamlSNIConfig::Property::NAME_MASK);
+  bool check_name = static_cast<uint8_t>(netvc->options.verifyServerProperties) & static_cast<uint8_t>(YamlSNIConfig::Property::NAME_MASK);
   if (check_name) {
     char *matched_name = nullptr;
     unsigned char *sni_name;
@@ -109,10 +108,12 @@ verify_callback(int signature_ok, X509_STORE_CTX *ctx)
       sni_name = reinterpret_cast<unsigned char *>(buff);
       ats_ip_ntop(netvc->get_remote_addr(), buff, INET6_ADDRSTRLEN);
     }
+
     if (validate_hostname(cert, sni_name, false, &matched_name)) {
       Debug("ssl_verify", "Hostname %s verified OK, matched %s", sni_name, matched_name);
       ats_free(matched_name);
     } else { // Name validation failed
+
       // Get the server address if we did't already compute it
       if (netvc->options.sni_servername) {
         ats_ip_ntop(netvc->get_remote_addr(), buff, INET6_ADDRSTRLEN);
@@ -122,7 +123,9 @@ verify_callback(int signature_ok, X509_STORE_CTX *ctx)
               netvc->options.ssl_servername.get(), buff);
       return !enforce_mode;
     }
+
   }
+
   // If the previous configured checks passed, give the hook a try
   netvc->set_verify_cert(ctx);
   netvc->callHooks(TS_EVENT_SSL_VERIFY_SERVER);
@@ -130,16 +133,19 @@ verify_callback(int signature_ok, X509_STORE_CTX *ctx)
   if (netvc->getSSLHandShakeComplete()) { // hook moved the handshake state to terminal
     unsigned char *sni_name;
     char buff[INET6_ADDRSTRLEN];
+
     if (netvc->options.sni_servername) {
       sni_name = reinterpret_cast<unsigned char *>(netvc->options.sni_servername.get());
     } else {
       sni_name = reinterpret_cast<unsigned char *>(buff);
       ats_ip_ntop(netvc->get_remote_addr(), buff, INET6_ADDRSTRLEN);
     }
+
     Warning("TS_EVENT_SSL_VERIFY_SERVER plugin failed the origin certificate check for %s.  Action=%s SNI=%s",
             netvc->options.ssl_servername.get(), enforce_mode ? "Terminate" : "Continue", sni_name);
     return !enforce_mode;
   }
+
   // Made it this far.  All is good
   return true;
 }

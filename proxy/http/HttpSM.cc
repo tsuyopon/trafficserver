@@ -1010,8 +1010,7 @@ HttpSM::wait_for_full_body()
   // Next order of business if copy the remaining data from the
   //  header buffer into new buffer
   int64_t post_bytes = chunked ? INT64_MAX : t_state.hdr_info.request_content_length;
-  client_request_body_bytes =
-    post_buffer->write(ua_txn->get_remote_reader(), chunked ? ua_txn->get_remote_reader()->read_avail() : post_bytes);
+  client_request_body_bytes = post_buffer->write(ua_txn->get_remote_reader(), chunked ? ua_txn->get_remote_reader()->read_avail() : post_bytes);
 
   ua_txn->get_remote_reader()->consume(client_request_body_bytes);
   p = tunnel.add_producer(ua_entry->vc, post_bytes, buf_start, &HttpSM::tunnel_handler_post_ua, HT_BUFFER_READ, "ua post buffer");
@@ -2941,6 +2940,7 @@ HttpSM::tunnel_handler_post_or_put(HttpTunnelProducer *p)
   default:
     ink_release_assert(0);
   }
+
 }
 
 // int HttpSM::tunnel_handler_post(int event, void* data)
@@ -5120,6 +5120,7 @@ HttpSM::send_origin_throttled_response()
 static void
 set_tls_options(NetVCOptions &opt, const OverridableHttpConfigParams *txn_conf)
 {
+
   char *verify_server = nullptr;
   if (txn_conf->ssl_client_verify_server_policy == nullptr) {
     opt.verifyServerPolicy = YamlSNIConfig::Policy::UNSET;
@@ -5137,6 +5138,7 @@ set_tls_options(NetVCOptions &opt, const OverridableHttpConfigParams *txn_conf)
       opt.verifyServerPolicy = YamlSNIConfig::Policy::UNSET;
     }
   }
+
   if (txn_conf->ssl_client_verify_server_properties == nullptr) {
     opt.verifyServerProperties = YamlSNIConfig::Property::UNSET;
   } else {
@@ -5155,6 +5157,7 @@ set_tls_options(NetVCOptions &opt, const OverridableHttpConfigParams *txn_conf)
       opt.verifyServerProperties = YamlSNIConfig::Property::NONE;
     }
   }
+
 }
 
 std::string_view
@@ -5170,6 +5173,7 @@ HttpSM::get_outbound_cert() const
 std::string_view
 HttpSM::get_outbound_sni() const
 {
+
   using namespace ts::literals;
   ts::TextView zret;
   ts::TextView policy{t_state.txn_conf->ssl_client_sni_policy, ts::TextView::npos};
@@ -5193,7 +5197,9 @@ HttpSM::get_outbound_sni() const
     // If other is specified, like "remap" and "verify_with_name_source", the remapped origin name is used for the SNI value
     zret.assign(t_state.server_info.name, ts::TextView::npos);
   }
+
   return zret;
+
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -5205,6 +5211,7 @@ HttpSM::get_outbound_sni() const
 void
 HttpSM::do_http_server_open(bool raw)
 {
+
   int ip_family = t_state.current.server->dst_addr.sa.sa_family;
   auto fam_name = ats_ip_family_name(ip_family);
   SMDebug("http_track", "entered inside do_http_server_open ][%.*s]", static_cast<int>(fam_name.size()), fam_name.data());
@@ -5530,6 +5537,7 @@ HttpSM::do_http_server_open(bool raw)
       int pid = SessionProtocolNameRegistry::INVALID;
 
       // sni.yamlに「partial_blind_route」が指定されている場合
+      // see: https://docs.trafficserver.apache.org/ja/latest/admin-guide/layer-4-routing.en.html#pre-warming-tls-tunnel
       if (ssl_vc->tunnel_type() == SNIRoutingType::PARTIAL_BLIND) {
         pid = ssl_vc->get_negotiated_protocol_id();
         if (pid != SessionProtocolNameRegistry::INVALID) {
@@ -6271,6 +6279,8 @@ HttpSM::do_setup_post_tunnel(HttpVC_t to_vc_type)
 
     // Next order of business if copy the remaining data from the
     //  header buffer into new buffer
+
+    // User-AgentからTrafficserverへのリクエストに対して書き込み処理を反映する
     client_request_body_bytes = post_buffer->write(ua_txn->get_remote_reader(), chunked ? ua_txn->get_remote_reader()->read_avail() : post_bytes);
 
     ua_txn->get_remote_reader()->consume(client_request_body_bytes);
@@ -6956,11 +6966,11 @@ HttpSM::setup_internal_transfer(HttpSMHandler handler_arg)
   if (is_msg_buf_present && t_state.method != HTTP_WKSIDX_HEAD) {
     nbytes += t_state.internal_msg_buffer_size;
 
+    // append_xmallocedやappend_fast_allocated経由でIOBufferDataの_dataメンバー変数に値が登録されているはずである。(ちょっと自信ない)
     if (t_state.internal_msg_buffer_fast_allocator_size < 0) {
       buf->append_xmalloced(t_state.internal_msg_buffer, t_state.internal_msg_buffer_size);
     } else {
-      buf->append_fast_allocated(t_state.internal_msg_buffer, t_state.internal_msg_buffer_size,
-                                 t_state.internal_msg_buffer_fast_allocator_size);
+      buf->append_fast_allocated(t_state.internal_msg_buffer, t_state.internal_msg_buffer_size, t_state.internal_msg_buffer_fast_allocator_size);
     }
 
     // The IOBufferBlock will free the msg buffer when necessary so
@@ -8751,6 +8761,7 @@ HttpSM::populate_client_protocol(std::string_view *result, int n) const
 const char *
 HttpSM::client_protocol_contains(std::string_view tag_prefix) const
 {
+
   const char *retval     = nullptr;
   std::string_view proto = HttpSM::find_proto_string(t_state.hdr_info.client_request.version_get());
   if (!proto.empty()) {
@@ -8762,16 +8773,19 @@ HttpSM::client_protocol_contains(std::string_view tag_prefix) const
     }
   }
   return retval;
+
 }
 
 // Fill in the server protocols used.  Return the number of entries populated.
 int
 HttpSM::populate_server_protocol(std::string_view *result, int n) const
 {
+
   int retval = 0;
   if (!t_state.hdr_info.server_request.valid()) {
     return retval;
   }
+
   if (n > 0) {
     std::string_view proto = HttpSM::find_proto_string(t_state.hdr_info.server_request.version_get());
     if (!proto.empty()) {
@@ -8781,6 +8795,7 @@ HttpSM::populate_server_protocol(std::string_view *result, int n) const
       }
     }
   }
+
   return retval;
 }
 
@@ -8925,4 +8940,5 @@ HttpSM::milestone_update_api_time()
       milestones[TS_MILESTONE_PLUGIN_ACTIVE] += delta;
     }
   }
+
 }

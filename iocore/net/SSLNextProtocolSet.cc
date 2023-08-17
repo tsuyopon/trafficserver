@@ -34,19 +34,33 @@
 // above link says we need to send length-prefixed strings, but does
 // not say how many bytes the length is. For the record, it's 1.
 
+// NPNのコールバックに戻す文字列は (プロトコル1の文字数 + プロトコル名1 + プロトコル2の文字数 + プロトコル名2 + ... )といった形式にする必要があります。
+// ここでは「プロトコル1の文字数 + プロトコル名1 + プロトコル2の文字数 + プロトコル名2 + ... 」の形式を作り出す関数です。
 unsigned char *
 append_protocol(const char *proto, unsigned char *buf)
 {
   size_t sz = strlen(proto);
+
+  // ここはまずは*bufにszのプロトコル分の文字列を格納しています。その後、bufのポインタを1進めています。
+  //
+  // 注意: *buf++とbuf++の違いを説明しておきます。
+  //      *buf++ は、ポインタ buf が指す場所の値を取得した後に、ポインタ buf を次の位置に進める操作を行います。具体的には、次の手順で処理が行われます。
+  //       buf++ は、ポインタ buf を次の位置に進める操作を行うだけで、取得する値はありません。この操作はポインタを次の要素（または次のメモリ位置）に移動するためだけのものです。
   *buf++    = static_cast<unsigned char>(sz);
+
+  // 手前でbufのポインタを1進めているので、szのプロトコル分の文字数の後にプロトコルの文字列を格納します。
   memcpy(buf, proto, sz);
+
+  // ポインタ位置を末尾に上のmemcpyでコピーしたsz分の文字列を進めます
   return buf + sz;
 }
 
 // HTTPSリクエストをacceptした後に呼ばれる
+// TLSのNPN(Next Protocol Negotiation)だけでなく、ALPNのコールバックでも呼ばれる
 bool
 SSLNextProtocolSet::create_npn_advertisement(const SessionProtocolSet &enabled, unsigned char **npn, size_t *len) const
 {
+
   const SSLNextProtocolSet::NextProtocolEndpoint *ep;
   unsigned char *advertised;
 
@@ -54,17 +68,24 @@ SSLNextProtocolSet::create_npn_advertisement(const SessionProtocolSet &enabled, 
   *npn = nullptr;
   *len = 0;
 
+  // この後*npnには「文字列長1 + プロトコル1名 + 文字列長2 + プロトコル名2 + ...」といった規則でサポートするプロトコルリストが格納されますが(これはOpenSSL APIに指定される)、この時の文字列を取得します。
   for (ep = endpoints.head; ep != nullptr; ep = endpoints.next(ep)) {
     ink_release_assert((strlen(ep->protocol) > 0));
+    // ここでep->protocol(プロトコル名)に「+1」しているのはプロトコル名の前に必ず1byteの文字列長が必要となるためです
     *len += (strlen(ep->protocol) + 1);
   }
 
+  // この行では、advertised と *npn が同じメモリ領域を指すように設定されています。
+  // つまり、ats_malloc(*len) によって確保されたメモリブロックの先頭アドレスが advertised および *npn に代入されています。
   *npn = advertised = static_cast<unsigned char *>(ats_malloc(*len));
   if (!(*npn)) {
     goto fail;
   }
 
+  // 全てのプロトコル情報によりイテレーション操作を行います
   for (ep = endpoints.head; ep != nullptr; ep = endpoints.next(ep)) {
+
+    // 有効なプロトコルに設定されている場合には、NPNコールバック用との文字列を生成します(詳細はappend_protocolを参考のこと)
     if (enabled.contains(globalSessionProtocolNameRegistry.toIndex(ts::TextView{ep->protocol, strlen(ep->protocol)}))) {
 
       // リクエストを受信すると下記のようにALPNに含まれる値を各行それぞれで表示します
@@ -73,6 +94,8 @@ SSLNextProtocolSet::create_npn_advertisement(const SessionProtocolSet &enabled, 
       //   DEBUG: <SSLNextProtocolSet.cc:68 (create_npn_advertisement)> (ssl) advertising protocol http/1.0, 0x55fd2426cdb0
       Debug("ssl", "advertising protocol %s, %p", ep->protocol, ep->endpoint);
 
+      // append_protocolでadvertisedポインタの位置が変わってきます。
+      // 要するに、advertised と *npn は同じメモリブロックの異なる位置を指すポインタとして扱われています。
       advertised = append_protocol(ep->protocol, advertised);
     }
   }
@@ -89,6 +112,7 @@ fail:
 bool
 SSLNextProtocolSet::registerEndpoint(const char *proto, Continuation *ep)
 {
+
   size_t len = strlen(proto);
 
   // Both ALPN and NPN only allow 255 bytes of protocol name.
@@ -102,6 +126,7 @@ SSLNextProtocolSet::registerEndpoint(const char *proto, Continuation *ep)
   }
 
   return false;
+
 }
 
 Continuation *

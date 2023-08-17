@@ -813,6 +813,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
   TunnelChunkingAction_t action = p->chunking_action;
 
   // [bug 2579251] static producers won't have handler set
+  // STATIC PRODUCERに対してはフラグをセットしないように、それ以外のフラグをセットする
   if (p->vc != HTTP_TUNNEL_STATIC_PRODUCER) {
     if (action == TCA_CHUNK_CONTENT) {
       p->do_chunking = true;
@@ -926,6 +927,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
 
     // (note that since we are not dechunking POST, this is the chunked size if chunked)
     if (p->buffer_start->read_avail() > HttpConfig::m_master.post_copy_size) {
+
       Warning("http_redirect, [HttpTunnel::producer_handler] post exceeds buffer limit, buffer_avail=%" PRId64 " limit=%" PRId64 "",
               p->buffer_start->read_avail(), HttpConfig::m_master.post_copy_size);
       sm->disable_redirect();
@@ -933,9 +935,11 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
         producer_handler(VC_EVENT_ERROR, p);
         return;
       }
+
     } else {
       sm->postbuf_copy_partial_data();
     }
+
   } // end of added logic for partial POST
 
   if (p->do_chunking) {
@@ -1016,6 +1020,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
       consumer_handler(VC_EVENT_WRITE_COMPLETE, c);
 
     } else {
+
       // In the client half close case, all the data that will be sent
       // from the client is already in the buffer.  Go ahead and set
       // the amount to read since we know it.  We will forward the FIN
@@ -1047,6 +1052,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
 
     // read_avail = 0で　producer_n=0がセットされているはず
     if (producer_n == 0) {
+
       // Everything is already in the buffer so mark the producer as done.  We need to notify
       // state machine that everything is done.  We use a special event to say the producers is
       // done but we didn't do anything
@@ -1057,6 +1063,7 @@ HttpTunnel::producer_run(HttpTunnelProducer *p)
 
       // producerの処理が完了したらここに入ると思われる。
       producer_handler(HTTP_TUNNEL_EVENT_PRECOMPLETE, p);
+
     } else {
       if (read_start_pos > 0) {
         p->read_vio = ((CacheVC *)p->vc)->do_io_pread(this, producer_n, p->read_buffer, read_start_pos);

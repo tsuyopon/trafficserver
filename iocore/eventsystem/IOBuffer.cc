@@ -111,29 +111,53 @@ MIOBuffer::write(IOBufferBlock const *b, int64_t alen, int64_t offset)
 {
   int64_t len = alen;
 
+  // 多くのデータを書き出す場合には、複数のIOBufferBlockを追加する可能性があります。
+  // lenの値が書き込み終わるまでこのイテレーションはおこなれます。
+  // このイテレーションはIOBufferBlockに対する処理単位で実行されます(ループ内でのイテレーション時にbは次のポインタを指し示すようになっています)
   while (b && len > 0) {
+
+    // 現状のIOBufferBlockの空いているバイト数を取得する
     int64_t max_bytes = b->read_avail();
     max_bytes -= offset;
+
+    // maxbytesからoffsetを差し引いた値が0以下であるということは、offsetは１つのブロックを超過して指定された場合であるので、次のブロックを指し示してContinueするようになっています。
     if (max_bytes <= 0) {
+      // offsetをリセットします。IOBufferBlockの次のポインタにセットします
       offset = -max_bytes;
       b      = b->next.get();
       continue;
     }
+
+    // lenがmax_bytes(=read_avail())よりも大きいといういことは、IOBufferBlockの1ブロックに書き出す容量よりも大きいということを意図しています。
     int64_t bytes;
     if (len >= max_bytes) {
+      // lenがmax_bytes以上のバイト数であれば、1ブロックに書き出す値はmax_bytesとなります。
       bytes = max_bytes;
     } else {
+      // lenがmax_bytes未満のバイト数であれば、1ブロックに書き出す値lenとなります。
       bytes = len;
     }
+
+    // IOBufferBlockをcloneします
     IOBufferBlock *bb = b->clone();
+
+    // cloneしたオブジェクトに対して、変数値を再セットします
+    // 下記ではIOBufferBlock内の書き込みの開始offsetと書き込みの終了offsetをセットしています。
     bb->_start += offset;
     bb->_buf_end = bb->_end = bb->_start + bytes;
+
+    // cloneして変数をセットしたオブジェクトをIOBufferBlockに追加しておきます。
     append_block(bb);
+
     offset = 0;
     len -= bytes;
+
+    //IOBufferBlockの次のポインタにセットします
     b = b->next.get();
+
   }
 
+  // 指定された値から、書き込みが完了したバイト数を差し引い他を応答します。つまり、値があれば、書き込みできなかった残バイト数を表します
   return alen - len;
 }
 

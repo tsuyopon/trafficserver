@@ -396,9 +396,11 @@ ssl_verify_client_callback(int preverify_ok, X509_STORE_CTX *ctx)
 #if TS_USE_HELLO_CB
 // Pausable callback
 // OpenSSLはこちら
+// ClientHelloパケット用のコールバックです
 static int
 ssl_client_hello_callback(SSL *s, int *al, void *arg)
 {
+
   TLSSNISupport *snis = TLSSNISupport::getInstance(s);
   if (snis) {
     snis->on_client_hello(s, al, arg);
@@ -420,6 +422,7 @@ ssl_client_hello_callback(SSL *s, int *al, void *arg)
     return SSL_CLIENT_HELLO_ERROR;
   }
 
+  // ClientHello用のフックを呼び出す
   bool reenabled = netvc->callHooks(TS_EVENT_SSL_CLIENT_HELLO);
 
   if (!reenabled) {
@@ -540,6 +543,7 @@ ssl_servername_callback(SSL *ssl, int *al, void *arg)
 // NextProtocolNegotiation TLS extension callback. The NPN extension
 // allows the client to select a preferred protocol, so all we have
 // to do here is tell them what out protocol set is.
+// NPN(ALPNではない)にてクライアントがサーバが提示したリスト中からプロトコルを選定し、そのプロトコル情報をサーバが受け取った際に呼び出されるコールバックです
 int
 ssl_next_protos_advertised_callback(SSL *ssl, const unsigned char **out, unsigned *outlen, void *)
 {
@@ -553,9 +557,9 @@ ssl_next_protos_advertised_callback(SSL *ssl, const unsigned char **out, unsigne
   return SSL_TLSEXT_ERR_NOACK;
 }
 
+// ALPNを決定する際に呼び出すコールバックです。
 int
-ssl_alpn_select_callback(SSL *ssl, const unsigned char **out, unsigned char *outlen, const unsigned char *in, unsigned inlen,
-                         void *)
+ssl_alpn_select_callback(SSL *ssl, const unsigned char **out, unsigned char *outlen, const unsigned char *in, unsigned inlen, void *)
 {
   ALPNSupport *alpns = ALPNSupport::getInstance(ssl);
 
@@ -1643,6 +1647,9 @@ SSLMultiCertConfigLoader::_set_info_callback(SSL_CTX *ctx)
 bool
 SSLMultiCertConfigLoader::_set_npn_callback(SSL_CTX *ctx)
 {
+  // TLSのNPN拡張(SPDYでHTTP/2の前身で使われている)
+  // 下記のようなコマンドでNPN拡張を付与する指定は可能 (NPNは古い仕組みですがOpenSSL3.0系でも可能)
+  //   $ openssl s_client -tls1_2 -connect xxx.xxx.xxx.xxx:443 -servername example.jp -nextprotoneg spdy/3,spdy/2,http/1.1
   SSL_CTX_set_next_protos_advertised_cb(ctx, ssl_next_protos_advertised_callback, nullptr);
   return true;
 }

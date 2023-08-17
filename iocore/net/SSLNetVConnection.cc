@@ -357,6 +357,7 @@ SSLNetVConnection::_ssl_read_from_net(EThread *lthread, int64_t &ret)
       ink_assert(nread);
       bytes_read += nread;
       if (nread > 0) {
+        // MIOBuffer::fillを呼び出す
         buf.writer()->fill(nread); // Tell the buffer, we've used the bytes
         this->netActivity(lthread);
       }
@@ -693,9 +694,11 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
     } else if (ret == SSL_HANDSHAKE_WANT_READ || ret == SSL_HANDSHAKE_WANT_ACCEPT) {
 
       if (SSLConfigParams::ssl_handshake_timeout_in > 0) {
+
         double handshake_time = (static_cast<double>(Thread::get_hrtime() - this->get_tls_handshake_begin_time()) / 1000000000);
         Debug("ssl", "ssl handshake for vc %p, took %.3f seconds, configured handshake_timer: %d", this, handshake_time,
               SSLConfigParams::ssl_handshake_timeout_in);
+
         if (handshake_time > SSLConfigParams::ssl_handshake_timeout_in) {
           Debug("ssl", "ssl handshake for vc %p, expired, release the connection", this);
           read.triggered = 0;
@@ -703,6 +706,7 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
           readSignalError(nh, ETIMEDOUT);
           return;
         }
+
       }
 
       // move over to the socket if we haven't already
@@ -789,6 +793,7 @@ SSLNetVConnection::net_read_io(NetHandler *nh, EThread *lthread)
       }
       return;
     }
+
     // reset the trigger and remove from the ready queue
     // we will need to be retriggered to read from this socket again
     read.triggered = 0;
@@ -1440,8 +1445,7 @@ SSLNetVConnection::sslServerHandShakeEvent(int &err)
 
     if (_tunnel_type != SNIRoutingType::NONE) {
       // Foce to use HTTP/1.1 endpoint for SNI Routing
-      if (!this->setSelectedProtocol(reinterpret_cast<const unsigned char *>(IP_PROTO_TAG_HTTP_1_1.data()),
-                                     IP_PROTO_TAG_HTTP_1_1.size())) {
+      if (!this->setSelectedProtocol(reinterpret_cast<const unsigned char *>(IP_PROTO_TAG_HTTP_1_1.data()), IP_PROTO_TAG_HTTP_1_1.size())) {
         return EVENT_ERROR;
       }
     }
@@ -2135,6 +2139,9 @@ SSLNetVConnection::_ssl_accept()
   int ssl_error = SSL_ERROR_NONE;
 
 #if TS_HAS_TLS_EARLY_DATA
+
+  // proxy.config.ssl.server.max_early_dataが0よりも大きい(デフォルト:0)
+  // https://docs.trafficserver.apache.org/en/9.2.x/admin-guide/files/records.config.en.html#proxy-config-ssl-server-max-early-data
   if (SSLConfigParams::server_max_early_data > 0 && !this->early_data_finish) {
     size_t nread;
 
@@ -2180,8 +2187,10 @@ SSLNetVConnection::_ssl_accept()
       }
     }
   } else {
+    // デフォルトでは SSLConfigParams::server_max_early_data = 0なので、こちらの遷移になるはずです。
     ret = SSL_accept(ssl);
   }
+
 #else
   ret = SSL_accept(ssl);
 #endif

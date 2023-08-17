@@ -239,6 +239,8 @@ read_from_net(NetHandler *nh, UnixNetVConnection *vc, EThread *thread)
   unsigned niov = 0;
   IOVec tiovec[NET_MAX_IOV];
   if (toread) {
+
+    // 最初のIOBufferBlockへのポインタを返す
     IOBufferBlock *b = buf.writer()->first_write_block();
     do {
       niov       = 0;
