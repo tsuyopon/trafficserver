@@ -273,6 +273,7 @@ LocalManager::LocalManager(bool proxy_on, bool listen) : BaseManager(), run_prox
   env_prep                     = REC_readString("proxy.config.env_prep", &found);
 
   // Calculate proxy_binary from the absolute bin_path
+  // traffic_serverバイナリを絶対パスで取得する
   absolute_proxy_binary = ats_stringdup(Layout::relative_to(bindir, proxy_binary));
 
   // coverity[fs_check_call]
@@ -923,6 +924,8 @@ LocalManager::processEventQueue()
  */
 static const size_t OPTIONS_SIZE = 16384; // Arbitrary max size for command line option string
 
+
+// traffic_managerの下記ハンドラからtraffic_serverプロセスがexecvにより起動されます
 bool
 LocalManager::startProxy(const char *onetime_options)
 {
@@ -1046,7 +1049,9 @@ LocalManager::startProxy(const char *onetime_options)
 
     EnableDeathSignal(SIGTERM);
 
+    // traffic_serverバイナリはここから起動されます。
     execv(absolute_proxy_binary, options);
+
     mgmt_fatal(errno, "[LocalManager::startProxy] Exec of %s failed\n", absolute_proxy_binary);
   }
   return true;

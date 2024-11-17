@@ -261,6 +261,7 @@ check_lockfile()
   }
 }
 
+// シグナルハンドラの初期設定を行う
 static void
 initSignalHandlers()
 {
@@ -576,6 +577,7 @@ main(int argc, const char **argv)
 
   // A user of #-1 means to not attempt to switch user. Yes, it's documented ;)
   if (strcmp(userToRunAs, "#-1") != 0) {
+    // 「proxy.config.admin.user_id」のユーザー権限に変更する
     runAsUser(userToRunAs);
   }
 
@@ -854,6 +856,7 @@ main(int argc, const char **argv)
         sleep_time = 1;
       }
 
+      // 下記のProxyStateSetからtraffic_serverが起動することになります
       if (ProxyStateSet(TS_PROXY_ON, TS_CACHE_CLEAR_NONE) == TS_ERR_OKAY) {
         just_started      = 0;
         last_start_epoc_s = static_cast<uint64_t>(time(nullptr));
