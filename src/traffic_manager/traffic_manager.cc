@@ -269,6 +269,7 @@ initSignalHandlers()
   sigset_t sigsToBlock;
 
 // Set up the signal handler
+// シグナルが呼び出された場合にはSignalHandler関数が呼ばれるように設定しています
 #if !defined(linux) && !defined(freebsd) && !defined(darwin)
   sigHandler.sa_handler   = nullptr;
   sigHandler.sa_sigaction = SignalHandler;
@@ -584,6 +585,7 @@ main(int argc, const char **argv)
   EnableCoreFile(true);
   check_lockfile();
 
+  // 「const char *」として定義されている各種定数の値をセットする
   url_init();
   mime_init();
   http_init();
@@ -757,7 +759,7 @@ main(int argc, const char **argv)
     // manager.logのログローテートを実施する
     rotateLogs();
 
-    // Check for a SIGHUP
+    // Check for a SIGHUP (sigHupNotifierはシグナル受信時にシグナルハンドラで値がセットされる)
     if (sigHupNotifier) {
       mgmt_log("[main] Reading Configuration Files due to SIGHUP\n");
       Reconfigure();
@@ -856,7 +858,7 @@ main(int argc, const char **argv)
         sleep_time = 1;
       }
 
-      // 下記のProxyStateSetからtraffic_serverが起動することになります
+      // 下記のProxyStateSetからtraffic_serverが起動します
       if (ProxyStateSet(TS_PROXY_ON, TS_CACHE_CLEAR_NONE) == TS_ERR_OKAY) {
         just_started      = 0;
         last_start_epoc_s = static_cast<uint64_t>(time(nullptr));

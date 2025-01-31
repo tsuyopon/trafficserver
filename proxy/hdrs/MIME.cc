@@ -2263,6 +2263,19 @@ mime_field_value_append(HdrHeap *heap, MIMEHdrImpl *mh, MIMEField *field, const 
   }
 }
 
+/*
+ * Hostヘッダの文字列の分割を行います。
+ * 
+ * (例)
+ * 入力ヘッダー: Host: [::1]:443
+ *
+ * 解析結果:
+ *     host_ptr → "[::1]"
+ *     host_len → 5
+ *     port_ptr → "443"
+ *     port_len → 3
+ *
+*/
 MIMEField *
 MIMEHdr::get_host_port_values(const char **host_ptr, ///< Pointer to host.
                               int *host_len,         ///< Length of host.
@@ -2296,13 +2309,15 @@ MIMEHdr::get_host_port_values(const char **host_ptr, ///< Pointer to host.
 
     if (b) {
 
-      // 先頭が"["の場合 (これは何のためのif文なのか不明: TBD)
+      // IPv6アドレスの場合の特別の処理:   値が [ で始まる場合（IPv6アドレスの形式: [::1]:80）、対応する ] を探し、その後に : が続く場合はポートを分離する
       if ('[' == *b) {
         auto idx = b.find(']');
         if (idx <= b.size() && b[idx + 1] == ':') {
+          // IPv6のポート番号取得処理
           host = b.take_prefix_at(idx + 1);
           port = b;
         } else {
+          // IPv6の形式に「:」が無い場合には、全体をホスト名として扱う
           host = b;
         }
 
@@ -2311,7 +2326,7 @@ MIMEHdr::get_host_port_values(const char **host_ptr, ///< Pointer to host.
         // ホスト名とポートを区別する「:」でsplitする 。具体例 「example.com:80」
         auto x = b.split_prefix_at(':');
 
-        // xがあればportが含まれている
+        // x(ポート指定)があればportが含まれている
         if (x) {
           host = x;
           port = b;

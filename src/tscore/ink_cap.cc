@@ -144,6 +144,7 @@ DebugCapabilities(const char *tag)
   DEBUG_PRIVILEGES(tag);
 }
 
+// 権限の昇格、権限の降格を行う
 static void
 impersonate(const struct passwd *pwd, ImpersonationLevel level)
 {
@@ -160,9 +161,11 @@ impersonate(const struct passwd *pwd, ImpersonationLevel level)
 #endif
 
   // Always repopulate the supplementary group list for the new user.
+  // 補助グループであり、実グループは/etc/passwdに記載されているが、/etc/groupsに所属するグループ(補助グループ)はinitgroupsを指定しないと変更が行われない
   initgroups(pwd->pw_name, pwd->pw_gid);
 
   switch (level) {
+  // permanentの場合にはsetregidやsetreuidを利用しているので、実ID、実効ID、および実グループ、実効GIDを設定する。元のプロセスに戻ることはできない
   case IMPERSONATE_PERMANENT:
     if (setregid(pwd->pw_gid, pwd->pw_gid) != 0) {
       Fatal("switching to user %s, failed to set group ID %ld", pwd->pw_name, (long)pwd->pw_gid);
@@ -173,6 +176,7 @@ impersonate(const struct passwd *pwd, ImpersonationLevel level)
     }
     break;
 
+  // effectiveの場合にはsetegidやseteuidを利用しているので、実効ID、実効GIDを設定する。実GIDや実UIDは変更されていないために、再度元setegidやseteuidで権限の復帰ができる
   case IMPERSONATE_EFFECTIVE:
     if (setegid(pwd->pw_gid) != 0) {
       Fatal("switching to user %s, failed to set group ID %ld", pwd->pw_name, (long)pwd->pw_gid);
