@@ -117,6 +117,7 @@ ChunkedHandler::set_max_chunk_size(int64_t size)
   max_chunk_header_len = snprintf(max_chunk_header, sizeof(max_chunk_header), CHUNK_HEADER_FMT, max_chunk_size);
 }
 
+// chunked requestの読み込みを行います
 void
 ChunkedHandler::read_size()
 {
